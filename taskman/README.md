@@ -4,11 +4,17 @@ Uniform recursive work-item management. A CLI for tracking epic/feature/task hie
 
 This is a work-in-progress rewrite of the bash `taskman.sh` in `plugins/agn/scripts/`. See the parent repo's `tasks/epics/20260525_taskman_python.md` for the design and decomposition.
 
-## Install (end-user)
+## Install
+
+**End user (no repo checkout)** — install straight from GitHub. `uv` fetches the package and, if needed, a suitable Python:
+
+    uv tool install "git+https://github.com/AgentureHQ/agenture-loop.git#subdirectory=taskman"
+
+**Developer (from a clone)** — editable install against your working tree:
 
     uv tool install -e ./taskman
 
-After install, `taskman --help` is on PATH.
+After install, `taskman --help` is on PATH and `taskman version` prints the version. If your shell can't find `taskman`, run `uv tool update-shell` and restart the shell so uv's tool directory is on `PATH`. (`uv` provisions Python 3.11+ automatically. `pipx install "git+https://github.com/AgentureHQ/agenture-loop.git#subdirectory=taskman"` also works, but requires Python ≥3.11 already present.)
 
 ## Shell completion
 

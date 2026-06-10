@@ -11,6 +11,18 @@ From the `agenture` marketplace:
 /plugin install agn@agenture
 ```
 
+### Prerequisite: the `taskman` CLI
+
+The `/agn:*` skills drive a task CLI named `taskman` — a standalone Python app, not bundled in the plugin. Install it once; no repo checkout needed:
+
+```
+uv tool install "git+https://github.com/AgentureHQ/agenture-loop.git#subdirectory=taskman"
+```
+
+Verify with `taskman version`. If the command isn't found afterward, run `uv tool update-shell` and restart the shell. `uv` provisions Python 3.11+ if needed; `pipx`/`pip` work too. Full notes in [`taskman/README.md`](../../taskman/README.md).
+
+> **Migration in progress.** Skills are being rewired from the legacy bundled bash `scripts/taskman.sh` to this Python `taskman` (epic `taskman_skill_integration`). Until that lands, the skill call sites still target the bash script.
+
 ## Work-unit hierarchy
 
 The plugin supports a four-tier hierarchy. Each tier is optional one level up — a task may have no feature, and a feature may have no epic.

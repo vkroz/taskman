@@ -17,6 +17,18 @@ Add the marketplace to Claude Code once, then install the plugin:
 
 Restart Claude Code (or run `/reload-plugins`) and the `/agn:*` skills become available.
 
+### Prerequisite: the `taskman` CLI
+
+The `/agn:*` skills drive a task CLI named `taskman` — a standalone Python app. Install it once, straight from GitHub (no repo checkout; `uv` fetches Python 3.11+ if you don't have it):
+
+```
+uv tool install "git+https://github.com/AgentureHQ/agenture-loop.git#subdirectory=taskman"
+```
+
+Verify with `taskman version`. If your shell can't find `taskman` afterward, run `uv tool update-shell` and restart the shell so uv's tool directory is on `PATH`. (`pipx`/`pip` work too, given Python ≥3.11.)
+
+> **Status — skill integration in progress.** Wiring `/agn:*` to this CLI is an active epic (`taskman_skill_integration`). Until it lands, the commands below are not yet fully functional on a fresh marketplace install — today they run only inside a clone of this repo, which still uses the legacy bundled `taskman.sh`.
+
 Then walk the lifecycle for whatever you're building. The smallest useful loop — a single change or bug:
 
 ```
