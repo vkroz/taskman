@@ -1,18 +1,26 @@
-# Agenture - Vision
+# codename 'Agenture Loop' - Vision
 
 ## Objective
 
-Accelerate the software development lifecycle (SDLC) through adoption of AI coding tools and automation. Transition software teams from ad-hoc AI use to repeatable, validated, and measurable AI-assisted development.
+Define software development process that optimized for use of AI coding agents across all phases of SDLC. It is designed for eliminating bottlenecks at every steps of SDLC and therefore helps to accelerate software products delivery in orders of magnitude vs traditional SDLC. 
 
-This guideline defines the path for software engineering teams to transform and aceelerate software developement with AI coding tool. 
+## Problem statement
 
-The five sections below list the actions required to reach that state. Execute them in order; each section builds on the ones before it.
+Software development process as we know it was built and optimized for humans. Commits velocity of 'two-pizza team' is PRs per week at best. Ambiguities and additional requirements are discovered and addressed interactively  via Agile rithuals and coordination meetings. AI coding agents can build software orders of magnitude faster than humans. But coding itself is just one step of the process of building software. To get  productivity increase from AI agents, we need to modify SDLC and development practices. Without this groundwork, we simply move bottleneck from coding to other steps, without increasing productivity. 
+
+## How we do this
+
+### 
 
 
-
+---- STOP READING HERE ----
 ## Objective
 
-This guideline charts how a software team moves from ad-hoc AI use to AI-driven development. At the target, AI drafts code, tests, and routine fixes from specifications. The pipeline gates and packages every change. Developers write the specs, review the output, and approve each release. The path has five stages: foundations, daily practice, workflow integration, quality automation, and autonomous agents.
+This guideline defines the path for software engineering teams from ad-hoc AI use towards automated AI-driven software development. 
+
+At our target state, 
+
+AI writes the code, tests, and fixes from specifications. The pipeline gates and packages every change. Developers write the specs, review the output, and approve each release. The path has five stages: foundations, daily practice, workflow integration, quality automation, and autonomous agents.
 
 Execute the stages in order; each builds on the ones before it.
 
