@@ -42,11 +42,6 @@ def _root() -> None:
     """
 
 
-@app.command()
-def version() -> None:
-    """Print the taskman version and exit."""
-    typer.echo(__version__)
-
 
 # Register subcommands from the commands package.
 app.command("new")(_new)
@@ -66,6 +61,11 @@ app.command("help")(_help)
 # --- auxiliary or temporary commands ---
 app.command("convert")(_convert)
 app.command("migrate")(_migrate)
+
+@app.command()
+def version() -> None:
+    """Print the taskman version and exit."""
+    typer.echo(__version__)
 
 
 def main() -> None:

@@ -1,10 +1,10 @@
 ---
 name: validate
-description: Quality gates at any tier — task, feature, epic, or product. Invoke with /agn:validate <level>. Task runs the task's own ## Quality gates in the main session (lightweight). Feature, epic, and product delegate to the QA sub-agent (fresh-context validation against spec).
+description: Quality gates at any tier — task, feature, epic, or product. Invoke with /tm:validate <level>. Task runs the task's own ## Quality gates in the main session (lightweight). Feature, epic, and product delegate to the QA sub-agent (fresh-context validation against spec).
 argument-hint: task | feature | epic | product
 ---
 
-# Validate (`/agn:validate <level>`)
+# Validate (`/tm:validate <level>`)
 
 ## Arguments
 
@@ -26,7 +26,7 @@ Read `$0`. Run exactly one of the branches below.
 
 ## Validation via the QA sub-agent
 
-For `feature`, `epic`, and `product` levels, validation runs in the QA sub-agent (`plugins/agn/agents/qa.md`). The sub-agent loads `rules/qa.md`, reads the spec and the implementation, runs tests, and returns a verdict. Fresh context is the point — the agent that wrote the code has already collapsed the design space in their head; a fresh reader sees gaps that closed space hid.
+For `feature`, `epic`, and `product` levels, validation runs in the QA sub-agent (`plugins/tm/agents/qa.md`). The sub-agent loads `rules/qa.md`, reads the spec and the implementation, runs tests, and returns a verdict. Fresh context is the point — the agent that wrote the code has already collapsed the design space in their head; a fresh reader sees gaps that closed space hid.
 
 The `task` branch does **not** invoke the QA sub-agent — the task's own `## Quality gates` are narrow and the parent session has the right context to run them.
 
@@ -58,7 +58,7 @@ A task file at `$1` (path) — either in `tasks/active/` or `tasks/backlog/`. Th
 
 4. **Offer next step (do not auto-execute)** — If all gates pass:
    - If the task is in `tasks/active/`, offer: *"All gates pass. Run `./scripts/taskman.sh move <path> done`?"*
-   - If the task is in `tasks/backlog/`, offer nothing — the user runs `/agn:implement task` for activation.
+   - If the task is in `tasks/backlog/`, offer nothing — the user runs `/tm:implement task` for activation.
    - In both cases, the user owns the decision to move state.
 
 5. **Stop.** Do not advance the task lifecycle without user instruction.
@@ -66,8 +66,8 @@ A task file at `$1` (path) — either in `tasks/active/` or `tasks/backlog/`. Th
 ### Discipline
 
 - **No QA sub-agent at this level.** The gates are narrow and named in the task body; the parent session has the right context to run them. Delegating would lose that context for negligible benefit.
-- **Do not modify the task file** beyond optionally appending a one-line note to its `## Quality gates` section if a gate is incorrect — and only with user approval. The `## Summary` is owned by `/agn:implement task`, not by this skill.
-- **Failures are reports, not fixes.** If a gate exposes a bug, file a bug task via `/agn:define task --kind bug --feature <slug>` — do not fix inline.
+- **Do not modify the task file** beyond optionally appending a one-line note to its `## Quality gates` section if a gate is incorrect — and only with user approval. The `## Summary` is owned by `/tm:implement task`, not by this skill.
+- **Failures are reports, not fixes.** If a gate exposes a bug, file a bug task via `/tm:define task --kind bug --feature <slug>` — do not fix inline.
 
 ---
 
@@ -92,13 +92,13 @@ A task file at `$1` (path) — either in `tasks/active/` or `tasks/backlog/`. Th
 
 4. **Surface verdict** — Present QA's `## Verdict`, `## Per-requirement results`, and `## Issues` to the user. Name the report path so they can open it.
 
-5. **Halt on not ready** — If verdict is `not ready`, stop. Do not offer `feature close`. Do not advance lifecycle. The user owns the decision to triage the issues (route to `/agn:define task --kind bug --feature <slug>` for fixes, or escalate spec changes).
+5. **Halt on not ready** — If verdict is `not ready`, stop. Do not offer `feature close`. Do not advance lifecycle. The user owns the decision to triage the issues (route to `/tm:define task --kind bug --feature <slug>` for fixes, or escalate spec changes).
 
 6. **Offer close on ready** — If verdict is `ready` and all member tasks are in `done`, offer: *"Run `./scripts/taskman.sh feature close <slug>`?"*. Do not auto-execute.
 
 ### Discipline
 
-- Do not claim release readiness — that is `/agn:validate product`.
+- Do not claim release readiness — that is `/tm:validate product`.
 - The QA sub-agent's report is the authoritative artifact. Do not paraphrase or re-summarize beyond what the user needs to triage.
 - If QA escalates, surface the escalation verbatim with QA's recommended next steps. Do not silently filter.
 
@@ -109,7 +109,7 @@ A task file at `$1` (path) — either in `tasks/active/` or `tasks/backlog/`. Th
 ### Preconditions
 
 - An epic slug. If `$1` is empty, ask the user or list candidates: `./scripts/taskman.sh list epics`.
-- Every linked feature must already be closed (`status: done`). If any are still active/backlog, the epic is not ready for epic-level validation — direct the user to finish them first via `/agn:implement feature`.
+- Every linked feature must already be closed (`status: done`). If any are still active/backlog, the epic is not ready for epic-level validation — direct the user to finish them first via `/tm:implement feature`.
 
 ### Workflow
 
@@ -130,7 +130,7 @@ A task file at `$1` (path) — either in `tasks/active/` or `tasks/backlog/`. Th
 
 ### Discipline
 
-- Epic validation is about cross-feature interactions, not re-running per-feature tests. Trust prior `/agn:validate feature` reports if they are recent and the relevant features have not changed since.
+- Epic validation is about cross-feature interactions, not re-running per-feature tests. Trust prior `/tm:validate feature` reports if they are recent and the relevant features have not changed since.
 - The QA sub-agent's report is the authoritative artifact.
 
 ---
@@ -164,4 +164,4 @@ If docs are missing, say so and ask whether to proceed with a reduced checklist.
 ### Discipline
 
 - The QA sub-agent's report is the release artifact. Do not paraphrase it in a way that loses Critical/Major/Minor categorization.
-- If QA escalates spec ambiguities, surface them verbatim — these are signals that `docs/spec.md` or `docs/requirements.md` may need a revision via `/agn:design product`.
+- If QA escalates spec ambiguities, surface them verbatim — these are signals that `docs/spec.md` or `docs/requirements.md` may need a revision via `/tm:design product`.

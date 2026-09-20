@@ -2,9 +2,9 @@
 # Taskman — epic, feature, and task management CLI.
 #
 # Single source of truth for creating, moving, listing, and closing
-# epics/features/tasks under ./tasks. Skills (/agn:epic-create,
-# /agn:feature-create, /agn:task-create, /agn:task-implement,
-# /agn:feature-implement, /agn:epic-implement) invoke this script
+# epics/features/tasks under ./tasks. Skills (/tm:epic-create,
+# /tm:feature-create, /tm:task-create, /tm:task-implement,
+# /tm:feature-implement, /tm:epic-implement) invoke this script
 # instead of touching files directly so invariants stay consistent.
 #
 # See rules/task-management.md for the model.
@@ -144,7 +144,7 @@ validate_slug() {
 # ---------- Doc-sync queue (PostClose hook) ----------
 #
 # When a work unit closes (task → done, feature close, epic close), append an
-# entry to docs-sync-queue.txt. The /agn:docs-sync skill reads this queue and
+# entry to docs-sync-queue.txt. The /tm:docs-sync skill reads this queue and
 # proposes upstream doc updates. The queue is durable on disk — survives
 # context compaction and direct CLI use.
 
@@ -152,7 +152,7 @@ emit_docs_sync_hint() {
   local kind="$1" id="$2"
   mkdir -p "${TASKS_DIR}"
   printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$kind" "$id" >> "$DOCS_SYNC_QUEUE"
-  log_info "Doc-sync pending. Run /agn:docs-sync to review upstream doc drift."
+  log_info "Doc-sync pending. Run /tm:docs-sync to review upstream doc drift."
 }
 
 # Print a hint to stderr if the queue has pending entries. Called from list
@@ -163,9 +163,9 @@ check_docs_sync_queue() {
   n="$(grep -c . "$DOCS_SYNC_QUEUE" 2>/dev/null || printf 0)"
   (( n > 0 )) || return 0
   if (( n == 1 )); then
-    log_warn "1 doc-sync entry pending in ${DOCS_SYNC_QUEUE}. Run /agn:docs-sync."
+    log_warn "1 doc-sync entry pending in ${DOCS_SYNC_QUEUE}. Run /tm:docs-sync."
   else
-    log_warn "${n} doc-sync entries pending in ${DOCS_SYNC_QUEUE}. Run /agn:docs-sync."
+    log_warn "${n} doc-sync entries pending in ${DOCS_SYNC_QUEUE}. Run /tm:docs-sync."
   fi
 }
 
@@ -1049,12 +1049,12 @@ DOC-SYNC QUEUE (PostClose hook)
   `taskman.sh list` prints a one-line WARN hint when the queue is non-empty,
   so you see pending entries whenever you look at task state.
 
-  Process the queue with `/agn:docs-sync`. The skill reads each entry,
+  Process the queue with `/tm:docs-sync`. The skill reads each entry,
   reviews upstream docs (vision → spec → requirements → architecture →
   linked spec) per rules/doc-maintenance.md, proposes diffs, and clears the
   entry on user approval.
 
-  The queue is written by taskman.sh and cleared by /agn:docs-sync. Both
+  The queue is written by taskman.sh and cleared by /tm:docs-sync. Both
   are "observability records" — not lifecycle units. Direct CLI users can
   inspect or edit the queue file; the format is line-stable.
 

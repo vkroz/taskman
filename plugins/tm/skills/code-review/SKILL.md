@@ -16,7 +16,7 @@ Run periodically — after completing a batch of tasks, before a release, or whe
 1. **Determine scope** — ask the user what to review: the entire codebase, a specific module, or recent changes (e.g., `git diff main..HEAD` or a date range).
 2. **Run the checklist** — evaluate each category below. For each finding, note the file, line, and a concrete recommendation.
 3. **Present summary to user** — show findings grouped by category and severity. Discuss with user which findings warrant action.
-4. **Create backlog tasks** — for each approved finding (or group of related findings), create a task file in `tasks/backlog/` following the task management standard. These tasks are then executed later via `/agn:task-implement`.
+4. **Create backlog tasks** — for each approved finding (or group of related findings), create a task file in `tasks/backlog/` following the task management standard. These tasks are then executed later via `/tm:task-implement`.
 
 ## Review Checklist
 

@@ -1,10 +1,10 @@
 ---
 name: define
-description: Define a work unit at any tier — product, epic, feature, or task. Invoke with /agn:define <level>. Produces vision/spec/requirements (product), an epic + linked features (epic), a feature + linked tasks (feature), or a single task/bug ticket (task).
+description: Define a work unit at any tier — product, epic, feature, or task. Invoke with /tm:define <level>. Produces vision/spec/requirements (product), an epic + linked features (epic), a feature + linked tasks (feature), or a single task/bug ticket (task).
 argument-hint: product | epic | feature | task [title|kind]
 ---
 
-# Define (`/agn:define <level>`)
+# Define (`/tm:define <level>`)
 
 ## Arguments
 
@@ -26,9 +26,9 @@ Read `$0`. Run exactly one of the four workflows below.
 
 ## Composition via the Planner sub-agent
 
-For `epic`, `feature`, and `task` levels, composition of the unit body (and decomposition into child units, where applicable) is delegated to the Planner sub-agent (`plugins/agn/agents/planner.md`). This skill stays focused on user dialog, slug confirmation, and `taskman.sh` persistence.
+For `epic`, `feature`, and `task` levels, composition of the unit body (and decomposition into child units, where applicable) is delegated to the Planner sub-agent (`plugins/tm/agents/planner.md`). This skill stays focused on user dialog, slug confirmation, and `taskman.sh` persistence.
 
-The `product` branch does **not** invoke the Planner — vision/spec/requirements drafting is pre-Design and stays in the parent session. Product-level Design (architecture) lives in `/agn:design product`; the epic list comes from `/agn:define epic` calls afterward.
+The `product` branch does **not** invoke the Planner — vision/spec/requirements drafting is pre-Design and stays in the parent session. Product-level Design (architecture) lives in `/tm:design product`; the epic list comes from `/tm:define epic` calls afterward.
 
 When a workflow below says "delegate to the Planner", invoke it via the Agent tool with `subagent_type: planner` and a brief containing:
 
@@ -64,7 +64,7 @@ The `docs/spec.md` and `docs/requirements.md` produced here are **product-level*
 
 ### Workflow
 
-This branch does not invoke the Planner sub-agent — drafting of `docs/vision.md`, `docs/spec.md`, and `docs/requirements.md` happens in this parent session. The Planner takes over at `/agn:design product` (architecture) and `/agn:define epic` (epic decomposition).
+This branch does not invoke the Planner sub-agent — drafting of `docs/vision.md`, `docs/spec.md`, and `docs/requirements.md` happens in this parent session. The Planner takes over at `/tm:design product` (architecture) and `/tm:define epic` (epic decomposition).
 
 1. **Vision** — Interview the user (problem, users, capabilities). Draft a one-page `docs/vision.md`. Iterate until the user is satisfied with the direction.
 
@@ -78,7 +78,7 @@ This branch does not invoke the Planner sub-agent — drafting of `docs/vision.m
 
 5. **Consistency** — If any document changes, check downstream docs in the chain: vision → spec → requirements. State explicitly what you updated and why.
 
-6. **Gate** — Do not treat the stage as complete until the **user** explicitly approves moving to `/agn:design product`.
+6. **Gate** — Do not treat the stage as complete until the **user** explicitly approves moving to `/tm:design product`.
 
 **Discipline:** Do not silently skip validation. Do not proceed to architecture without user approval to leave this stage.
 
@@ -93,17 +93,17 @@ Collaborate with the user to **define an epic** — a named functional block lar
 1. One **epic file** under `tasks/epics/YYYYMMDD_<slug>.md` holding the functional-block-level plan.
 2. Zero or more **feature files** under `tasks/features/`, each stamped with `epic: <slug>`.
 
-This branch is **requirements + decomposition only**. Do not implement. Do not propose code-level designs. Capture WHAT and WHY at functional-block level; leave HOW to `/agn:define feature` and `/agn:implement feature` for each feature, and `/agn:implement task` for each task within. See `rules/first-principles.md` (Planning Guidelines).
+This branch is **requirements + decomposition only**. Do not implement. Do not propose code-level designs. Capture WHAT and WHY at functional-block level; leave HOW to `/tm:define feature` and `/tm:implement feature` for each feature, and `/tm:implement task` for each task within. See `rules/first-principles.md` (Planning Guidelines).
 
 ### Preconditions
 
-None strictly required. If the epic is architecture-sensitive, consider running `/agn:design product` first to produce `docs/architecture.md`. If the user is starting from vision/spec docs under `docs/`, read them before the dialog.
+None strictly required. If the epic is architecture-sensitive, consider running `/tm:design product` first to produce `docs/architecture.md`. If the user is starting from vision/spec docs under `docs/`, read them before the dialog.
 
 ### When to create an epic vs a feature
 
 Create an **epic** when the work spans multiple features that share a coherent objective at the functional-block level. Examples: "AWS onboarding", "Authentication & authorization", "Cost ingestion pipeline".
 
-Create a **feature** directly via `/agn:define feature` when the work fits inside a single coherent slice that produces tasks at one level of depth. Most product work is a feature, not an epic. Epics are for genuinely larger blocks where decomposition by feature adds clarity.
+Create a **feature** directly via `/tm:define feature` when the work fits inside a single coherent slice that produces tasks at one level of depth. Most product work is a feature, not an epic. Epics are for genuinely larger blocks where decomposition by feature adds clarity.
 
 If unclear, ask the user.
 
@@ -192,9 +192,9 @@ Report:
 
 - The created epic file path
 - The created feature file paths (if any)
-- A one-sentence next step (typically: *"Ready for `/agn:implement epic <epic-slug>`"* — or *"Run `/agn:define feature` with `--epic <epic-slug>`"* if features are still to be defined)
+- A one-sentence next step (typically: *"Ready for `/tm:implement epic <epic-slug>`"* — or *"Run `/tm:define feature` with `--epic <epic-slug>`"* if features are still to be defined)
 
-Do not transition any feature out of `backlog`. That belongs to `/agn:implement feature` (or `/agn:implement epic`, which iterates features).
+Do not transition any feature out of `backlog`. That belongs to `/tm:implement feature` (or `/tm:implement epic`, which iterates features).
 
 ### Epic-branch discipline
 
@@ -202,7 +202,7 @@ Do not transition any feature out of `backlog`. That belongs to `/agn:implement 
 - Always end the dialog with `taskman.sh finalize` (per file) or `taskman.sh discard` (per file). Do not leave files with `draft: true` behind.
 - One epic per invocation. If the user describes two epics, suggest splitting.
 - If the user asks "how should we build it?", capture as a follow-up — implementation design is not this branch's job.
-- If the user describes work that fits in a single feature, suggest `/agn:define feature` instead.
+- If the user describes work that fits in a single feature, suggest `/tm:define feature` instead.
 
 ---
 
@@ -215,11 +215,11 @@ Collaborate with the user to **define a feature** — a named product initiative
 1. One **feature file** under `tasks/features/YYYYMMDD_<slug>.md` holding the plan.
 2. Zero or more **task files** under `tasks/backlog/`, each stamped with `feature: <slug>`.
 
-This branch is **requirements + planning only**. Do not implement. Do not propose code-level designs. Capture WHAT and WHY; leave HOW to `/agn:implement feature` / `/agn:implement task`. See `rules/first-principles.md` (Planning Guidelines).
+This branch is **requirements + planning only**. Do not implement. Do not propose code-level designs. Capture WHAT and WHY; leave HOW to `/tm:implement feature` / `/tm:implement task`. See `rules/first-principles.md` (Planning Guidelines).
 
 ### Preconditions
 
-None strictly required. If the feature is large and architecture-sensitive, consider running `/agn:design product` first to produce `docs/architecture.md`. If the user is starting from vision/spec docs under `docs/`, read them before the dialog. If the feature belongs to an existing epic, confirm the epic slug during the dialog and pass `--epic <slug>` when creating the feature.
+None strictly required. If the feature is large and architecture-sensitive, consider running `/tm:design product` first to produce `docs/architecture.md`. If the user is starting from vision/spec docs under `docs/`, read them before the dialog. If the feature belongs to an existing epic, confirm the epic slug during the dialog and pass `--epic <slug>` when creating the feature.
 
 ### Workflow
 
@@ -313,9 +313,9 @@ Report:
 
 - The created feature file path
 - The created task file paths
-- A one-sentence next step (typically: *"Ready for `/agn:implement feature <feature-slug>`"* or per-task implementation)
+- A one-sentence next step (typically: *"Ready for `/tm:implement feature <feature-slug>`"* or per-task implementation)
 
-Do not transition any task out of `backlog/`. That belongs to `/agn:implement task` or `/agn:implement feature`.
+Do not transition any task out of `backlog/`. That belongs to `/tm:implement task` or `/tm:implement feature`.
 
 ### Feature-branch discipline
 
@@ -337,11 +337,11 @@ Feature files under `tasks/features/` hold the plan (problem, objective, require
 ### Usage
 
 ```
-/agn:define task                         # Claude will ask for the task kind
-/agn:define task task                    # Development task
-/agn:define task bug                     # Bug ticket
-/agn:define task task <short title>
-/agn:define task bug  <short title>
+/tm:define task                         # Claude will ask for the task kind
+/tm:define task task                    # Development task
+/tm:define task bug                     # Bug ticket
+/tm:define task task <short title>
+/tm:define task bug  <short title>
 ```
 
 If the task belongs to an existing feature, mention the feature slug during the dialog — it becomes `feature: <slug>` in the YAML header. If you don't know the slug, ask: *"Does this task belong to a feature? If yes, which slug under `tasks/features/`?"* A task without a feature is **ad-hoc** — perfectly valid.
@@ -353,7 +353,7 @@ Collaborate with the user to **define a task** with clear, non-ambiguous require
 **This branch is requirements definition only:**
 - Do not implement the task.
 - Do not make code/config changes beyond writing the task file (via `taskman.sh`).
-- Do not propose or evaluate solutions. If the user asks "how should we build it?", capture that as a follow-up for `/agn:implement task`.
+- Do not propose or evaluate solutions. If the user asks "how should we build it?", capture that as a follow-up for `/tm:implement task`.
 
 ### Task kind
 
@@ -438,7 +438,7 @@ On rejection, delete the draft:
 ./scripts/taskman.sh discard <path>
 ```
 
-Report the final path to the user. Stop. User will run `/agn:implement task <path>` when ready.
+Report the final path to the user. Stop. User will run `/tm:implement task <path>` when ready.
 
 ---
 
@@ -491,7 +491,7 @@ Re-read the file from disk and show the user. On approval run `./scripts/taskman
 
 - Use `taskman.sh` for any task/feature/epic persistence. Never write those files directly.
 - Always end the dialog with either `taskman.sh finalize` or `taskman.sh discard` for every draft. Do not leave files with `draft: true` behind.
-- This skill captures requirements and decomposition only; it does not propose implementation. If the user asks "how should we build it?", capture as a follow-up — execution belongs in `/agn:implement`.
+- This skill captures requirements and decomposition only; it does not propose implementation. If the user asks "how should we build it?", capture as a follow-up — execution belongs in `/tm:implement`.
 - For maintenance work at the task level (`refactor`, `upgrade`, `chore`), use the task branch; scope tightly.
 - Stop as soon as the work is written and the path(s) reported. No execution follows from this skill.
 - If the task implements something defined in a spec under `docs/<area>/.../-spec.md`, reference the spec rather than restating its requirements. Spec sections drift if duplicated.

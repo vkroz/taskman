@@ -1,10 +1,10 @@
 ---
 name: implement
-description: Execute implementation work at any tier — task, feature, or epic. Invoke with /agn:implement <level> <id>. Task takes a file path; feature and epic take a slug.
+description: Execute implementation work at any tier — task, feature, or epic. Invoke with /tm:implement <level> <id>. Task takes a file path; feature and epic take a slug.
 argument-hint: task <path> | feature <slug> | epic <slug>
 ---
 
-# Implement (`/agn:implement <level> <id>`)
+# Implement (`/tm:implement <level> <id>`)
 
 ## Arguments
 
@@ -35,7 +35,7 @@ All file moves and status transitions go through [`scripts/taskman.sh`](../../sc
 
 ## Design gap escalation protocol
 
-When `/agn:implement task` detects a meaningful design gap during detailed design (missing scope detail, ambiguous acceptance criterion, undefined interface contract), it halts, writes a gap-log entry, and routes the user to the upstream skill that should address it. This protocol preserves the Design/Implementation separation: implementers do not silently improvise design.
+When `/tm:implement task` detects a meaningful design gap during detailed design (missing scope detail, ambiguous acceptance criterion, undefined interface contract), it halts, writes a gap-log entry, and routes the user to the upstream skill that should address it. This protocol preserves the Design/Implementation separation: implementers do not silently improvise design.
 
 ### Gap-log file format
 
@@ -64,7 +64,7 @@ Body sections (all required):
 
 ## Detection context
 
-<which step of /agn:implement task surfaced this; what the implementer was trying to do at the moment of detection>
+<which step of /tm:implement task surfaced this; what the implementer was trying to do at the moment of detection>
 
 ## Suspected upstream
 
@@ -84,16 +84,16 @@ Design gap detected. Halted before coding.
 
 Gap-log: tasks/gaps/<YYYYMMDD-HHMMSS>_<task-slug>.md
 Suspected upstream: <level>
-Recommended next step: /agn:design <level>     # or /agn:plan <level>, or "edit the task body" for task-level gaps
+Recommended next step: /tm:design <level>     # or /tm:plan <level>, or "edit the task body" for task-level gaps
 
-Re-invoke /agn:implement task <task-path> after the upstream skill closes.
+Re-invoke /tm:implement task <task-path> after the upstream skill closes.
 ```
 
 Then stop. Do not proceed to architecture checkpoint or coding. If multiple gaps were detected, write one file per gap and list them all in the message.
 
 ### Resume protocol
 
-At the start of every `/agn:implement task` invocation, **before** activation or design work:
+At the start of every `/tm:implement task` invocation, **before** activation or design work:
 
 1. Scan `tasks/gaps/` for files where YAML `task == <this task slug>` and `status == open`.
 2. If any open gaps exist, surface them to the user with their paths and suspected levels.
@@ -114,7 +114,7 @@ Read `$0`. Run exactly one of the branches below.
 ### Usage
 
 ```
-/agn:implement task @tasks/backlog/20260419_wire_up_widget.md
+/tm:implement task @tasks/backlog/20260419_wire_up_widget.md
 ```
 
 ### Preconditions
@@ -164,7 +164,7 @@ Read `$0`. Run exactly one of the branches below.
 7. **Documentation** — If behavior or intent in docs is wrong or incomplete, update `docs/*` (dependency order: vision → spec → requirements → architecture → tasks).
 
 ### After single-task flows (bugfix / ad-hoc)
-When the user expects integration coverage, run **`/agn:validate feature`** for the affected scope before hand-off. Full regression uses **`/agn:validate product`**.
+When the user expects integration coverage, run **`/tm:validate feature`** for the affected scope before hand-off. Full regression uses **`/tm:validate product`**.
 
 ### Task-branch discipline
 - Use `taskman.sh` for every state transition. Never `mv` or hand-edit YAML status.
@@ -178,12 +178,12 @@ When the user expects integration coverage, run **`/agn:validate feature`** for 
 ### Usage
 
 ```
-/agn:implement feature worktree_isolated_dev_stacks
+/tm:implement feature worktree_isolated_dev_stacks
 ```
 
 ### Preconditions
 - A feature file exists for `$1`. Confirm: `./scripts/taskman.sh feature show $1`.
-- If not, stop: *Cannot run — feature not found. Create it first with `/agn:define feature`.*
+- If not, stop: *Cannot run — feature not found. Create it first with `/tm:define feature`.*
 
 ### Workflow
 
@@ -209,7 +209,7 @@ When the user expects integration coverage, run **`/agn:validate feature`** for 
 
 4. If a task is blocked, stop and report; do not skip silently.
 
-5. **When every member task is in `done/`**, run **`/agn:validate feature`** scoped to the feature, then:
+5. **When every member task is in `done/`**, run **`/tm:validate feature`** scoped to the feature, then:
    - Append a `## Summary` section to the feature file.
    - Close the feature:
      ```bash
@@ -222,7 +222,7 @@ When the user expects integration coverage, run **`/agn:validate feature`** for 
 ### Feature-branch discipline
 - Respect scope in the feature body; flag conflicts with the user.
 - Do not close the feature until the user has approved the final task and integration results.
-- Bugs that surface during implementation: create them via `/agn:define task` with `--kind bug --feature $1` so they remain traceable.
+- Bugs that surface during implementation: create them via `/tm:define task` with `--kind bug --feature $1` so they remain traceable.
 - Use `taskman.sh` for every state transition. Never `mv` or hand-edit YAML status.
 
 ---
@@ -232,12 +232,12 @@ When the user expects integration coverage, run **`/agn:validate feature`** for 
 ### Usage
 
 ```
-/agn:implement epic aws_onboarding
+/tm:implement epic aws_onboarding
 ```
 
 ### Preconditions
 - An epic file exists for `$1` at `tasks/epics/YYYYMMDD_<slug>.md`. Confirm: `./scripts/taskman.sh list epics`.
-- If not, stop: *Cannot run — epic not found. Create it first with `/agn:define epic`.*
+- If not, stop: *Cannot run — epic not found. Create it first with `/tm:define epic`.*
 - The epic body's `## Linked features` lists the features that compose the epic, in execution order.
 
 ### Workflow
@@ -256,7 +256,7 @@ When the user expects integration coverage, run **`/agn:validate feature`** for 
    - Iterate through each task using the `$0 = task` branch.
    - User confirmation per task.
    - Append `## Summary` to each task file.
-   - When every task of the feature is `done`, run **`/agn:validate feature`** scoped to that feature.
+   - When every task of the feature is `done`, run **`/tm:validate feature`** scoped to that feature.
    - Append `## Summary` to the feature file.
    - Close the feature: `./scripts/taskman.sh feature close <feature-slug>`.
 
@@ -266,7 +266,7 @@ When the user expects integration coverage, run **`/agn:validate feature`** for 
 
 5. **Feature boundary gate** — After each feature is closed and its integration test passes, the user reviews the results before the next feature starts. Do not auto-advance.
 
-6. **When every linked feature is in `done`**, run **`/agn:validate epic`** scoped to the whole epic (cross-feature interactions), then:
+6. **When every linked feature is in `done`**, run **`/tm:validate epic`** scoped to the whole epic (cross-feature interactions), then:
    - Append a `## Summary` section to the epic file.
    - Close the epic:
      ```bash
@@ -276,7 +276,7 @@ When the user expects integration coverage, run **`/agn:validate feature`** for 
 
 7. **Interrupts** — The user may stop at any feature boundary; report what's complete and what remains.
 
-8. After the epic closes, point the user to **`/agn:validate product`** for full product verification if the epic represents a release-ready slice.
+8. After the epic closes, point the user to **`/tm:validate product`** for full product verification if the epic represents a release-ready slice.
 
 ### Epic-branch discipline
 - Respect scope in the epic body; flag conflicts with the user.

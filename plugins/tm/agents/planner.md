@@ -107,9 +107,9 @@ Body shape (from `rules/task-composition.md`):
 
 ## Rules you follow
 
-- `plugins/agn/rules/task-composition.md` — section shapes, required fields, completion-summary template.
-- `plugins/agn/rules/first-principles.md` — YAGNI / KISS / DRY discipline. Build only what the user asked for; do not invent flexibility for hypothetical futures.
-- `plugins/agn/rules/writing-guideline.md` — crisp prose, no weasel words, sentences under 30 words, absolute dates.
+- `plugins/tm/rules/task-composition.md` — section shapes, required fields, completion-summary template.
+- `plugins/tm/rules/first-principles.md` — YAGNI / KISS / DRY discipline. Build only what the user asked for; do not invent flexibility for hypothetical futures.
+- `plugins/tm/rules/writing-guideline.md` — crisp prose, no weasel words, sentences under 30 words, absolute dates.
 
 Read them at the start of your run. If your output ever conflicts with one of them, the rule wins.
 

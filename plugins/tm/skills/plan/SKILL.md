@@ -1,10 +1,10 @@
 ---
 name: plan
-description: Focused revision of an existing unit's decomposition — epic into features, or feature into tasks. Invoke with /agn:plan <level>. Delegates to the Planner sub-agent in refine + plan-only mode.
+description: Focused revision of an existing unit's decomposition — epic into features, or feature into tasks. Invoke with /tm:plan <level>. Delegates to the Planner sub-agent in refine + plan-only mode.
 argument-hint: epic | feature
 ---
 
-# Plan (`/agn:plan <level>`)
+# Plan (`/tm:plan <level>`)
 
 ## Arguments
 
@@ -29,7 +29,7 @@ Read `$0`. Run exactly one of the branches below.
 
 ### Preconditions
 
-The epic file must exist under `tasks/epics/`. If it does not, stop and direct the user to `/agn:define epic`.
+The epic file must exist under `tasks/epics/`. If it does not, stop and direct the user to `/tm:define epic`.
 
 ### Workflow
 
@@ -44,12 +44,12 @@ The epic file must exist under `tasks/epics/`. If it does not, stop and direct t
    - `initial_scope=plan-only — <user description of decomposition change>; existing features: <list>`
    - `upstream=<docs/vision.md, docs/spec.md, docs/architecture.md if relevant>`
 
-   The Planner returns a `## Decomposition` delta — features to add, remove, or re-order — plus a one-sentence rationale. It does not touch the epic body (that's `/agn:design epic`).
+   The Planner returns a `## Decomposition` delta — features to add, remove, or re-order — plus a one-sentence rationale. It does not touch the epic body (that's `/tm:design epic`).
 
 4. **User review** — Show the proposed feature changes. Iterate until approved.
 
 5. **Persist** —
-   - For each new feature: invoke `/agn:define feature --epic <slug>` (or `taskman.sh new feature --epic <slug>` if the user provides bodies inline).
+   - For each new feature: invoke `/tm:define feature --epic <slug>` (or `taskman.sh new feature --epic <slug>` if the user provides bodies inline).
    - For each obsolete feature still in `backlog`: confirm with the user, then `taskman.sh discard <path>`.
    - For ordering changes: edit the epic's `## Linked features` list in place via the Edit tool.
    - Features already in `active` or `done` are not modified; surface them in the report.
@@ -58,9 +58,9 @@ The epic file must exist under `tasks/epics/`. If it does not, stop and direct t
 
 ### Discipline
 
-- Plan refinement does not touch feature bodies — for that, use `/agn:design feature`.
+- Plan refinement does not touch feature bodies — for that, use `/tm:design feature`.
 - Do not move features between status folders here.
-- If the user asks to re-state the epic's objective or scope, redirect to `/agn:design epic`.
+- If the user asks to re-state the epic's objective or scope, redirect to `/tm:design epic`.
 
 Stop.
 
@@ -70,7 +70,7 @@ Stop.
 
 ### Preconditions
 
-The feature file must exist under `tasks/features/`. If it does not, stop and direct the user to `/agn:define feature`.
+The feature file must exist under `tasks/features/`. If it does not, stop and direct the user to `/tm:define feature`.
 
 ### Workflow
 
@@ -85,12 +85,12 @@ The feature file must exist under `tasks/features/`. If it does not, stop and di
    - `initial_scope=plan-only — <user description of decomposition change>; existing tasks: <list>`
    - `upstream=<parent epic file if any, linked spec, docs/architecture.md if relevant>`
 
-   The Planner returns a `## Decomposition` delta — tasks to add, remove, or re-order — plus a one-sentence rationale. It does not touch the feature body (that's `/agn:design feature`).
+   The Planner returns a `## Decomposition` delta — tasks to add, remove, or re-order — plus a one-sentence rationale. It does not touch the feature body (that's `/tm:design feature`).
 
 4. **User review** — Show the proposed task changes. Iterate until approved.
 
 5. **Persist** —
-   - For each new task: invoke `/agn:define task` with `--feature <slug>` (or call `taskman.sh new task --feature <slug>` directly if the user provides bodies inline).
+   - For each new task: invoke `/tm:define task` with `--feature <slug>` (or call `taskman.sh new task --feature <slug>` directly if the user provides bodies inline).
    - For each obsolete task still in `backlog`: confirm with the user, then `taskman.sh discard <path>`.
    - For ordering changes: edit the feature's `## Tasks` list in place via the Edit tool.
    - Tasks already in `active` or `done` are not modified; surface them in the report.
@@ -99,8 +99,8 @@ The feature file must exist under `tasks/features/`. If it does not, stop and di
 
 ### Discipline
 
-- Plan refinement does not touch task bodies — for that, use `/agn:design task` (not yet implemented; edit the task file directly under guidance for now).
+- Plan refinement does not touch task bodies — for that, use `/tm:design task` (not yet implemented; edit the task file directly under guidance for now).
 - Do not move tasks between status folders here.
-- If the user asks to re-state the feature's objective or acceptance criteria, redirect to `/agn:design feature`.
+- If the user asks to re-state the feature's objective or acceptance criteria, redirect to `/tm:design feature`.
 
 Stop.

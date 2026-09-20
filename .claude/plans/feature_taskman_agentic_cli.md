@@ -9,7 +9,7 @@
 
 ## Problem statement
 
-The Python `taskman` cannot yet be driven by the `/agn:*` agentic workflow. It writes only a `# {title}` body, has no way to delete a rejected draft, addresses items solely by 9-digit ID, cannot list a parent's children, does not validate body sections, and emits nothing on close for `/agn:docs-sync`. Until these gaps close, the skills cannot move off the bash `taskman.sh`.
+The Python `taskman` cannot yet be driven by the `/tm:*` agentic workflow. It writes only a `# {title}` body, has no way to delete a rejected draft, addresses items solely by 9-digit ID, cannot list a parent's children, does not validate body sections, and emits nothing on close for `/tm:docs-sync`. Until these gaps close, the skills cannot move off the bash `taskman.sh`.
 
 ## Objective
 
@@ -18,7 +18,7 @@ The Python `taskman` cannot yet be driven by the `/agn:*` agentic workflow. It w
 ## Scope
 
 **In scope:** additive changes to the `taskman` CLI and its tests (`taskman/src`, `taskman/tests`).
-**Out of scope:** editing `/agn:*` skills, the planner, `CLAUDE.md`, or any doc outside `taskman/` (those are Tracks B and C). No change to the storage model, the name grammar, or the `task = leaf` invariant.
+**Out of scope:** editing `/tm:*` skills, the planner, `CLAUDE.md`, or any doc outside `taskman/` (those are Tracks B and C). No change to the storage model, the name grammar, or the `task = leaf` invariant.
 
 ---
 
@@ -28,7 +28,7 @@ The Python `taskman` cannot yet be driven by the `/agn:*` agentic workflow. It w
 - **R-A4 → adopt:** add a **`discard <id>`** command that deletes the item **only if `draft: true`**; refuses non-drafts. Parity with the bash flow.
 - **R-A6 → adopt:** **no new selector syntax on mutators.** Standardize human-reference → ID resolution on the existing `list --json` and `search` outputs; this feature only guarantees those outputs are sufficient (expose `id`, `slug`, `path`, `status`, `type`, parent).
 - **R-A7 → adopt:** **`validate` reports items missing required body sections** (per `rules/task-composition.md`), at **warning** severity so it never blocks the already-migrated tree. The planner stays the primary author-time enforcer.
-- **R-A8 → adopt:** **`close` (and `move … done`) append a doc-sync entry** to `tasks/docs-sync-queue.txt` and print a "Doc-sync pending" line. Entry format becomes ID-based: `<ISO-8601> <type> <id>`. `/agn:docs-sync` (Track B) remains the reader.
+- **R-A8 → adopt:** **`close` (and `move … done`) append a doc-sync entry** to `tasks/docs-sync-queue.txt` and print a "Doc-sync pending" line. Entry format becomes ID-based: `<ISO-8601> <type> <id>`. `/tm:docs-sync` (Track B) remains the reader.
 
 ---
 
@@ -76,5 +76,5 @@ Each step lands with its tests before the next begins.
 ## Risks and mitigations
 
 - **K-A1 — `new` output contract.** Adding ID output (R-A2) could break a caller that parses the current path-only output. *Mitigation:* additive output, documented; the only current callers are the skills (Track B) and tests.
-- **K-A2 — doc-sync queue format change (R-A8).** The entry is now ID-based, not path/slug-based. *Mitigation:* Track B updates `/agn:docs-sync` to the new format in lockstep; until then the queue is informational.
+- **K-A2 — doc-sync queue format change (R-A8).** The entry is now ID-based, not path/slug-based. *Mitigation:* Track B updates `/tm:docs-sync` to the new format in lockstep; until then the queue is informational.
 - **K-A3 — section validation noise (R-A7).** Warning on the migrated tree could be loud. *Mitigation:* warning severity only; scope the check to non-done items if noise is high.

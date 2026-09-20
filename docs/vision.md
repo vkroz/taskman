@@ -1,4 +1,4 @@
-# codename 'Agenture Loop' - Vision
+# Taskman — Vision
 
 ## Objective
 
@@ -99,4 +99,3 @@ Execute the stages in order; each builds on the ones before it.
 - Quotient. *An AI Maturity Model for Engineering Teams.* 2026.
 - CapitalG. *Agentic SDLC Thesis (Q1'2026).* 2026.
 - DORA. *State of AI Assisted Software Development.* 2025. [https://dora.dev/research/2025/dora-report/](https://dora.dev/research/2025/dora-report/)
-

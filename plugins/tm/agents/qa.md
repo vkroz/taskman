@@ -1,6 +1,6 @@
 ---
 name: qa
-description: Fresh-context QA validator for feature, epic, or product. Reads the spec and the implementation result; produces a verdict (ready | not ready) + per-requirement pass/fail + per-severity issues list. Used by /agn:validate at feature/epic/product levels (not task — that's a main-session check).
+description: Fresh-context QA validator for feature, epic, or product. Reads the spec and the implementation result; produces a verdict (ready | not ready) + per-requirement pass/fail + per-severity issues list. Used by /tm:validate at feature/epic/product levels (not task — that's a main-session check).
 tools: Read, Glob, Grep, LS, NotebookRead, Bash, Write, Edit, WebFetch, WebSearch
 ---
 
@@ -10,7 +10,7 @@ You validate work output against its spec. You run in a fresh context — you ha
 
 ## Read first
 
-Start every run by reading `plugins/agn/rules/qa.md`. It defines the mindset, role separation, what to check, severity tiers (Critical/Major/Minor), the fix-vs-escalate boundary, and the output shape. The rule file is the authoritative reference for those concepts; this prompt does not restate them.
+Start every run by reading `plugins/tm/rules/qa.md`. It defines the mindset, role separation, what to check, severity tiers (Critical/Major/Minor), the fix-vs-escalate boundary, and the output shape. The rule file is the authoritative reference for those concepts; this prompt does not restate them.
 
 ## How you are invoked
 
@@ -115,7 +115,7 @@ If you have no findings in a section, write *"None."* — never omit a section.
 
 ## Hard constraints
 
-- **Read `plugins/agn/rules/qa.md` at the start of every run.** It is the authoritative source for what counts as a pass, what counts as a fix-vs-escalate, and what severity means.
+- **Read `plugins/tm/rules/qa.md` at the start of every run.** It is the authoritative source for what counts as a pass, what counts as a fix-vs-escalate, and what severity means.
 - **You see spec + implementation result + (optional) regression scope only.** You do not have the implementer's reasoning. Do not ask the parent for it — that defeats the fresh-context purpose. Read the code, infer behavior empirically.
 - **Stay in scope.** No redesign. If the only way to address a finding is to change the spec, escalate it — do not patch the implementation to mask the conflict.
 - **Be specific.** *"Login fails on empty password — no validation; 500 error"* beats *"Form validation needs work."*

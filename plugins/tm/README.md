@@ -1,22 +1,22 @@
-# agn — Agentic SDLC
+# Taskman development plugin (`tm`)
 
-Agentic software-delivery loop for Claude Code. Claude facilitates writing specs and designing architecture, then autonomously builds implementation plans, implements, and tests — all through structured `/agn:*` skills with built-in review gates and document consistency.
+Agentic software-delivery loop for Claude Code. Claude facilitates writing specs and designing architecture, then autonomously builds implementation plans, implements, and tests — all through structured `/tm:*` skills with built-in review gates and document consistency.
 
 ## Install
 
-From the `agenture` marketplace:
+From the `taskman` marketplace:
 
 ```
-/plugin marketplace add AgentureHQ/agenture-loop
-/plugin install agn@agenture
+/plugin marketplace add AgentureHQ/taskman
+/plugin install tm@taskman
 ```
 
 ### Prerequisite: the `taskman` CLI
 
-The `/agn:*` skills drive a task CLI named `taskman` — a standalone Python app, not bundled in the plugin. Install it once; no repo checkout needed:
+The `/tm:*` skills drive a task CLI named `taskman` — a standalone Python app, not bundled in the plugin. Install it once; no repo checkout needed:
 
 ```
-uv tool install "git+https://github.com/AgentureHQ/agenture-loop.git#subdirectory=taskman"
+uv tool install "git+https://github.com/AgentureHQ/taskman.git#subdirectory=taskman"
 ```
 
 Verify with `taskman version`. If the command isn't found afterward, run `uv tool update-shell` and restart the shell. `uv` provisions Python 3.11+ if needed; `pipx`/`pip` work too. Full notes in [`taskman/README.md`](../../taskman/README.md).
@@ -44,34 +44,34 @@ See `rules/task-composition.md` for the body and frontmatter model; see `./scrip
 
 ## Skills
 
-The plugin ships 8 skills. Lifecycle skills follow the verb-noun pattern `/agn:<verb> <level>`; tool skills retain their action-named form.
+The plugin ships 8 skills. Lifecycle skills follow the verb-noun pattern `/tm:<verb> <level>`; tool skills retain their action-named form.
 
 ### SDLC workflow (lifecycle skills)
 
 | Verb | Skill | What it does |
 |------|-------|--------------|
-| Define | `/agn:define <product\|epic\|feature\|task>` | Define a work unit at the named tier — vision/spec/requirements (product), epic + linked features (epic), feature + linked tasks (feature), task/bug ticket (task). Delegates composition to the Planner sub-agent for epic/feature/task levels. |
-| Design | `/agn:design <product\|epic\|feature>` | Focused revision of an existing unit's design; product produces `docs/architecture.md`. Epic and feature delegate to the Planner sub-agent for in-place body refinement. |
-| Plan | `/agn:plan <epic\|feature>` | Focused revision of an existing unit's decomposition (epic into features, feature into tasks). Delegates to the Planner sub-agent in refine + plan-only mode. |
-| Implement | `/agn:implement <task\|feature\|epic>` | Execute implementation; task = detailed design → code → tests; feature/epic = iterate children with review gates |
-| Validate | `/agn:validate <task\|feature\|epic\|product>` | Quality gates. Task runs the task's own `## Quality gates` in the main session. Feature, epic, and product delegate to the QA sub-agent for fresh-context validation against spec. |
+| Define | `/tm:define <product\|epic\|feature\|task>` | Define a work unit at the named tier — vision/spec/requirements (product), epic + linked features (epic), feature + linked tasks (feature), task/bug ticket (task). Delegates composition to the Planner sub-agent for epic/feature/task levels. |
+| Design | `/tm:design <product\|epic\|feature>` | Focused revision of an existing unit's design; product produces `docs/architecture.md`. Epic and feature delegate to the Planner sub-agent for in-place body refinement. |
+| Plan | `/tm:plan <epic\|feature>` | Focused revision of an existing unit's decomposition (epic into features, feature into tasks). Delegates to the Planner sub-agent in refine + plan-only mode. |
+| Implement | `/tm:implement <task\|feature\|epic>` | Execute implementation; task = detailed design → code → tests; feature/epic = iterate children with review gates |
+| Validate | `/tm:validate <task\|feature\|epic\|product>` | Quality gates. Task runs the task's own `## Quality gates` in the main session. Feature, epic, and product delegate to the QA sub-agent for fresh-context validation against spec. |
 
 ### Code and maintenance
 
 | Skill | What it does |
 |-------|--------------|
-| `/agn:code-review` | Read-only codebase audit; produces backlog tasks |
-| `/agn:code-comment` | Add explanatory comments to source code |
-| `/agn:code-commit` | Stage files and write a well-formed git commit message |
-| `/agn:docs-sync` | Process the doc-sync queue: review upstream docs for drift against recently closed units, propose diffs, apply after user approval, clear processed entries |
+| `/tm:code-review` | Read-only codebase audit; produces backlog tasks |
+| `/tm:code-comment` | Add explanatory comments to source code |
+| `/tm:code-commit` | Stage files and write a well-formed git commit message |
+| `/tm:docs-sync` | Process the doc-sync queue: review upstream docs for drift against recently closed units, propose diffs, apply after user approval, clear processed entries |
 
 ## Workflows supported
 
-- **New product** — `/agn:define product` → `/agn:design product` → `/agn:define epic` (or `/agn:define feature` if no epic tier needed) → `/agn:implement epic` / `/agn:implement feature` → `/agn:validate product`
-- **Bug fix** — `/agn:define task bug` → `/agn:implement task` → `/agn:validate feature` → `/agn:validate product`
-- **Ad-hoc maintenance** — `/agn:define task` → `/agn:implement task` → `/agn:validate feature`
-- **Incremental feature** — `/agn:define feature` (against existing product docs) → `/agn:implement feature` → `/agn:validate feature`
-- **Codebase optimization** — `/agn:code-review` → `/agn:define feature` (or `/agn:define epic` for larger scope) → `/agn:implement feature` → `/agn:validate product`
+- **New product** — `/tm:define product` → `/tm:design product` → `/tm:define epic` (or `/tm:define feature` if no epic tier needed) → `/tm:implement epic` / `/tm:implement feature` → `/tm:validate product`
+- **Bug fix** — `/tm:define task bug` → `/tm:implement task` → `/tm:validate feature` → `/tm:validate product`
+- **Ad-hoc maintenance** — `/tm:define task` → `/tm:implement task` → `/tm:validate feature`
+- **Incremental feature** — `/tm:define feature` (against existing product docs) → `/tm:implement feature` → `/tm:validate feature`
+- **Codebase optimization** — `/tm:code-review` → `/tm:define feature` (or `/tm:define epic` for larger scope) → `/tm:implement feature` → `/tm:validate product`
 
 ## taskman.sh — task and feature CLI
 
@@ -112,7 +112,7 @@ tasks/
   active/
   done/
   gaps/                           # YYYYMMDD-HHMMSS_<task-slug>.md — design-gap escalation log
-  docs-sync-queue.txt             # PostClose hook queue; processed by /agn:docs-sync
+  docs-sync-queue.txt             # PostClose hook queue; processed by /tm:docs-sync
 ```
 
 Created incrementally as you run each stage — no upfront scaffolding.
@@ -122,11 +122,11 @@ Created incrementally as you run each stage — no upfront scaffolding.
 Plugins do not auto-load `rules/`. To activate the behavioral rules in your project, append this block to your project's `CLAUDE.md`:
 
 ```
-@~/.claude/plugins/cache/agenture/agn/0.1.0/rules/first-principles.md
-@~/.claude/plugins/cache/agenture/agn/0.1.0/rules/task-composition.md
-@~/.claude/plugins/cache/agenture/agn/0.1.0/rules/writing-guideline.md
-@~/.claude/plugins/cache/agenture/agn/0.1.0/rules/qa.md
-@~/.claude/plugins/cache/agenture/agn/0.1.0/rules/doc-maintenance.md
+@~/.claude/plugins/cache/taskman/tm/0.1.0/rules/first-principles.md
+@~/.claude/plugins/cache/taskman/tm/0.1.0/rules/task-composition.md
+@~/.claude/plugins/cache/taskman/tm/0.1.0/rules/writing-guideline.md
+@~/.claude/plugins/cache/taskman/tm/0.1.0/rules/qa.md
+@~/.claude/plugins/cache/taskman/tm/0.1.0/rules/doc-maintenance.md
 ```
 
 Update the version (`0.1.0`) when you upgrade the plugin.
@@ -136,14 +136,14 @@ The five files:
 - `first-principles.md` — design discipline (YAGNI, KISS, DRY), surgical changes, goal-driven execution. Always-on.
 - `task-composition.md` — epic/feature/task frontmatter shapes, body section requirements, completion-summary template. Loaded by any skill that composes work units.
 - `writing-guideline.md` — crisp, no-fluff prose style. Loaded by document-writing skills.
-- `qa.md` — QA mindset, role separation, validation principles. Loaded by the QA sub-agent and `/agn:validate` skills.
+- `qa.md` — QA mindset, role separation, validation principles. Loaded by the QA sub-agent and `/tm:validate` skills.
 - `doc-maintenance.md` — what to check after a work unit closes. Loaded by the docs-sync skill / PostClose hook.
 
 Persistence rules (storage layout, naming, lifecycle preconditions, CLI surface, validation behavior) live in `./scripts/taskman.sh help` — the script is the single writer and the authoritative reference.
 
 ## PostClose hook and docs-sync
 
-Every successful close action — `taskman.sh move <path> done`, `feature close <slug>`, `epic close <slug>` — appends an entry to `tasks/docs-sync-queue.txt` and prints a "Doc-sync pending" hint. Run `/agn:docs-sync` to process the queue: it walks the dependency chain (vision → spec → requirements → architecture → linked spec) per `rules/doc-maintenance.md`, proposes diffs, applies after user approval, and clears each processed entry.
+Every successful close action — `taskman.sh move <path> done`, `feature close <slug>`, `epic close <slug>` — appends an entry to `tasks/docs-sync-queue.txt` and prints a "Doc-sync pending" hint. Run `/tm:docs-sync` to process the queue: it walks the dependency chain (vision → spec → requirements → architecture → linked spec) per `rules/doc-maintenance.md`, proposes diffs, applies after user approval, and clears each processed entry.
 
 The queue is durable on disk. `taskman.sh list` prints a WARN hint whenever the queue is non-empty, so you see pending entries during normal task-state checks.
 
@@ -160,7 +160,7 @@ For automatic surfacing of pending entries when a new Claude Code session opens 
         "hooks": [
           {
             "type": "command",
-            "command": "test -s tasks/docs-sync-queue.txt && printf 'Doc-sync pending: %s entries in tasks/docs-sync-queue.txt. Run /agn:docs-sync.\\n' \"$(wc -l < tasks/docs-sync-queue.txt | tr -d ' ')\" || true"
+            "command": "test -s tasks/docs-sync-queue.txt && printf 'Doc-sync pending: %s entries in tasks/docs-sync-queue.txt. Run /tm:docs-sync.\\n' \"$(wc -l < tasks/docs-sync-queue.txt | tr -d ' ')\" || true"
           }
         ]
       }
@@ -174,9 +174,9 @@ The hook is opt-in — the plugin does not install it for you. Without it, the q
 ## Plugin layout
 
 ```
-plugins/agn/
+plugins/tm/
 ├── .claude-plugin/plugin.json    # plugin manifest
-├── skills/                       # 9 /agn:* skills
+├── skills/                       # 9 /tm:* skills
 ├── agents/                       # planner (Design + Plan); qa (fresh-context validator)
 ├── rules/                        # first-principles, task-composition, writing-guideline, qa, doc-maintenance
 ├── scripts/taskman.sh            # task lifecycle CLI; PostClose hook emits to docs-sync-queue.txt

@@ -22,7 +22,7 @@ QA does **not** receive:
 
 - Implementer reasoning (why a choice was made).
 - The conversation transcript that led to the result.
-- The detailed-design notes from `/agn:implement`.
+- The detailed-design notes from `/tm:implement`.
 
 Fresh context is the point. An implementer who read the spec, made tradeoffs, and built the code has already collapsed the "what could go wrong" space; a fresh reader sees gaps that closed space hid.
 

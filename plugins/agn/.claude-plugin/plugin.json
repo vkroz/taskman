@@ -1,9 +1,0 @@
-{
-  "name": "agn",
-  "description": "Agentic SDLC for Claude Code — Claude facilitates writing specs and designing architecture, then autonomously builds implementation plans, implements and tests the product. Driven by structured /agn:* skills with built-in review gates and document consistency.",
-  "version": "0.1.0",
-  "author": {
-    "name": "Vladimir Kroz"
-  },
-  "repository": "https://github.com/AgentureHQ/agenture-loop"
-}

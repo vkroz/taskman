@@ -1,10 +1,10 @@
 ---
 name: design
-description: Focused revision of an existing unit's design at any tier — product, epic, or feature. Invoke with /agn:design <level>. Product drafts docs/architecture.md in this session; epic and feature delegate to the Planner sub-agent for in-place refinement.
+description: Focused revision of an existing unit's design at any tier — product, epic, or feature. Invoke with /tm:design <level>. Product drafts docs/architecture.md in this session; epic and feature delegate to the Planner sub-agent for in-place refinement.
 argument-hint: product | epic | feature
 ---
 
-# Design (`/agn:design <level>`)
+# Design (`/tm:design <level>`)
 
 ## Arguments
 
@@ -33,7 +33,7 @@ Read `$0`. Run exactly one of the branches below.
 - `docs/spec.md`
 - `docs/requirements.md`
 
-If any are missing, stop and tell the user: *Cannot run `/agn:design product` — definition documents not found. Run `/agn:define product` first.*
+If any are missing, stop and tell the user: *Cannot run `/tm:design product` — definition documents not found. Run `/tm:define product` first.*
 
 ### Output
 | Artifact | Path |
@@ -54,7 +54,7 @@ If any are missing, stop and tell the user: *Cannot run `/agn:design product` �
 
 4. **Document consistency** — If architectural decisions change scope (e.g. defer a feature), update `docs/spec.md` and/or `docs/requirements.md` and state why. Chain: vision → spec → requirements → architecture.
 
-5. **Gate** — User explicitly approves before `/agn:define epic` or `/agn:define feature`.
+5. **Gate** — User explicitly approves before `/tm:define epic` or `/tm:define feature`.
 
 ### Product-branch discipline
 - Do not invent requirements; align with definition docs or flag conflicts to the user.
@@ -66,7 +66,7 @@ If any are missing, stop and tell the user: *Cannot run `/agn:design product` �
 
 ### Preconditions
 
-The epic file must exist under `tasks/epics/`. If it does not, stop and direct the user to `/agn:define epic`.
+The epic file must exist under `tasks/epics/`. If it does not, stop and direct the user to `/tm:define epic`.
 
 ### Workflow
 
@@ -81,7 +81,7 @@ The epic file must exist under `tasks/epics/`. If it does not, stop and direct t
    - `initial_scope=<user description of what needs to change>`
    - `upstream=<paths to relevant docs: vision, spec, requirements, architecture>`
 
-   The Planner returns the changed sections of the `## Body` plus a one-sentence rationale. It does not normally touch the feature list — that's the `/agn:plan epic` flow.
+   The Planner returns the changed sections of the `## Body` plus a one-sentence rationale. It does not normally touch the feature list — that's the `/tm:plan epic` flow.
 
 4. **User review** — Show the diff (current sections vs Planner's proposed sections). Iterate until approved.
 
@@ -92,7 +92,7 @@ The epic file must exist under `tasks/epics/`. If it does not, stop and direct t
 ### Discipline
 
 - Refinement is in-place. Do not move the epic between status folders.
-- If the user asks for a fundamental re-decomposition (adding/removing features), redirect to `/agn:plan epic`.
+- If the user asks for a fundamental re-decomposition (adding/removing features), redirect to `/tm:plan epic`.
 - If the user describes a contradicting requirement, surface the conflict; do not silently resolve.
 
 Stop.
@@ -103,7 +103,7 @@ Stop.
 
 ### Preconditions
 
-The feature file must exist under `tasks/features/`. If it does not, stop and direct the user to `/agn:define feature`.
+The feature file must exist under `tasks/features/`. If it does not, stop and direct the user to `/tm:define feature`.
 
 ### Workflow
 
@@ -118,7 +118,7 @@ The feature file must exist under `tasks/features/`. If it does not, stop and di
    - `initial_scope=<user description of what needs to change>`
    - `upstream=<paths to: parent epic file if any, docs/vision.md, docs/spec.md, docs/architecture.md, linked spec>`
 
-   The Planner returns the changed sections of the `## Body` (and optionally the linked spec content) plus a one-sentence rationale. It does not normally touch the task list — that's the `/agn:plan feature` flow.
+   The Planner returns the changed sections of the `## Body` (and optionally the linked spec content) plus a one-sentence rationale. It does not normally touch the task list — that's the `/tm:plan feature` flow.
 
 4. **User review** — Show the diff. Iterate until approved.
 
@@ -129,7 +129,7 @@ The feature file must exist under `tasks/features/`. If it does not, stop and di
 ### Discipline
 
 - Refinement is in-place. Do not move the feature between status folders.
-- If the user asks for a fundamental re-decomposition (adding/removing tasks), redirect to `/agn:plan feature`.
+- If the user asks for a fundamental re-decomposition (adding/removing tasks), redirect to `/tm:plan feature`.
 - If the user describes a contradicting requirement, surface the conflict.
 
 Stop.

@@ -4,13 +4,13 @@ description: Process the doc-sync queue. Reads tasks/docs-sync-queue.txt, review
 argument-hint: (no args — processes all pending entries) | <line-number> | <slug-or-path>
 ---
 
-# Docs sync (`/agn:docs-sync`)
+# Docs sync (`/tm:docs-sync`)
 
 ## Purpose
 
 Every time a work unit closes (task → done, feature close, epic close), `taskman.sh` appends an entry to `tasks/docs-sync-queue.txt` and prints a "Doc-sync pending" hint. This skill processes that queue: it reviews upstream `docs/*` files for drift against each closed unit, proposes diffs, and clears the entry once the user approves.
 
-Follow `plugins/agn/rules/doc-maintenance.md` for what to check and when no update is needed.
+Follow `plugins/tm/rules/doc-maintenance.md` for what to check and when no update is needed.
 
 ## Arguments
 
@@ -83,6 +83,6 @@ If a user interrupts mid-run, leave un-processed entries in the queue — they w
 
 ## No-active-session fallback
 
-When `taskman.sh close` runs from a direct CLI (no Claude session active), entries accumulate in the queue. The queue file is durable on disk. The next time the user runs `taskman.sh list` in any Claude session, taskman prints a WARN hint about pending entries. Run `/agn:docs-sync` then.
+When `taskman.sh close` runs from a direct CLI (no Claude session active), entries accumulate in the queue. The queue file is durable on disk. The next time the user runs `taskman.sh list` in any Claude session, taskman prints a WARN hint about pending entries. Run `/tm:docs-sync` then.
 
-Users wanting automatic surfacing on session start can add an opt-in Claude Code SessionStart hook — see `plugins/agn/README.md` for a copy-paste snippet.
+Users wanting automatic surfacing on session start can add an opt-in Claude Code SessionStart hook — see `plugins/tm/README.md` for a copy-paste snippet.

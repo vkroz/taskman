@@ -1,16 +1,16 @@
-# agn: Vision, Specification and Requirements
+# Taskman: Vision, Specification and Requirements
 
 ## Vision
 
 
-### agn goals:
+### Taskman goals:
 - Provide a framework and mechanisms for accelerated software development using AI coding tools (Claude Code).
 - Establish AI-assisted SDLC where repeatable steps in the lifecycle are automated or assisted using AI agents, accelerating overall delivery.
-- Stretch goal: establish a feedback loop for incremental improvements of agn artifacts (skills, rules, agents, hooks, tools/MCPs) — the more users use it, the better it serves their projects (tracked by backlog task `feedback_loop_infrastructure`).
+- Stretch goal: establish a feedback loop for incremental improvements of tm artifacts (skills, rules, agents, hooks, tools/MCPs) — the more users use it, the better it serves their projects (tracked by backlog task `feedback_loop_infrastructure`).
 
 ### SDLC model
 
-agn's SDLC is a **recursive decomposition** pattern. Each tier (product → epic → feature → task) runs the same five stages at a different level of abstraction, with a user gate between stages:
+tm's SDLC is a **recursive decomposition** pattern. Each tier (product → epic → feature → task) runs the same five stages at a different level of abstraction, with a user gate between stages:
 
 ```
 define → design → plan → implement → validate
@@ -44,10 +44,10 @@ Which stage produces what artifact at which level:
 
 | Level | Define | Design | Plan | Implement | Validate |
 |---|---|---|---|---|---|
-| **Product** | `docs/vision.md`, `docs/spec.md`, `docs/requirements.md` | `docs/architecture.md` | Ordered set of top-level work items under `tasks/` — epics by default; tier per item by effort estimate | — (via work items) | `/agn:validate product` |
-| **Epic** | Epic body: problem, objective, scope, acceptance criteria | Design delta — required by default | `## Linked features` list + feature files | — (via features) | `/agn:validate epic` |
-| **Feature** | Feature body: problem, objective, acceptance criteria | Design delta — optional; skip requires recorded rationale | `## Tasks` list + task files | — (via tasks) | `/agn:validate feature` |
-| **Task** | Task body: problem, scope, acceptance criteria, quality gates; design decisions inline | Folded into Define | None — the task is the plan | Execution: code, artifacts | `/agn:validate task` (lightweight gates) |
+| **Product** | `docs/vision.md`, `docs/spec.md`, `docs/requirements.md` | `docs/architecture.md` | Ordered set of top-level work items under `tasks/` — epics by default; tier per item by effort estimate | — (via work items) | `/tm:validate product` |
+| **Epic** | Epic body: problem, objective, scope, acceptance criteria | Design delta — required by default | `## Linked features` list + feature files | — (via features) | `/tm:validate epic` |
+| **Feature** | Feature body: problem, objective, acceptance criteria | Design delta — optional; skip requires recorded rationale | `## Tasks` list + task files | — (via tasks) | `/tm:validate feature` |
+| **Task** | Task body: problem, scope, acceptance criteria, quality gates; design decisions inline | Folded into Define | None — the task is the plan | Execution: code, artifacts | `/tm:validate task` (lightweight gates) |
 
 Per-level notes:
 
@@ -60,19 +60,19 @@ Documentation evolves continuously. Each completed unit triggers automatic revie
 
 ## Current Implementation State
 
-`agn` ships as a Claude Code plugin (`agn`) in the `agenture` marketplace; install via `/plugin install agn@agenture`. It implements this specification in full. For the shipped-component inventory see `CLAUDE.md`; for the user-facing skill reference see `README.md`. Component contracts are specified under **Plugin Specification** below.
+`tm` ships as a Claude Code plugin (`tm`) in the `taskman` marketplace; install via `/plugin install tm@taskman`. It implements this specification in full. For the shipped-component inventory see `CLAUDE.md`; for the user-facing skill reference see `README.md`. Component contracts are specified under **Plugin Specification** below.
 
 # Specification and Requirements
 
 ## Workflows: User Experience
 
-agn supports four workflows. Each is a sequence of stages driven by skill invocations. At every stage the user invokes a skill, the agent executes it (often via a sub-agent), and the user approves the output before moving forward.
+tm supports four workflows. Each is a sequence of stages driven by skill invocations. At every stage the user invokes a skill, the agent executes it (often via a sub-agent), and the user approves the output before moving forward.
 
 ### New Product Development
 
 Starting point: the user has an idea for a new product and no existing documents.
 
-**Definition** — `/agn:define product`
+**Definition** — `/tm:define product`
 
 The Planner sub-agent guides the user through producing three documents:
 
@@ -82,43 +82,43 @@ The Planner sub-agent guides the user through producing three documents:
 
 After all three are drafted, the agent validates them against business-case and functional-completeness rubrics, produces a report, and addresses findings until all critical issues are resolved or the user approves moving forward.
 
-**Design (Architecture)** — `/agn:design product`
+**Design (Architecture)** — `/tm:design product`
 
 The Planner sub-agent drafts `docs/architecture.md` covering technology choices, system architecture, domain dictionary (key terms only), workflows, key APIs, and security mechanisms. Detailed design (API signatures, schemas) is out of scope.
 
 Review cycle: user feedback → agent updates → QA review → consistency check against specs → user approval.
 
-**Plan (Decomposition)** — `/agn:define epic`, `/agn:define feature`, `/agn:define task`
+**Plan (Decomposition)** — `/tm:define epic`, `/tm:define feature`, `/tm:define task`
 
 The agent decomposes the product into a four-tier hierarchy. There is no single implementation plan document — the epic, feature, and task files together are the plan.
 
-- Large functional blocks become epics via `/agn:define epic`. The epic file lists linked features (optionally pre-created in the same Planner session).
-- Coherent slices become features via `/agn:define feature`. The feature file lists linked tasks. A feature can be attached to an epic via `--epic <slug>` or stand alone.
-- One-off work or units inside a feature become tasks via `/agn:define task`. A task can be attached to a feature via `--feature <slug>` or be ad-hoc.
+- Large functional blocks become epics via `/tm:define epic`. The epic file lists linked features (optionally pre-created in the same Planner session).
+- Coherent slices become features via `/tm:define feature`. The feature file lists linked tasks. A feature can be attached to an epic via `--epic <slug>` or stand alone.
+- One-off work or units inside a feature become tasks via `/tm:define task`. A task can be attached to a feature via `--feature <slug>` or be ad-hoc.
 
 The same Planner sub-agent handles Design + Plan at every tier. Each tier is optional one level up. Most product work is a feature; epics are for genuinely larger blocks.
 
 Review cycle: user reviews each definition → Planner self-validates against rubrics → specs/requirements updated if needed → user approves.
 
-**Refinement** — `/agn:design <level>`, `/agn:plan <level>`
+**Refinement** — `/tm:design <level>`, `/tm:plan <level>`
 
-For revising existing work units rather than creating new ones, `/agn:design <product|epic|feature>` and `/agn:plan <epic|feature>` invoke the same Planner sub-agent in focused mode against an existing file.
+For revising existing work units rather than creating new ones, `/tm:design <product|epic|feature>` and `/tm:plan <epic|feature>` invoke the same Planner sub-agent in focused mode against an existing file.
 
-**Implementation** — `/agn:implement epic`, `/agn:implement feature`, `/agn:implement task`
+**Implementation** — `/tm:implement epic`, `/tm:implement feature`, `/tm:implement task`
 
-- `/agn:implement task <path>` — single task execution.
-- `/agn:implement feature <slug>` — every open task of a feature in order, stop-per-task for review.
-- `/agn:implement epic <slug>` — every linked feature of an epic in order, stop-per-feature for review.
+- `/tm:implement task <path>` — single task execution.
+- `/tm:implement feature <slug>` — every open task of a feature in order, stop-per-task for review.
+- `/tm:implement epic <slug>` — every linked feature of an epic in order, stop-per-feature for review.
 
 Per task, the agent: (1) cross-checks upstream design, halting via the escalation protocol if gaps surface; (2) produces detailed design (if not already locked upstream); (3) implements; (4) writes and runs tests. Blockers and ambiguities are surfaced via the escalation protocol.
 
-At feature and epic boundaries, the QA sub-agent runs integration tests via `/agn:validate feature` or `/agn:validate epic`. User reviews before advancing. Documents are updated if implementation reveals necessary changes (PostClose hook automates the check).
+At feature and epic boundaries, the QA sub-agent runs integration tests via `/tm:validate feature` or `/tm:validate epic`. User reviews before advancing. Documents are updated if implementation reveals necessary changes (PostClose hook automates the check).
 
-**Validation** — `/agn:validate task | feature | epic | product`
+**Validation** — `/tm:validate task | feature | epic | product`
 
-- `/agn:validate task` — task-level quality gates run in the main session (lightweight).
-- `/agn:validate feature` and `/agn:validate epic` — integration tests run by the QA sub-agent (fresh context, sees spec + result only).
-- `/agn:validate product` — full system test by the QA sub-agent. Produces a system test report (critical/major/minor). Fixes what it can; escalates the rest. Re-tests until all critical and major issues are cleared.
+- `/tm:validate task` — task-level quality gates run in the main session (lightweight).
+- `/tm:validate feature` and `/tm:validate epic` — integration tests run by the QA sub-agent (fresh context, sees spec + result only).
+- `/tm:validate product` — full system test by the QA sub-agent. Produces a system test report (critical/major/minor). Fixes what it can; escalates the rest. Re-tests until all critical and major issues are cleared.
 
 ---
 
@@ -126,14 +126,14 @@ At feature and epic boundaries, the QA sub-agent runs integration tests via `/ag
 
 Precondition: existing product with documents in `docs/`.
 
-1. User creates a bug ticket: `/agn:define task --kind bug` — observed problem, expected result, actual result, reproduction steps.
-2. User runs `/agn:implement task <defect-task>`.
+1. User creates a bug ticket: `/tm:define task --kind bug` — observed problem, expected result, actual result, reproduction steps.
+2. User runs `/tm:implement task <defect-task>`.
 3. Agent investigates root cause. Produces root cause analysis and fix plan.
 4. **Architecture gate**: if the fix requires architectural changes, the agent stops and discusses with the user before proceeding.
 5. Agent implements: detailed design → code → tests.
-6. `/agn:validate task` — task-level quality gates.
-7. `/agn:validate feature` (or `/agn:validate epic` if the touched scope crosses features) — integration tests via QA sub-agent.
-8. `/agn:validate product` — full regression via QA sub-agent.
+6. `/tm:validate task` — task-level quality gates.
+7. `/tm:validate feature` (or `/tm:validate epic` if the touched scope crosses features) — integration tests via QA sub-agent.
+8. `/tm:validate product` — full regression via QA sub-agent.
 9. User approves.
 
 ---
@@ -144,18 +144,18 @@ Precondition: existing product with documents in `docs/`.
 
 **Ad-hoc task:**
 
-1. User creates a task: `/agn:define task` (kind: `refactor`, `upgrade`, `chore`, etc.).
-2. User runs `/agn:implement task <task>`. Architecture gate applies.
-3. `/agn:validate task` → `/agn:validate feature` → user approves.
+1. User creates a task: `/tm:define task` (kind: `refactor`, `upgrade`, `chore`, etc.).
+2. User runs `/tm:implement task <task>`. Architecture gate applies.
+3. `/tm:validate task` → `/tm:validate feature` → user approves.
 
 **Codebase optimization:**
 
-1. User invokes `/agn:code-review`.
+1. User invokes `/tm:code-review`.
 2. Agent audits the full codebase. Produces a report: technical debt, fragmentation, inconsistency, duplication, performance issues.
 3. User reviews and prioritizes findings.
-4. If structural changes are needed: agent updates architecture via `/agn:design product`, user approves.
-5. Agent decomposes the work via `/agn:define feature` (or `/agn:define epic` for larger scope). User approves.
-6. Execution follows the standard `/agn:implement feature` → `/agn:validate feature` → `/agn:validate product` flow.
+4. If structural changes are needed: agent updates architecture via `/tm:design product`, user approves.
+5. Agent decomposes the work via `/tm:define feature` (or `/tm:define epic` for larger scope). User approves.
+6. Execution follows the standard `/tm:implement feature` → `/tm:validate feature` → `/tm:validate product` flow.
 
 ---
 
@@ -165,9 +165,9 @@ Precondition: existing product with documents in `docs/`.
 
 Same stages as new product development, but the agent operates on existing documents:
 
-1. `/agn:define product` (or focused `/agn:design product`) — agent drafts additions/amendments to existing vision, spec, requirements, and architecture as needed. After this stage, the existing docs describe the product including the new feature — no separate "feature docs."
-2. `/agn:define feature` (or `/agn:define epic` if the work spans multiple features) — scoped to the new feature but accounts for dependencies on existing code.
-3. `/agn:implement feature` (or `/agn:implement epic`), then `/agn:validate feature`, `/agn:validate product` — same as new product development.
+1. `/tm:define product` (or focused `/tm:design product`) — agent drafts additions/amendments to existing vision, spec, requirements, and architecture as needed. After this stage, the existing docs describe the product including the new feature — no separate "feature docs."
+2. `/tm:define feature` (or `/tm:define epic` if the work spans multiple features) — scoped to the new feature but accounts for dependencies on existing code.
+3. `/tm:implement feature` (or `/tm:implement epic`), then `/tm:validate feature`, `/tm:validate product` — same as new product development.
 
 ---
 
@@ -177,7 +177,7 @@ Derived from the workflows above. Everything below exists to support the user ex
 
 ### Skills
 
-agn is a Claude Code plugin named `agn`. All skills are namespaced as `/agn:<skill>`. Lifecycle skills follow the verb-noun pattern (`<verb> <level>`); tool skills are level-agnostic.
+tm is a Claude Code plugin named `tm`. All skills are namespaced as `/tm:<skill>`. Lifecycle skills follow the verb-noun pattern (`<verb> <level>`); tool skills are level-agnostic.
 
 #### Lifecycle skills
 
@@ -193,10 +193,10 @@ agn is a Claude Code plugin named `agn`. All skills are namespaced as `/agn:<ski
 
 | Skill | Drives | Input | Output |
 |-------|--------|-------|--------|
-| `/agn:code-review` | Codebase audit | Full codebase | Audit report, backlog tasks for findings |
-| `/agn:code-comment` | Code commenting | Source files | Commented source files |
-| `/agn:code-commit` | Version control | Staged changes | Git commit |
-| `/agn:docs-sync` | Doc maintenance on closure | Closed work unit + linked spec | Proposed diffs to `docs/architecture.md`, `docs/spec.md`, `docs/requirements.md` |
+| `/tm:code-review` | Codebase audit | Full codebase | Audit report, backlog tasks for findings |
+| `/tm:code-comment` | Code commenting | Source files | Commented source files |
+| `/tm:code-commit` | Version control | Staged changes | Git commit |
+| `/tm:docs-sync` | Doc maintenance on closure | Closed work unit + linked spec | Proposed diffs to `docs/architecture.md`, `docs/spec.md`, `docs/requirements.md` |
 
 #### Skill behavior contract
 
@@ -209,57 +209,57 @@ Every lifecycle skill must:
 
 ### Sub-agents
 
-agn uses two sub-agents to enforce role separation and isolate rules from the main session.
+tm uses two sub-agents to enforce role separation and isolate rules from the main session.
 
 #### Planner
 
 - **Owns**: `rules/task-composition.md` (and `rules/writing-guideline.md` for doc-producing tiers).
-- **Invoked by**: `/agn:define <level>`, `/agn:design <level>`, `/agn:plan <level>`.
+- **Invoked by**: `/tm:define <level>`, `/tm:design <level>`, `/tm:plan <level>`.
 - **Behavior**: receives the user's context from the parent session, dialogs with the user via the parent for clarifications, drives Design + Plan phases. Persists outputs via `taskman.sh`.
 - **Why a sub-agent**: composition rules stay out of the parent session's context; the same agent can be reused across all four tiers (it is level-aware).
 
 #### QA
 
 - **Owns**: `rules/qa.md`.
-- **Invoked by**: `/agn:validate feature`, `/agn:validate epic`, `/agn:validate product`.
+- **Invoked by**: `/tm:validate feature`, `/tm:validate epic`, `/tm:validate product`.
 - **Behavior**: receives spec + implementation result only (not the implementer's reasoning or decisions). Reviews code against spec, runs tests, identifies coverage gaps, validates end-to-end flows. Produces a verdict + report.
 - **Why a sub-agent**: fresh context catches issues the implementer overlooks due to implicit context bias.
 
-`/agn:validate task` runs in the main session (lightweight; just runs the task's quality gates) because the cost of a sub-agent is not warranted for a single task's validation.
+`/tm:validate task` runs in the main session (lightweight; just runs the task's quality gates) because the cost of a sub-agent is not warranted for a single task's validation.
 
 ### Hooks
 
-- **PostClose** — fires on success of `taskman.sh move <path> done`, `taskman.sh feature close <slug>`, or `taskman.sh epic close <slug>`. Invokes `/agn:docs-sync` to review upstream `docs/` files for drift and propose diffs. User reviews diffs before commit. If no active Claude session at hook fire time, the hook queues a note that surfaces at next session start.
+- **PostClose** — fires on success of `taskman.sh move <path> done`, `taskman.sh feature close <slug>`, or `taskman.sh epic close <slug>`. Invokes `/tm:docs-sync` to review upstream `docs/` files for drift and propose diffs. User reviews diffs before commit. If no active Claude session at hook fire time, the hook queues a note that surfaces at next session start.
 
 ### Escalation protocol
 
-When `/agn:implement task` cross-checks the task body against upstream design and detects missing or ambiguous design decisions, the skill halts immediately and:
+When `/tm:implement task` cross-checks the task body against upstream design and detects missing or ambiguous design decisions, the skill halts immediately and:
 
 1. Writes a gap-log entry to a durable on-disk location (survives compaction; feeds the future feedback loop).
 2. The entry contains: gap description, suspected upstream level (task / feature / epic / architecture), implementation context at point of detection.
-3. Surfaces routing instructions to the user: `"Gap at <level>. Run /agn:design <level> to address before continuing."`
-4. The user manually runs the upstream skill. After it completes, the user re-invokes `/agn:implement task`; the skill re-reads the task body to pick up the revised design.
+3. Surfaces routing instructions to the user: `"Gap at <level>. Run /tm:design <level> to address before continuing."`
+4. The user manually runs the upstream skill. After it completes, the user re-invokes `/tm:implement task`; the skill re-reads the task body to pick up the revised design.
 
 This protocol prevents silent intermixing of Design and Implementation work. Frequent escalations are a signal of insufficient upstream design and feed into the long-term feedback loop (backlog task `feedback_loop_infrastructure`) to improve prompts and rules.
 
 ### Behavioral Guardrails
 
-Rules live in `plugins/agn/rules/`. To activate them in a user's project, the user `@`-imports them in their project's `CLAUDE.md`.
+Rules live in `plugins/tm/rules/`. To activate them in a user's project, the user `@`-imports them in their project's `CLAUDE.md`.
 
 | Guardrail | Content | Source | Loaded by |
 |-----------|---------|--------|-----------|
 | Core Principles | YAGNI, KISS, DRY, readability over performance, single-task focus, clarify ambiguity, step-by-step approval, root-cause troubleshooting | `rules/first-principles.md` | Always — every session |
 | Task Composition | Frontmatter shapes, body section requirements, completion-summary template | `rules/task-composition.md` | Planner sub-agent |
 | Task Persistence | Lifecycle (backlog → active → done), CLI surface, validation rules | `taskman.sh help` | Authoritative reference; consulted by skills that touch lifecycle |
-| QA | Validation mindset, role separation, integration / system test protocols | `rules/qa.md` | QA sub-agent + `/agn:validate task` |
-| Doc Maintenance | What to check on closure (drift in architecture / spec / requirements) | `rules/doc-maintenance.md` | `/agn:docs-sync` |
-| Writing Guideline | Crisp, no-fluff document style: short sentences, active voice, absolute dates, no weasel/peacock words | `rules/writing-guideline.md` | Document-producing skills (Planner sub-agent, `/agn:docs-sync`) |
+| QA | Validation mindset, role separation, integration / system test protocols | `rules/qa.md` | QA sub-agent + `/tm:validate task` |
+| Doc Maintenance | What to check on closure (drift in architecture / spec / requirements) | `rules/doc-maintenance.md` | `/tm:docs-sync` |
+| Writing Guideline | Crisp, no-fluff document style: short sentences, active voice, absolute dates, no weasel/peacock words | `rules/writing-guideline.md` | Document-producing skills (Planner sub-agent, `/tm:docs-sync`) |
 
 Skills themselves contain only workflow instructions — no inlined rules. They rely on the rules being present in their context (loaded by sub-agent system prompt, by skill `!cat`, or by the user's `CLAUDE.md`).
 
 ### User's Project Structure
 
-agn skills create the following layout in the user's project as they progress through SDLC stages:
+tm skills create the following layout in the user's project as they progress through SDLC stages:
 
 ```
 user-project/
@@ -277,7 +277,7 @@ user-project/
 │   └── done/
 ```
 
-`/agn:define product` creates the `docs/` directory and initial documents if they don't exist. `/agn:define <epic|feature|task>` create files under `tasks/`. The project structure is created incrementally as the user progresses through stages — no upfront scaffolding required.
+`/tm:define product` creates the `docs/` directory and initial documents if they don't exist. `/tm:define <epic|feature|task>` create files under `tasks/`. The project structure is created incrementally as the user progresses through stages — no upfront scaffolding required.
 
 ### Workflow State
 
@@ -305,7 +305,7 @@ When any document changes, the skill that made the change must check dependent d
 
 ### Precondition Enforcement
 
-Every skill validates its preconditions before starting work. Missing preconditions produce a clear message ("Cannot run `/agn:design product` — definition documents not found. Run `/agn:define product` first."). No skill silently proceeds with incomplete inputs.
+Every skill validates its preconditions before starting work. Missing preconditions produce a clear message ("Cannot run `/tm:design product` — definition documents not found. Run `/tm:define product` first."). No skill silently proceeds with incomplete inputs.
 
 ### User Approval Gates
 
@@ -313,11 +313,11 @@ Stage transitions require explicit user approval. The agent must not proceed to 
 
 ### Architecture Impact Gate
 
-Any change that touches the high-level architecture — whether discovered during bug fixing, maintenance, or implementation — triggers a mandatory discussion with the user before proceeding. The agent presents the architectural impact, proposes options, and waits for explicit approval. The escalation protocol routes architecture-level gaps to `/agn:design product`.
+Any change that touches the high-level architecture — whether discovered during bug fixing, maintenance, or implementation — triggers a mandatory discussion with the user before proceeding. The agent presents the architectural impact, proposes options, and waits for explicit approval. The escalation protocol routes architecture-level gaps to `/tm:design product`.
 
 ### Task DAG Execution
 
-When executing multiple tasks (`/agn:implement feature` or `/agn:implement epic`), the agent respects feature and epic boundaries. In v1, tasks run sequentially within a feature, and features run sequentially within an epic; parallel execution is deferred. Integration tests (`/agn:validate feature` or `/agn:validate epic`) run at boundaries. The user can interrupt execution at any boundary.
+When executing multiple tasks (`/tm:implement feature` or `/tm:implement epic`), the agent respects feature and epic boundaries. In v1, tasks run sequentially within a feature, and features run sequentially within an epic; parallel execution is deferred. Integration tests (`/tm:validate feature` or `/tm:validate epic`) run at boundaries. The user can interrupt execution at any boundary.
 
 ### Validation Rubrics
 
@@ -344,7 +344,7 @@ During implementation, the agent does not modify functionality outside the scope
 
 Cross-reference confirming that every workflow step maps to a plugin component.
 
-| Workflow Step | Skill (`/agn:*`) | Agent | Artifacts Produced |
+| Workflow Step | Skill (`/tm:*`) | Agent | Artifacts Produced |
 |--------------|------------------|-------|--------------------|
 | New product → Definition | `define product` | Planner | vision, spec, requirements |
 | New product → Architecture | `design product` | Planner | architecture |
