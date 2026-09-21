@@ -107,12 +107,12 @@ def test_render_page_contains_required_sections(tmp_path: Path) -> None:
     page = collect_page(tmp_path)
     html = render_page(page)
     assert 'id="tree"' in html
-    assert 'id="ready"' in html
-    assert 'id="blocked"' in html
-    assert 'id="recent"' in html
-    assert 'id="graph"' in html
-    assert "mermaid" in html
-    assert "Filter" in html  # search input placeholder
+    assert 'aria-label="Work views"' in html
+    assert 'id="filters"' in html
+    assert 'id="editor"' in html
+    assert 'id="preview"' in html
+    assert 'Consolidated history' in html
+    assert 'cdn.jsdelivr' not in html
 
 
 def test_render_page_escapes_html(tmp_path: Path) -> None:
@@ -126,7 +126,7 @@ def test_render_page_escapes_html(tmp_path: Path) -> None:
     page = collect_page(tmp_path)
     html = render_page(page)
     assert "<script>alert" not in html
-    assert "&lt;script&gt;" in html
+    assert "alert(1)" not in html  # Data arrives through JSON, never interpolated into script.
 
 
 # ---- server smoke ----
@@ -146,8 +146,8 @@ def test_server_smoke_serves_html(tmp_path: Path) -> None:
             assert r.status == 200
             body = r.read().decode("utf-8")
         assert 'id="tree"' in body
-        assert 'id="graph"' in body
-        assert "smoke_test_item" in body
+        assert 'aria-label="Work views"' in body
+        assert 'id="preview"' in body
     finally:
         server.shutdown()
         server.server_close()
@@ -202,3 +202,61 @@ def test_ui_stop_when_no_server_running(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("taskman.commands.ui._pid_file", lambda: tmp_path / "ui.pid")
     r = runner.invoke(app, ["ui", "--stop"], env=_env(tmp_path))
     assert r.exit_code == 0
+
+
+def test_checkbox_selection_follows_hierarchy_and_deselects_individually():
+    """Execute the shipped event handler with hidden descendants and two branches."""
+    import shutil
+    import subprocess
+
+    import pytest
+    import taskman.commands.ui as ui
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required to exercise the browser event handler")
+    source = Path(ui.__file__).with_name("workspace.html").read_text()
+    handler = source.split('$("#tree").onchange = (e) => {', 1)[1].split(
+        '\n      };', 1
+    )[0]
+    script = r'''
+const assert = require("node:assert/strict");
+const all = [
+  {id: "root", parent_id: null},
+  {id: "child", parent_id: "root"},
+  {id: "grandchild", parent_id: "child"},
+  {id: "sibling", parent_id: "root"},
+  {id: "other", parent_id: null},
+  {id: "other-child", parent_id: "other"},
+  {id: "archived", parent_id: "root", archived: true},
+];
+// Only root is visible: selection must use all, not rendered rows.
+const rows = [all[0]], collapsed = new Set(["root"]);
+const selected = new Set(["other-child"]);
+let renders = 0;
+function render() { renders++; }
+const change = (e) => { HANDLER };
+function click(id, checked) { change({target: {dataset: {select: id}, checked}}); }
+function expect(ids) { assert.deepEqual([...selected].sort(), ids.sort()); }
+click("root", true);
+expect(["root", "child", "grandchild", "sibling", "other-child"]);
+click("root", false);
+expect(["child", "grandchild", "sibling", "other-child"]);
+click("child", false);
+expect(["grandchild", "sibling", "other-child"]);
+click("root", true);
+click("child", false);
+expect(["root", "grandchild", "sibling", "other-child"]);
+click("grandchild", false);
+expect(["root", "sibling", "other-child"]);
+click("grandchild", true);
+expect(["root", "grandchild", "sibling", "other-child"]);
+// An already selected descendant must not stop recursive traversal.
+click("root", true);
+expect(["root", "child", "grandchild", "sibling", "other-child"]);
+assert.equal(renders, 8);
+change({target: {dataset: {}, checked: true}});
+assert.equal(renders, 8);
+'''.replace("HANDLER", handler)
+    result = subprocess.run([node, "-e", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

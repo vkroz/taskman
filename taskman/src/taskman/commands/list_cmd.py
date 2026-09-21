@@ -32,7 +32,9 @@ def list_items(
     recursive: bool = typer.Option(False, "--recursive", help="Include all descendants with --parent."),
 ) -> None:
     """List work items in the tree, optionally filtered, optionally as JSON."""
+    from taskman.model.collection import histories
     tasks_dir = get_tasks_dir()
+    archived = {id for h in histories(tasks_dir) for id in h["ids"]}
     parent_path = find_item_by_id(tasks_dir, parent) if parent else None
     if parent and parent_path is None:
         raise typer.BadParameter(f"parent not found: {parent}")
@@ -43,6 +45,8 @@ def list_items(
         try:
             wi = parse_name(path.name)
         except NameParseError:
+            continue
+        if wi.item_id in archived:
             continue
         if status is not None and wi.status != status:
             continue

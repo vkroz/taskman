@@ -84,3 +84,26 @@ uv run pytest
 ```
 
 Python code is under `taskman/src/taskman/`; plugin sources are under `plugins/tm/`. Add a platform adapter to the installer to support another coding tool without changing task storage. The shell script under `plugins/tm/scripts/` is retained for legacy data; current workflows use the Python CLI.
+
+### Workspace UI and history
+
+Run `taskman ui` for the local workspace. The left navigation selects current, backlog, done or consolidated history. Search combines with epic scope and metadata filters; matching descendants retain labeled parent context. Sort orders siblings. Expand or collapse branches, and select a title to open details; Close returns the space to the list.
+
+Create work with **New task**. Open task details offer title/description editing with a recorded reason. **Delete draft** is limited to draft leaves with no incoming dependencies; finalized and completed work cannot be deleted through this command.
+
+Select completed rows and choose **Consolidate completed work** to create a Markdown documentation summary. Selecting a parent includes its descendants. Originals remain immutable and retrievable in Consolidated history, while individual rows leave ordinary lists. The summary contains bounded excerpts and links to full requirements and evidence.
+
+The same operations are available from the CLI:
+
+```sh
+taskman browse --where status=active,backlog --sort title
+taskman browse --where status=done --epic EPIC_ID --keyword migration
+taskman browse --contains journal=verification --exists depends_on
+taskman edit TASK_ID --title "Updated title" --body-file requirements.md --reason "Clarify table coverage"
+taskman discard DRAFT_ID
+taskman consolidate DONE_ID --title "Delivered database changes"
+taskman history
+taskman browse --include-archived
+```
+
+`browse` emits hierarchy-preserving JSON; contextual ancestors have `context: true` and do not match the query themselves. Use `show` or `context` with any retained ID for complete history. See [workspace design](docs/ui-design.md) for filtering and retention semantics.

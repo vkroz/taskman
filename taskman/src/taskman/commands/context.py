@@ -119,9 +119,13 @@ def depend(
 
 def discard(item_id: str = typer.Argument(...)) -> None:
     """Remove a draft leaf with no incoming dependencies."""
-    tasks_dir = get_tasks_dir()
+    discard_item(get_tasks_dir(), item_id)
+    typer.echo(f"Discarded: {item_id}")
+
+
+def discard_item(tasks_dir: Path, item_id: str):
     path, _, data, _ = load_item(tasks_dir, item_id)
-    if not data.get("draft") or path.is_dir():
+    if data.get("status") == "done" or not data.get("draft") or path.is_dir():
         raise typer.BadParameter("only draft leaves can be discarded; handle children first")
     for candidate in iter_work_items(tasks_dir):
         _, _, meta, _ = load_item(tasks_dir, parse_name(candidate.name).item_id)
@@ -129,7 +133,6 @@ def discard(item_id: str = typer.Argument(...)) -> None:
             raise typer.BadParameter("another item depends on this draft")
     invalidate_ancestors(tasks_dir, path)
     path.unlink()
-    typer.echo(f"Discarded: {item_id}")
 
 
 def context(item_id: str = typer.Argument(...)) -> None:

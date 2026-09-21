@@ -4,7 +4,7 @@
 
 Taskman is a general-purpose tool and the shared source of truth for development work performed by Codex, Claude Code, or another agent. Store requirements, plans, decisions, progress, and verification evidence in Taskman so another agent can continue from that context. Reservoir is a real-world testing ground; keep project-specific assumptions out of Taskman's core.
 
-Agents execute the lifecycle through local acceptance. The UI creates work items and displays their hierarchy, dependencies, progress, and verification. Deployment is outside this workflow.
+Agents execute the lifecycle through local acceptance. The UI creates and edits open work, discards eligible drafts, consolidates completed history, and displays hierarchy, dependencies, progress, and verification. Deployment is outside this workflow.
 
 The CLI supports every operation available in the UI and installs the shared plugin through platform adapters. Open tasks may be refined to reach their agreed outcome. Closed tasks, including requirements and evidence, are immutable; subsequent changes require a new linked task. Journal significant decisions, reasons, and scope refinements during work; summarize them before closing.
 

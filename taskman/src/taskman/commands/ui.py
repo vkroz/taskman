@@ -51,11 +51,15 @@ class _Page:
 
 
 def _load_items(tasks_dir: Path) -> list[_Item]:
+    from taskman.model.collection import histories
+    archived = {id for h in histories(tasks_dir) for id in h["ids"]}
     items: list[_Item] = []
     for path in iter_work_items(tasks_dir):
         try:
             wi = parse_name(path.name)
         except NameParseError:
+            continue
+        if wi.item_id in archived:
             continue
         body_file = (
             path / special_file_name(wi.item_id) if path.is_dir() else path
@@ -292,33 +296,7 @@ def render_sections(page: _Page) -> str:
 
 
 def render_page(page: _Page) -> str:
-    sections = render_sections(page)
-    return f"""<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>Taskman</title>
-<style>{_CSS}</style>
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-<script>if (window.mermaid) mermaid.initialize({{ startOnLoad: false }});</script>
-</head>
-<body>
-<header><h1>Taskman</h1>
-<form id="create">
-<label>Title <input name="title" required maxlength="200"></label>
-<label>Type <select name="type"><option value="task">Task</option><option value="feat">Story / feature</option><option value="epic">Epic</option></select></label>
-<label>Parent <select name="parent" id="parent"><option value="">No parent</option></select></label>
-<label>Description and acceptance criteria <textarea name="body" rows="3"></textarea></label>
-<button type="submit">Create task</button><span id="create-result" role="status"></span>
-</form>
-<input id="search" placeholder="Filter…"><span id="connection" role="status"></span></header>
-<main>
-{sections}
-</main>
-<aside id="preview">Click an item to preview.</aside>
-<script>{_JS}</script>
-</body>
-</html>"""
+    return Path(__file__).with_name("workspace.html").read_text(encoding="utf-8")
 
 
 # ---- server ----
@@ -351,7 +329,7 @@ def _make_handler(tasks_dir: Path):
             if not self._local_request() or self.headers.get('X-Taskman') != '1':
                 self._json(403, {'error': 'Only local Taskman UI requests are accepted.'})
                 return
-            if self.path != '/api/items':
+            if self.path not in ('/api/items', '/api/query', '/api/edit', '/api/discard', '/api/consolidate'):
                 self._json(404, {'error': 'Unknown endpoint'})
                 return
             try:
@@ -363,6 +341,31 @@ def _make_handler(tasks_dir: Path):
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError('Expected an object')
+                if self.path != '/api/items':
+                    from taskman.model.collection import collection, query, histories, consolidate
+                    from taskman.commands.collection import edit_item
+                    from taskman.commands.context import load_item
+                    from taskman.model.revisions import invalidate_ancestors
+                    with mutation_lock(tasks_dir):
+                        if self.path == '/api/query':
+                            rows = collection(tasks_dir)
+                            all_rows = collection(tasks_dir, True)
+                            fields = sorted({k for r in all_rows for k in r['metadata']} | {'parent_id'})
+                            result = {'rows': query(rows, data.get('filters', []), data.get('keyword', ''), data.get('epic', ''), data.get('sort', 'priority'), data.get('descending', False)), 'all': all_rows, 'fields': fields, 'history': histories(tasks_dir)}
+                        elif self.path == '/api/edit':
+                            edit_item(tasks_dir, str(data.get('id', '')), data.get('title'), data.get('body'), data.get('reason'))
+                            result = {'ok': True}
+                        elif self.path == '/api/discard':
+                            from taskman.commands.context import discard_item
+                            discard_item(tasks_dir, str(data.get('id', '')))
+                            result = {'ok': True}
+                        else:
+                            ids = data.get('ids', [])
+                            if not isinstance(ids, list) or not all(isinstance(id, str) for id in ids):
+                                raise ValueError('Select valid task IDs')
+                            result = consolidate(tasks_dir, ids, data.get('title', ''))
+                    self._json(200, result)
+                    return
                 title, kind = data.get('title', ''), data.get('type', 'task')
                 body, parent = data.get('body', ''), data.get('parent') or None
                 if not isinstance(title, str) or not title.strip() or len(title) > 200:
@@ -374,7 +377,7 @@ def _make_handler(tasks_dir: Path):
                 with mutation_lock(tasks_dir):
                     path = _make_item(tasks_dir, title.strip(), kind, parent, body or None)
                 self._json(201, {'id': parse_name(path.name).item_id, 'path': str(path)})
-            except (ValueError, NewCommandError) as exc:
+            except (ValueError, NewCommandError, typer.BadParameter, OSError, TypeError, KeyError) as exc:
                 self._json(400, {'error': str(exc)})
 
         def do_GET(self) -> None:  # noqa: N802
@@ -388,6 +391,19 @@ def _make_handler(tasks_dir: Path):
         def _get(self):
             if self.path == "/":
                 self._send_html(render_page(collect_page(tasks_dir)))
+            elif self.path.startswith('/api/history/'):
+                from taskman.model.collection import histories
+                key = self.path.rsplit('/', 1)[-1]
+                record = next((h for h in histories(tasks_dir) if h['key'] == key), None)
+                if record is None:
+                    self.send_error(404)
+                    return
+                body = record['summary'].encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/markdown; charset=utf-8')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
             elif self.path == '/api/page':
                 page = collect_page(tasks_dir)
                 self._json(200, {'sections': render_sections(page), 'parents': [
