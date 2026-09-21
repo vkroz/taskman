@@ -7,6 +7,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from taskman.cli import app
+from tests.workflow_helpers import prepare
 from taskman.model.names import parse_name
 
 runner = CliRunner()
@@ -21,7 +22,9 @@ def _new(tmp_path: Path, title: str, item_type: str = "task") -> str:
         app, ["new", "--title", title, "--type", item_type], env=_env(tmp_path)
     )
     assert r.exit_code == 0, r.output
-    return parse_name(Path(r.output.strip()).name).item_id
+    item_id = parse_name(Path(r.output.strip()).name).item_id
+    prepare(tmp_path, item_id)
+    return item_id
 
 
 def test_list_empty(tmp_path: Path) -> None:

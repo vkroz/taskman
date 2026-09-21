@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import os
 import re
+import json
+import sys
 from pathlib import Path
 
 import typer
@@ -27,6 +29,7 @@ from taskman.model.names import (
     special_file_name,
 )
 from taskman.model.yaml_io import read_file, write_file
+from taskman.model.revisions import invalidate_ancestors
 
 _SLUGIFY_NON_CHARSET = re.compile(r"[^a-z0-9_]+")
 _SLUGIFY_COLLAPSE = re.compile(r"_+")
@@ -62,7 +65,12 @@ def get_tasks_dir() -> Path:
     """
     env = os.environ.get("TASKMAN_TASKS_DIR")
     if env:
-        return Path(env)
+        return Path(env).expanduser().resolve()
+    for directory in (Path.cwd(), *Path.cwd().parents):
+        if (directory / "tasks").is_dir():
+            return directory / "tasks"
+        if (directory / ".git").exists():
+            return directory / "tasks"
     return Path.cwd() / "tasks"
 
 
@@ -109,6 +117,7 @@ def _make_item(
     title: str,
     item_type: WorkItemType,
     parent_id: str | None,
+    body: str | None = None,
 ) -> Path:
     """Core creation logic. Returns the path of the newly created leaf file."""
     item_id = allocate_id(tasks_dir)
@@ -123,6 +132,8 @@ def _make_item(
         if parent_path is None:
             raise NewCommandError(f"parent not found: {parent_id}")
         parent_wi = parse_name(parent_path.name)
+        if parent_wi.status == "done":
+            raise NewCommandError("closed parents are immutable; create a follow-up task")
         if parent_wi.item_type == "task":
             raise NewCommandError(
                 f"cannot add child to a task ({parent_id}): task = leaf invariant. "
@@ -155,8 +166,10 @@ def _make_item(
         "title": title,
         "draft": True,
     }
-    body = f"# {title}\n"
+    if body is None:
+        body = f"# {title}\n"
     write_file(path, data, body)
+    invalidate_ancestors(tasks_dir, path)
     return path
 
 
@@ -168,6 +181,8 @@ def new(
         "--parent",
         help="Parent item ID (9 digits). Omit for a top-level item.",
     ),
+    body_file: str | None = typer.Option(None, "--body-file", help="Markdown body file; - reads stdin."),
+    as_json: bool = typer.Option(False, "--json", help="Emit ID and path as JSON."),
 ) -> None:
     """Create a new work item (draft)."""
     if item_type not in ("epic", "feat", "task"):
@@ -182,11 +197,12 @@ def new(
             title=title,
             item_type=item_type,  # type: ignore[arg-type]
             parent_id=parent,
+            body=(sys.stdin.read() if body_file == "-" else Path(body_file).read_text(encoding="utf-8")) if body_file else None,
         )
-    except NewCommandError as exc:
+    except (NewCommandError, OSError) as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(1) from exc
-    typer.echo(str(path))
+    typer.echo(json.dumps({"id": parse_name(path.name).item_id, "path": str(path)}) if as_json else str(path))
 
 
 def finalize(
@@ -205,6 +221,9 @@ def finalize(
         typer.echo(f"Error: body file missing: {body_file}", err=True)
         raise typer.Exit(1)
     data, body = read_file(body_file)
+    if data.get("status") == "done":
+        typer.echo(f"No change: {item_id} is closed and immutable.")
+        return
     if not data.get("draft"):
         typer.echo(f"Item {item_id} is not a draft — nothing to do.")
         return

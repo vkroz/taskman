@@ -19,6 +19,7 @@ from taskman.model.names import (
     special_file_name,
 )
 from taskman.model.yaml_io import read_file, write_file
+from taskman.model.revisions import invalidate_ancestors
 
 _TYPES: tuple[WorkItemType, ...] = ("epic", "feat", "task")
 
@@ -41,6 +42,8 @@ def convert(
         typer.echo(f"Error: item not found: {item_id}", err=True)
         raise typer.Exit(1)
     wi = parse_name(path.name)
+    if wi.status == "done":
+        raise typer.BadParameter("closed items are immutable; create a linked follow-up task")
     if wi.item_type == target_type:
         typer.echo(f"No change: {item_id} already typed {target_type}.")
         return
@@ -86,6 +89,8 @@ def convert(
     )
     data, body = read_file(body_file)
     data["type"] = target_type
+    data["revision"] = int(data.get("revision", 0)) + 1
     write_file(body_file, data, body)
+    invalidate_ancestors(tasks_dir, new_path)
 
     typer.echo(str(new_path))

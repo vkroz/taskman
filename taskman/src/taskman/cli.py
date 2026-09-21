@@ -3,8 +3,6 @@
 The CLI is wired to a typer app. Subcommands are registered by the
 implementations under ``taskman.commands``. This module exposes ``main`` as
 the console_scripts entry point declared in pyproject.toml.
-
-Scaffolding only — real subcommands land in subsequent tasks.
 """
 from __future__ import annotations
 
@@ -27,6 +25,9 @@ from taskman.commands.show import show as _show
 from taskman.commands.ui import ui as _ui
 from taskman.commands.validate import validate as _validate
 from taskman.commands.worktree_status import worktree_status as _worktree_status
+from taskman.commands.context import context, update, record, depend, discard
+from taskman.model.locking import mutating
+from taskman.commands.install import install
 
 app = typer.Typer(
     name="taskman",
@@ -44,13 +45,19 @@ def _root() -> None:
 
 
 # Register subcommands from the commands package.
-app.command("new")(_new)
-app.command("finalize")(_finalize)
+app.command("new")(mutating(_new))
+app.command("finalize")(mutating(_finalize))
 app.command("list")(_list)
 app.command("show")(_show)
 app.command("dependents")(_dependents)
-app.command("move")(_move)
-app.command("close")(_close)
+app.command("move")(mutating(_move))
+app.command("close")(mutating(_close))
+app.command("context")(context)
+app.command("update")(mutating(update))
+app.command("record")(mutating(record))
+app.command("depend")(mutating(depend))
+app.command("discard")(mutating(discard))
+app.command("install")(install)
 app.command("validate")(_validate)
 app.command("ready")(_ready)
 app.command("waiting-on")(_waiting_on)
@@ -59,7 +66,7 @@ app.command("worktree-status")(_worktree_status)
 app.command("ui")(_ui)
 app.command("help")(_help)
 # --- auxiliary or temporary commands ---
-app.command("convert")(_convert)
+app.command("convert")(mutating(_convert))
 app.command("migrate")(_migrate)
 
 @app.command()

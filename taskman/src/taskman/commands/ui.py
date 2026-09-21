@@ -1,23 +1,4 @@
-"""`ui` command — local read-only web UI for browse / search / dependency graph.
-
-Library choice: **stdlib** ``http.server.ThreadingHTTPServer`` + inline
-HTML/JS. Justification: zero new runtime dependencies; the UI is read-only,
-single-user, single-page, and serves a small amount of data — FastAPI's
-features (validation, async, OpenAPI) buy nothing here while adding three
-non-trivial deps (fastapi, uvicorn, jinja2). Mermaid is loaded from a CDN
-client-side.
-
-Page renders five sections:
-  1. Nested tree (hierarchical view of all items)
-  2. Ready (items whose deps are all done, or have no deps)
-  3. Blocked (items with open deps)
-  4. Recently done (last 7 days by file mtime)
-  5. Mermaid dependency graph
-
-Two endpoints:
-  GET /                — the page
-  GET /api/show/<id>   — JSON ``{frontmatter, body}`` for the side panel
-"""
+"""Local task creation and live visibility into the shared work-item tree."""
 from __future__ import annotations
 
 import html
@@ -27,6 +8,10 @@ import signal
 import tempfile
 import time
 import webbrowser
+from taskman.model.locking import mutation_lock
+from taskman.commands.new import _make_item, NewCommandError
+from taskman.commands.show import _to_plain
+from taskman.commands.queries import _load_graph, is_ready
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -53,6 +38,7 @@ class _Item:
     path: str
     depends_on: tuple[str, ...]
     mtime: float
+    draft: bool = False
 
 
 @dataclass(slots=True)
@@ -93,6 +79,7 @@ def _load_items(tasks_dir: Path) -> list[_Item]:
                 path=str(path),
                 depends_on=deps,
                 mtime=body_file.stat().st_mtime,
+                draft=bool(data.get("draft")),
             )
         )
     return items
@@ -100,17 +87,14 @@ def _load_items(tasks_dir: Path) -> list[_Item]:
 
 def collect_page(tasks_dir: Path) -> _Page:
     items = _load_items(tasks_dir)
-    by_id = {i.item_id: i for i in items}
+    graph = _load_graph(tasks_dir)
     page = _Page(items=sorted(items, key=lambda i: (i.priority, i.item_id)))
 
     # Ready / blocked: applies only to non-done items.
     for i in items:
-        if i.status == "done":
+        if i.status == "done" or i.draft:
             continue
-        deps_done = all(
-            by_id.get(d) is not None and by_id[d].status == "done"
-            for d in i.depends_on
-        )
+        deps_done = i.item_id in graph and is_ready(graph[i.item_id], graph)
         if deps_done:
             page.ready.append(i)
         else:
@@ -148,51 +132,116 @@ def _build_mermaid(items: list[_Item]) -> str:
 
 
 _CSS = """
+* { box-sizing: border-box; }
 body { font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 1rem;
-       display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; }
+       display: grid; grid-template-columns: minmax(0, 2fr) minmax(18rem, 1fr); gap: 1rem; }
 header { grid-column: 1 / -1; padding-bottom: 0.5rem; border-bottom: 1px solid #ccc; }
 input#search { width: 100%; padding: 0.4rem; font-size: 1rem; }
-main { overflow-y: auto; max-height: 90vh; }
-aside { background: #f4f4f4; padding: 1rem; border-radius: 4px; overflow-y: auto;
+main { min-width: 0; overflow-y: auto; max-height: 90vh; }
+aside { min-width: 0; overflow-wrap: anywhere; background: #f4f4f4; padding: 1rem; border-radius: 4px; overflow-y: auto;
         max-height: 90vh; font-family: monospace; white-space: pre-wrap; font-size: 0.9rem; }
 section { margin-bottom: 1.5rem; }
 section h2 { margin: 0.5em 0 0.3em 0; font-size: 1.1rem; color: #333; }
-.item { display: flex; gap: 0.5rem; padding: 0.2rem 0.4rem; cursor: pointer;
+.item { display: grid; grid-template-columns: 3em 9ch 8em minmax(0, 1fr); gap: 0.5rem; padding: 0.2rem 0.4rem; cursor: pointer;
         border-radius: 3px; font-family: monospace; font-size: 0.9rem; }
 .item:hover { background: #eef; }
 .item .type { color: #888; min-width: 3em; }
 .item .id { color: #666; }
-.item .slug { color: #060; min-width: 14em; }
+.item .title { overflow-wrap: anywhere; }
 .item .status { color: #c40; min-width: 5em; }
 .empty { color: #888; font-style: italic; padding-left: 0.5rem; }
+ul { list-style: none; padding-left: 1.3rem; }
+form { display: flex; flex-wrap: wrap; gap: .75rem; margin-bottom: 1rem; }
+label { display: flex; flex-direction: column; gap: .25rem; }
+textarea { width: 24rem; max-width: 85vw; }
+@media (max-width: 800px) { body { display: block; } .item { grid-template-columns: 3em 9ch minmax(0, 1fr); } .item .title { grid-column: 1 / -1; } }
 pre.mermaid { background: white; padding: 0.5rem; border: 1px solid #eee; }
 """
 
 _JS = """
-function setupSearch() {
-  const box = document.getElementById('search');
-  box.addEventListener('input', () => {
-    const q = box.value.toLowerCase();
-    document.querySelectorAll('.item').forEach(el => {
-      const text = el.dataset.search || el.textContent.toLowerCase();
-      el.style.display = text.includes(q) ? '' : 'none';
-    });
+let selected = null;
+function filterItems() {
+  const q = document.getElementById('search').value.toLowerCase();
+  document.querySelectorAll('.item').forEach(el => {
+    el.style.display = el.dataset.search.includes(q) ? '' : 'none';
   });
 }
-async function setupPreview() {
-  document.querySelectorAll('.item').forEach(el => {
-    el.addEventListener('click', async () => {
-      const id = el.dataset.id;
-      const r = await fetch(`/api/show/${id}`);
-      const data = await r.json();
-      const aside = document.getElementById('preview');
-      aside.textContent = JSON.stringify(data.frontmatter, null, 2) + '\\n\\n' + data.body;
-    });
-  });
+async function preview(id) {
+  selected = id;
+  const r = await fetch(`/api/show/${id}`);
+  if (r.status === 404) {
+    selected = null;
+    document.getElementById('preview').textContent = 'This draft was removed. Select another item.';
+    return;
+  }
+  if (!r.ok) throw new Error('Could not load task.');
+  const data = await r.json();
+  const meta = data.frontmatter;
+  const entries = (meta.journal || []).map(e =>
+    `${e.kind} — ${e.actor}${e.result ? ' — ' + e.result : ''}\\n${e.text}`).join('\\n\\n');
+  document.getElementById('preview').textContent =
+    `${meta.title} (${meta.status}${meta.draft ? ', draft' : ''})\\n` +
+    `Dependencies: ${(meta.depends_on || []).join(', ') || 'none'}\\n\\n` +
+    data.body + (entries ? '\\n\\nActivity and verification\\n\\n' + entries : '');
+}
+async function refresh() {
+  try {
+    const r = await fetch('/api/page');
+    if (!r.ok) throw new Error('Could not refresh tasks.');
+    const data = await r.json();
+    document.querySelector('main').innerHTML = data.sections;
+    const select = document.getElementById('parent');
+    const old = select.value;
+    select.replaceChildren(new Option('No parent', ''));
+    data.parents.forEach(p => select.add(new Option(p.title + ' (' + p.id + ')', p.id)));
+    select.value = old;
+    filterItems();
+    if (selected) await preview(selected);
+    document.getElementById('connection').textContent = 'Up to date';
+    if (window.mermaid) {
+      await mermaid.run({querySelector: '.mermaid'}).catch(() => {
+        document.querySelector('#graph pre').textContent = 'Diagram unavailable. Dependencies are listed in each task.';
+      });
+    } else {
+      document.querySelector('#graph pre').textContent = 'Diagram unavailable offline. Dependencies are listed in each task.';
+    }
+  } catch (e) {
+    document.getElementById('connection').textContent = e.message;
+  }
 }
 document.addEventListener('DOMContentLoaded', () => {
-  setupSearch();
-  setupPreview();
+  document.getElementById('search').addEventListener('input', filterItems);
+  document.querySelector('main').addEventListener('click', e => {
+    const item = e.target.closest('.item');
+    if (item) preview(item.dataset.id).catch(e => {
+      document.getElementById('preview').textContent = e.message;
+    });
+  });
+  document.getElementById('create').addEventListener('submit', async e => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const button = form.querySelector('button');
+    button.disabled = true;
+    try {
+      const fields = Object.fromEntries(new FormData(form));
+      const r = await fetch('/api/items', {method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-Taskman': '1'},
+        body: JSON.stringify(fields)});
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Could not create task.');
+      form.reset();
+      document.getElementById('create-result').textContent = 'Created draft. Continue with your coding agent.';
+      selected = data.id;
+      await refresh();
+    } catch (e) {
+      document.getElementById('create-result').textContent = e.message;
+    } finally { button.disabled = false; }
+  });
+  async function poll() {
+    await refresh();
+    setTimeout(poll, 3000);
+  }
+  poll();
 });
 """
 
@@ -205,8 +254,7 @@ def _render_item(i: _Item) -> str:
         f'<div class="item" data-id="{html.escape(i.item_id)}" data-search="{search_blob}">'
         f'<span class="type">{html.escape(i.item_type)}</span>'
         f'<span class="id">{html.escape(i.item_id)}</span>'
-        f'<span class="status">{html.escape(i.status)}</span>'
-        f'<span class="slug">{html.escape(i.slug)}</span>'
+        f'<span class="status">{html.escape(i.status)}{" (draft)" if i.draft else ""}</span>'
         f'<span class="title">{html.escape(i.title)}</span>'
         f"</div>"
     )
@@ -220,16 +268,31 @@ def _render_section(title: str, items: list[_Item], section_id: str) -> str:
     return f'<section id="{section_id}"><h2>{html.escape(title)}</h2>{body}</section>'
 
 
+def _render_tree(items: list[_Item]) -> str:
+    by_path = {i.path: i for i in items}
+    children: dict[str | None, list[_Item]] = {}
+    for item in items:
+        parent = str(Path(item.path).parent)
+        children.setdefault(parent if parent in by_path else None, []).append(item)
+
+    def branch(parent):
+        return '<ul>' + ''.join('<li>' + _render_item(i) + branch(i.path) + '</li>'
+                               for i in children.get(parent, [])) + '</ul>'
+    return '<section id="tree"><h2>Nested tree</h2>' + branch(None) + '</section>'
+
+
+def render_sections(page: _Page) -> str:
+    return "\n".join([
+        _render_tree(page.items),
+        _render_section("Ready", page.ready, "ready"),
+        _render_section("Blocked", page.blocked, "blocked"),
+        _render_section("Recently done (7 days)", page.recent, "recent"),
+        f'<section id="graph"><h2>Dependency graph</h2><pre class="mermaid">{html.escape(page.graph_mermaid)}</pre></section>',
+    ])
+
+
 def render_page(page: _Page) -> str:
-    sections = "\n".join(
-        [
-            _render_section("Nested tree", page.items, "tree"),
-            _render_section("Ready", page.ready, "ready"),
-            _render_section("Blocked", page.blocked, "blocked"),
-            _render_section("Recently done (7 days)", page.recent, "recent"),
-            f'<section id="graph"><h2>Dependency graph</h2><pre class="mermaid">{html.escape(page.graph_mermaid)}</pre></section>',
-        ]
-    )
+    sections = render_sections(page)
     return f"""<!doctype html>
 <html>
 <head>
@@ -237,10 +300,18 @@ def render_page(page: _Page) -> str:
 <title>Taskman</title>
 <style>{_CSS}</style>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-<script>mermaid.initialize({{ startOnLoad: true }});</script>
+<script>if (window.mermaid) mermaid.initialize({{ startOnLoad: false }});</script>
 </head>
 <body>
-<header><input id="search" placeholder="Filter…"></header>
+<header><h1>Taskman</h1>
+<form id="create">
+<label>Title <input name="title" required maxlength="200"></label>
+<label>Type <select name="type"><option value="task">Task</option><option value="feat">Story / feature</option><option value="epic">Epic</option></select></label>
+<label>Parent <select name="parent" id="parent"><option value="">No parent</option></select></label>
+<label>Description and acceptance criteria <textarea name="body" rows="3"></textarea></label>
+<button type="submit">Create task</button><span id="create-result" role="status"></span>
+</form>
+<input id="search" placeholder="Filter…"><span id="connection" role="status"></span></header>
 <main>
 {sections}
 </main>
@@ -263,9 +334,65 @@ def _make_handler(tasks_dir: Path):
             # Silence default access log; uncomment for debugging.
             return
 
+        def _local_request(self):
+            authority = self.headers.get('Host', '')
+            return authority in {f'localhost:{self.server.server_port}', f'127.0.0.1:{self.server.server_port}'}
+
+        def _json(self, status, data):
+            body = json.dumps(data, default=str).encode('utf-8')
+            self.send_response(status)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            if not self._local_request() or self.headers.get('X-Taskman') != '1':
+                self._json(403, {'error': 'Only local Taskman UI requests are accepted.'})
+                return
+            if self.path != '/api/items':
+                self._json(404, {'error': 'Unknown endpoint'})
+                return
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                if length <= 0 or length > 131072:
+                    raise ValueError('Invalid request size')
+                if self.headers.get('Content-Type') != 'application/json':
+                    raise ValueError('Expected JSON')
+                data = json.loads(self.rfile.read(length))
+                if not isinstance(data, dict):
+                    raise ValueError('Expected an object')
+                title, kind = data.get('title', ''), data.get('type', 'task')
+                body, parent = data.get('body', ''), data.get('parent') or None
+                if not isinstance(title, str) or not title.strip() or len(title) > 200:
+                    raise ValueError('Enter a title of 1–200 characters')
+                if kind not in ('task', 'feat', 'epic') or not isinstance(body, str):
+                    raise ValueError('Invalid task type or description')
+                if parent is not None and (not isinstance(parent, str) or not parent.isdigit() or len(parent) != 9):
+                    raise ValueError('Invalid parent ID')
+                with mutation_lock(tasks_dir):
+                    path = _make_item(tasks_dir, title.strip(), kind, parent, body or None)
+                self._json(201, {'id': parse_name(path.name).item_id, 'path': str(path)})
+            except (ValueError, NewCommandError) as exc:
+                self._json(400, {'error': str(exc)})
+
         def do_GET(self) -> None:  # noqa: N802
+            if not self._local_request():
+                self.send_error(403)
+                return
+            # Readers share the mutation lock so a rename cannot split a snapshot.
+            with mutation_lock(tasks_dir):
+                self._get()
+
+        def _get(self):
             if self.path == "/":
                 self._send_html(render_page(collect_page(tasks_dir)))
+            elif self.path == '/api/page':
+                page = collect_page(tasks_dir)
+                self._json(200, {'sections': render_sections(page), 'parents': [
+                    {'id': i.item_id, 'title': i.title} for i in page.items
+                    if i.item_type != 'task' and i.status != 'done']})
             elif self.path.startswith("/api/show/"):
                 item_id = self.path[len("/api/show/") :]
                 self._send_show(item_id)
@@ -297,7 +424,7 @@ def _make_handler(tasks_dir: Path):
                 return
             payload = json.dumps(
                 {
-                    "frontmatter": {k: str(v) for k, v in data.items()},
+                    "frontmatter": _to_plain(data),
                     "body": body,
                     "path": str(path),
                 }
@@ -336,8 +463,9 @@ def _stop_server() -> bool:
 def ui(
     port: int = typer.Option(8080, "--port", help="Port to bind on localhost."),
     stop: bool = typer.Option(False, "--stop", help="Stop a running UI server."),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Serve without opening a browser."),
 ) -> None:
-    """Start (or stop) a local web UI for browsing the work-item tree."""
+    """Create tasks and browse live agent progress in a local web UI."""
     if stop:
         if _stop_server():
             typer.echo("Stopped UI server.")
@@ -346,11 +474,9 @@ def ui(
         return
 
     tasks_dir = get_tasks_dir()
-    if not tasks_dir.exists():
-        typer.echo(f"Error: tasks dir does not exist: {tasks_dir}", err=True)
-        raise typer.Exit(1)
+    tasks_dir.mkdir(parents=True, exist_ok=True)
     typer.echo(f"Serving taskman UI at http://localhost:{port}/  (Ctrl+C to stop)")
-    server = _start_server("localhost", port, tasks_dir)
+    server = _start_server("127.0.0.1", port, tasks_dir, open_browser=not no_browser)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -1,3 +1,5 @@
+This historical exploration predates the current [Taskman scope](vision.md).
+
 # Taskman - Vision
 
 ## Taskman - Vision

@@ -65,8 +65,7 @@ If multiple interpretations remain after investigation, present them as options 
 ## Executing complex plans
 
 - State your plan before execution.
-- For multi-step plans with risky or multi-file changes, review each step's outcome with the user.
-- Get explicit approval before proceeding to the next step.
+- Continue within the user's authorized scope. Ask about material scope changes or unresolved decisions; do not repeat approvals already given.
 
 ## Troubleshooting
 

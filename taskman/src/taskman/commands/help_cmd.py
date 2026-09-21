@@ -52,8 +52,7 @@ NAME GRAMMAR
 
   The `<type>-<id>` form in the name renders the current type label for
   human scannability; on `convert`, the name is renamed but the underlying
-  ID does not change. References between items (e.g. `depends_on:` in
-  future features) use the bare ID.
+  ID does not change. References between items (`depends_on:`) use the bare ID.
 
 ================================================================================
 ID GENERATION
@@ -70,18 +69,30 @@ LIFECYCLE
 
   new       Create a draft work item (top-level or nested via --parent).
   finalize  Clear `draft: true` after the user reviews.
-  move      Reposition a top-level item between backlog/active/done.
+  move      Change status; top-level items move with their subtree.
   convert   Relabel an item's type. Cannot relabel a directory item to `task`.
-  close     Flip status to done. Rejects if any descendant is not yet done.
+  close     Freeze a completed item. Requires all descendants/dependencies done,
+            a current summary, and a current passing verification.
             Top-level items move their whole subtree to `done/`.
   list      Walk the tree and print items; --json for agent consumption.
   show      Print an item's frontmatter and body.
+  context   Read item, ancestors, descendants and dependencies as JSON.
+  update    Replace an open item's body using --body-file.
+  depend    Replace dependencies with repeated --on IDs, or --clear.
+  record    Append decision, progress, handoff, summary or verification.
+  discard   Remove an unreferenced draft leaf.
+  install   Install the shared plugin using repeated --platform targets.
   validate  Integrity check: name↔frontmatter drift, parent references,
             grammar, task=leaf invariant.
 
 ================================================================================
 INVARIANTS
 ================================================================================
+
+  - Closed items are immutable. Subsequent changes require a new linked item.
+    Open items may change; body, dependency, type, implementation-journal and
+    child changes invalidate prior completion evidence. Summarize decisions
+    and results before closing. Taskman records checks but does not run them.
 
   - task = leaf. A `task` item is always a file, never a directory. To add a
     child to a task, first `convert` it to `feat` or `epic`.
@@ -101,8 +112,9 @@ INVARIANTS
 ENVIRONMENT
 ================================================================================
 
-  TASKMAN_TASKS_DIR    Selects the active tasks tree. Defaults to $PWD/tasks
-                       if unset. Set per-worktree for cross-project use.
+  TASKMAN_TASKS_DIR    Selects the shared tasks tree. If unset, searches from
+                       the working directory up to the repository root for
+                       tasks/. Multiple agents must use the same tree.
 """
 
 

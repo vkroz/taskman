@@ -11,6 +11,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from taskman.cli import app
+from tests.workflow_helpers import prepare
 from taskman.commands.ui import (
     _build_mermaid,
     _Item,
@@ -34,7 +35,9 @@ def _new(tmp_path: Path, title: str, item_type: str = "task") -> str:
         app, ["new", "--title", title, "--type", item_type], env=_env(tmp_path)
     )
     assert r.exit_code == 0, r.output
-    return parse_name(Path(r.output.strip()).name).item_id
+    item_id = parse_name(Path(r.output.strip()).name).item_id
+    prepare(tmp_path, item_id)
+    return item_id
 
 
 def _set_depends(tmp_path: Path, item_id: str, deps: list[str]) -> None:
@@ -194,9 +197,8 @@ def test_server_api_show_missing_returns_404(tmp_path: Path) -> None:
 # ---- --stop ----
 
 
-def test_ui_stop_when_no_server_running(tmp_path: Path) -> None:
+def test_ui_stop_when_no_server_running(tmp_path: Path, monkeypatch) -> None:
     """--stop with no running server reports cleanly, exits 0."""
+    monkeypatch.setattr("taskman.commands.ui._pid_file", lambda: tmp_path / "ui.pid")
     r = runner.invoke(app, ["ui", "--stop"], env=_env(tmp_path))
-    # Note: this may report "Stopped" if some prior test left a stale pid file.
-    # Both outcomes are acceptable; just verify clean exit.
     assert r.exit_code == 0

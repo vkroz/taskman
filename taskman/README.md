@@ -1,47 +1,14 @@
 # Taskman CLI
 
-Uniform recursive work-item management. A CLI for tracking epic/feature/task hierarchies stored as nested directories with name-encoded status, ID, and priority.
+The `taskman` and `tm` commands share one Python implementation. See the [project README](../README.md) for installation, agent handoffs and the complete workflow.
 
-The Python CLI stores work items, tracks dependencies, and provides a local browser view. Integration with the development skills is still in progress.
+```sh
+uv sync --extra dev
+uv run pytest
+uv run taskman --help
+uv run taskman help
+```
 
-## Install
+Commands cover creation, nested planning, dependencies, execution status, shared context, attributed journals, verification and closure. All task mutations go through the CLI or the UI's shared backend. Closed tasks are immutable.
 
-**End user (no repo checkout)** — install straight from GitHub. `uv` fetches the package and, if needed, a suitable Python:
-
-    uv tool install "git+https://github.com/AgentureHQ/taskman.git#subdirectory=taskman"
-
-**Developer (from a clone)** — editable install against your working tree:
-
-    uv tool install -e ./taskman
-
-After install, `taskman --help` is on PATH and `taskman version` prints the version. If your shell can't find `taskman`, run `uv tool update-shell` and restart the shell so uv's tool directory is on `PATH`. (`uv` provisions Python 3.11+ automatically. `pipx install "git+https://github.com/AgentureHQ/taskman.git#subdirectory=taskman"` also works, but requires Python ≥3.11 already present.)
-
-`tm` is a short alias for the same CLI: `tm list`, `tm ready`, and `tm ui` work just like their `taskman` equivalents.
-
-## Shell completion
-
-Enable tab-completion for subcommands and options. Run once in each shell you use:
-
-    taskman --install-completion
-
-Then restart the shell. Auto-detects zsh, bash, fish, and PowerShell.
-
-## Develop
-
-    cd taskman
-    uv sync --extra dev
-    uv run pytest
-
-## Layout
-
-    taskman/
-      pyproject.toml
-      src/taskman/
-        cli.py              # typer entry point
-        model/              # name grammar, ID allocator, YAML I/O, layout
-        commands/           # subcommand implementations
-      tests/                # pytest suite
-
-## Status
-
-The CLI supports work-item creation, lifecycle transitions, dependency queries, search, validation, worktree status, and a local browser view. The legacy Claude Code skills still need migration to this CLI before the full development workflow works on a fresh install.
+`TASKMAN_TASKS_DIR` selects a shared task tree. Otherwise Taskman searches from the working directory toward the repository root. The local UI supports task creation and inspection; agents execute work through the CLI.

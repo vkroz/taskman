@@ -13,7 +13,7 @@ from pathlib import Path
 import typer
 
 from taskman.commands.new import get_tasks_dir
-from taskman.model.layout import iter_work_items
+from taskman.model.layout import iter_work_items, parent_item_path
 from taskman.model.names import NameParseError, parse_name, special_file_name
 from taskman.model.yaml_io import FrontmatterError, read_file
 
@@ -30,6 +30,8 @@ class _Item:
     title: str
     path: str
     depends_on: tuple[str, ...]
+    draft: bool = False
+    parent_id: str | None = None
 
 
 def _load_graph(tasks_dir: Path) -> dict[str, _Item]:
@@ -60,11 +62,13 @@ def _load_graph(tasks_dir: Path) -> dict[str, _Item]:
             title=str(data.get("title", "")),
             path=str(path),
             depends_on=deps,
+            draft=bool(data.get("draft")),
+            parent_id=parse_name(parent_item_path(path, tasks_dir).name).item_id if parent_item_path(path, tasks_dir) else None,
         )
     return items
 
 
-def _as_dict(item: _Item) -> dict[str, str | list[str]]:
+def _as_dict(item: _Item) -> dict[str, str | bool | None | list[str]]:
     return {
         "id": item.item_id,
         "type": item.item_type,
@@ -74,6 +78,8 @@ def _as_dict(item: _Item) -> dict[str, str | list[str]]:
         "title": item.title,
         "path": item.path,
         "depends_on": list(item.depends_on),
+        "draft": item.draft,
+        "parent_id": item.parent_id,
     }
 
 
@@ -91,6 +97,19 @@ def _emit(results: list[_Item], as_json: bool) -> None:
         )
 
 
+def is_ready(item: _Item, items: dict[str, _Item]) -> bool:
+    if item.status == "done":
+        return False
+    current = item
+    while current:
+        if current.draft or current.status == "done":
+            return False
+        if any(d not in items or items[d].status != "done" for d in current.depends_on):
+            return False
+        current = items.get(current.parent_id)
+    return True
+
+
 def ready(
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON."),
 ) -> None:
@@ -98,17 +117,7 @@ def ready(
     items = _load_graph(get_tasks_dir())
     out: list[_Item] = []
     for item in items.values():
-        if item.status == "done":
-            continue
-        # All deps must point to a done item. Unknown refs treated as
-        # blocking (the item is waiting on something that does not exist).
-        ready_to_start = True
-        for dep_id in item.depends_on:
-            dep = items.get(dep_id)
-            if dep is None or dep.status != "done":
-                ready_to_start = False
-                break
-        if ready_to_start:
+        if is_ready(item, items):
             out.append(item)
     out.sort(key=lambda i: (i.priority, i.item_id))
     _emit(out, as_json)
@@ -135,17 +144,19 @@ def waiting_on(
     item_id: str = typer.Argument(..., help="Item ID whose deps to inspect."),
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON."),
 ) -> None:
-    """List the non-done items that ``<id>`` lists in its depends_on."""
+    """List unfinished dependencies of this item and its ancestors."""
     items = _load_graph(get_tasks_dir())
     if item_id not in items:
         typer.echo(f"Warning: item not found: {item_id}", err=True)
         raise typer.Exit(1)
     target = items[item_id]
-    out = []
-    for dep_id in target.depends_on:
-        dep = items.get(dep_id)
-        if dep is None or dep.status == "done":
-            continue
-        out.append(dep)
+    dependencies = set()
+    while target:
+        dependencies.update(target.depends_on)
+        target = items.get(target.parent_id)
+    missing = dependencies - items.keys()
+    if missing:
+        raise typer.BadParameter("missing dependencies: " + ", ".join(sorted(missing)))
+    out = [items[dep] for dep in dependencies if items[dep].status != "done"]
     out.sort(key=lambda i: (i.priority, i.item_id))
     _emit(out, as_json)

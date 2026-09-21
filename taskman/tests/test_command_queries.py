@@ -7,6 +7,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from taskman.cli import app
+from tests.workflow_helpers import prepare
 from taskman.model.layout import find_item_by_id
 from taskman.model.names import parse_name, special_file_name
 from taskman.model.yaml_io import read_file, write_file
@@ -21,7 +22,9 @@ def _env(tasks_dir: Path) -> dict[str, str]:
 def _new(tmp_path: Path, title: str) -> str:
     r = runner.invoke(app, ["new", "--title", title], env=_env(tmp_path))
     assert r.exit_code == 0, r.output
-    return parse_name(Path(r.output.strip()).name).item_id
+    item_id = parse_name(Path(r.output.strip()).name).item_id
+    prepare(tmp_path, item_id)
+    return item_id
 
 
 def _set_depends(tmp_path: Path, item_id: str, deps: list[str]) -> None:
@@ -35,6 +38,7 @@ def _set_depends(tmp_path: Path, item_id: str, deps: list[str]) -> None:
 
 
 def _close(tmp_path: Path, item_id: str) -> None:
+    prepare(tmp_path, item_id)
     r = runner.invoke(app, ["close", item_id], env=_env(tmp_path))
     assert r.exit_code == 0, r.output
 
@@ -139,6 +143,7 @@ def test_dependents_excludes_done_items(tmp_path: Path) -> None:
     a = _new(tmp_path, "A")
     b = _new(tmp_path, "B")
     _set_depends(tmp_path, b, [a])
+    _close(tmp_path, a)
     _close(tmp_path, b)
     data = json.loads(runner.invoke(app, ["dependents", a, "--json"], env=_env(tmp_path)).output)
     assert data == []
@@ -180,10 +185,11 @@ def test_waiting_on_missing_target(tmp_path: Path) -> None:
     assert "not found" in r.output
 
 
-def test_waiting_on_ignores_unknown_dep_refs(tmp_path: Path) -> None:
-    """Target lists an unknown ID — query skips it (validate's domain)."""
+def test_waiting_on_reports_unknown_dep_refs(tmp_path: Path) -> None:
+    """Missing dependencies cannot be mistaken for an unblocked item."""
     a = _new(tmp_path, "A")
     _set_depends(tmp_path, a, ["999999999"])
     r = runner.invoke(app, ["waiting-on", a, "--json"], env=_env(tmp_path))
-    assert r.exit_code == 0
-    assert json.loads(r.output) == []
+    assert r.exit_code != 0
+    assert "missing dependencies" in r.output
+    assert "999999999" in r.output

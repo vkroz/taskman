@@ -1,9 +1,9 @@
 {
   "name": "tm",
-  "description": "Agentic SDLC for Claude Code — Claude facilitates writing specs and designing architecture, then autonomously builds implementation plans, implements and tests the product. Driven by structured /tm:* skills with built-in review gates and document consistency.",
-  "version": "0.1.0",
+  "description": "Taskman workflows for Codex and Claude Code: shared requirements, plans, decisions and verification through one CLI.",
+  "version": "0.2.0+codex.20260921024856",
   "author": {
     "name": "Vladimir Kroz"
   },
-  "repository": "https://github.com/AgentureHQ/taskman"
+  "repository": "https://github.com/vkroz/taskman"
 }

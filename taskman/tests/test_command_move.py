@@ -6,6 +6,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from taskman.cli import app
+from tests.workflow_helpers import prepare
 from taskman.model.names import parse_name
 from taskman.model.yaml_io import read_file
 
@@ -22,7 +23,9 @@ def _new_top_level(tmp_path: Path, title: str, item_type: str = "task") -> str:
         app, ["new", "--title", title, "--type", item_type], env=_env(tmp_path)
     )
     assert r.exit_code == 0, r.output
-    return parse_name(Path(r.output.strip()).name).item_id
+    item_id = parse_name(Path(r.output.strip()).name).item_id
+    prepare(tmp_path, item_id)
+    return item_id
 
 
 def test_move_backlog_to_active(tmp_path: Path) -> None:
@@ -70,7 +73,7 @@ def test_move_bad_target_status(tmp_path: Path) -> None:
     assert "must be one of" in r.output
 
 
-def test_move_rejects_nested_item(tmp_path: Path) -> None:
+def test_move_activates_nested_item(tmp_path: Path) -> None:
     epic_id = _new_top_level(tmp_path, "Epic", item_type="epic")
     # Create a child under the epic. Triggers file→dir auto-conversion.
     r = runner.invoke(
@@ -81,10 +84,12 @@ def test_move_rejects_nested_item(tmp_path: Path) -> None:
     assert r.exit_code == 0
     child_id = parse_name(Path(r.output.strip()).name).item_id
 
-    # Attempt to move the child directly should fail.
+    prepare(tmp_path, child_id)
+    # Nested items change status inside their parent.
     r2 = runner.invoke(app, ["move", child_id, "active"], env=_env(tmp_path))
-    assert r2.exit_code != 0
-    assert "nested" in r2.output or "top-level" in r2.output
+    assert r2.exit_code == 0, r2.output
+    assert parse_name(Path(r2.output.strip()).name).status == "active"
+    assert Path(r2.output.strip()).parent.name.endswith(".backlog.epic")
 
 
 def test_move_preserves_subtree(tmp_path: Path) -> None:

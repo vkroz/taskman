@@ -23,6 +23,7 @@ from taskman.model.names import (
     special_file_name,
 )
 from taskman.model.yaml_io import read_file, write_file
+from taskman.model.revisions import invalidate_ancestors
 
 
 def _open_descendants(path: Path) -> list[Path]:
@@ -66,6 +67,22 @@ def close(
             typer.echo(f"  {d.name}", err=True)
         raise typer.Exit(1)
 
+    body_file = path / special_file_name(item_id) if path.is_dir() else path
+    data, body = read_file(body_file)
+    if data.get("draft"):
+        raise typer.BadParameter("finalize the draft before closing it")
+    from taskman.commands.queries import _load_graph, is_ready
+    graph = _load_graph(tasks_dir)
+    if not is_ready(graph[item_id], graph):
+        raise typer.BadParameter("item or ancestor has an unfinished dependency or is a draft")
+    entries = data.get("journal") or []
+    revision = int(data.get("revision", 0))
+    checks = [e for e in entries if e.get("kind") == "verification"]
+    if not checks or checks[-1].get("result") != "pass" or checks[-1].get("revision") != revision:
+        raise typer.BadParameter("record a passing verification for the current revision before closing")
+    if not any(e.get("kind") == "summary" and e.get("revision") == revision for e in entries):
+        raise typer.BadParameter("record a summary for the current revision before closing")
+
     is_dir = path.is_dir()
     new_wi = WorkItemName(
         priority=wi.priority,
@@ -95,5 +112,6 @@ def close(
     data, body = read_file(body_file)
     data["status"] = "done"
     write_file(body_file, data, body)
+    invalidate_ancestors(tasks_dir, new_path)
 
     typer.echo(str(new_path))

@@ -6,6 +6,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from taskman.cli import app
+from tests.workflow_helpers import prepare
 from taskman.model.names import parse_name
 from taskman.model.yaml_io import read_file
 
@@ -22,7 +23,9 @@ def _new(tmp_path: Path, title: str, item_type: str = "task", parent: str | None
         args += ["--parent", parent]
     r = runner.invoke(app, args, env=_env(tmp_path))
     assert r.exit_code == 0, r.output
-    return parse_name(Path(r.output.strip()).name).item_id
+    item_id = parse_name(Path(r.output.strip()).name).item_id
+    prepare(tmp_path, item_id)
+    return item_id
 
 
 def test_close_leaf_task_moves_to_done(tmp_path: Path) -> None:
@@ -44,6 +47,7 @@ def test_close_epic_with_all_done_children(tmp_path: Path) -> None:
     # Close child first (nested item — stays in parent's directory).
     r1 = runner.invoke(app, ["close", child_id], env=_env(tmp_path))
     assert r1.exit_code == 0, r1.output
+    prepare(tmp_path, epic_id)
     # Now close epic — should succeed.
     r2 = runner.invoke(app, ["close", epic_id], env=_env(tmp_path))
     assert r2.exit_code == 0, r2.output

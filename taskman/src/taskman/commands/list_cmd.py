@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 
 from taskman.commands.new import get_tasks_dir
-from taskman.model.layout import iter_work_items
+from taskman.model.layout import iter_work_items, find_item_by_id, parent_item_path
 from taskman.model.names import NameParseError, parse_name, special_file_name
 from taskman.model.yaml_io import read_file
 
@@ -28,11 +28,18 @@ def list_items(
     status: str | None = typer.Option(None, "--status", help="Filter by status."),
     item_type: str | None = typer.Option(None, "--type", help="Filter by type."),
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON."),
+    parent: str | None = typer.Option(None, "--parent", help="List children of this ID."),
+    recursive: bool = typer.Option(False, "--recursive", help="Include all descendants with --parent."),
 ) -> None:
     """List work items in the tree, optionally filtered, optionally as JSON."""
     tasks_dir = get_tasks_dir()
+    parent_path = find_item_by_id(tasks_dir, parent) if parent else None
+    if parent and parent_path is None:
+        raise typer.BadParameter(f"parent not found: {parent}")
     rows: list[dict[str, str]] = []
     for path in iter_work_items(tasks_dir):
+        if parent_path and not (path != parent_path and (path.is_relative_to(parent_path) if recursive else path.parent == parent_path)):
+            continue
         try:
             wi = parse_name(path.name)
         except NameParseError:
@@ -50,6 +57,7 @@ def list_items(
                 "slug": wi.slug,
                 "title": _read_title(path, wi.item_id),
                 "path": str(path),
+                "parent_id": parse_name(parent_item_path(path, tasks_dir).name).item_id if parent_item_path(path, tasks_dir) else None,
             }
         )
     rows.sort(key=lambda r: (r["status"], r["priority"], r["id"]))
