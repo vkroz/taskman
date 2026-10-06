@@ -4,6 +4,7 @@ import pytest
 from typer.testing import CliRunner
 from taskman.cli import app
 from taskman.model.collection import collection, query, consolidate, histories
+from taskman.model.ordering import ordered_siblings, reorder_item
 from taskman.commands.collection import edit_item
 from taskman.model.layout import find_item_by_id
 from taskman.model.yaml_io import read_file, write_file
@@ -238,3 +239,98 @@ def test_cli_missing_field_keeps_present_null_distinct(tmp_path):
     )
     assert result.exit_code == 0, result.output
     assert [r["id"] for r in json.loads(result.output)] == [second]
+
+
+def test_reorder_moves_up_down_boundaries_and_persists_without_mutating_items(tmp_path):
+    tree = tmp_path / "tasks"
+    parent = new(tree, "Parent", "epic")
+    ids = [new(tree, title, parent=parent) for title in ("A", "B", "C", "D")]
+    before = {path: path.read_bytes() for path in tree.rglob("*.md")}
+
+    assert reorder_item(tree, ids[2], 1) == [ids[2], ids[0], ids[1], ids[3]]
+    assert reorder_item(tree, ids[2], 4) == [ids[0], ids[1], ids[3], ids[2]]
+    assert reorder_item(tree, ids[2], 1) == [ids[2], ids[0], ids[1], ids[3]]
+    assert [row["id"] for row in ordered_siblings(tree, ids[0])] == [
+        ids[2], ids[0], ids[1], ids[3]
+    ]
+    assert {path: path.read_bytes() for path in tree.rglob("*.md")} == before
+    rows = {row["id"]: row for row in collection(tree)}
+    assert rows[ids[2]]["parent_id"] == parent
+    assert rows[ids[2]]["metadata"]["status"] == "backlog"
+
+
+def test_reorder_cli_noop_and_invalid_requests_are_atomic(tmp_path):
+    tree = tmp_path / "tasks"
+    ids = [new(tree, title) for title in ("A", "B", "C")]
+    order_file = tree / ".taskman-order.json"
+    result = runner.invoke(
+        app, ["reorder", ids[1], "--position", "1"], env={"TASKMAN_TASKS_DIR": str(tree)}
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["order"] == [ids[1], ids[0], ids[2]]
+    persisted = order_file.read_bytes()
+
+    result = runner.invoke(
+        app, ["reorder", ids[1], "--position", "1"], env={"TASKMAN_TASKS_DIR": str(tree)}
+    )
+    assert result.exit_code == 0
+    assert order_file.read_bytes() == persisted
+    for args in (["reorder", "999999999", "--position", "1"], ["reorder", ids[0], "--position", "9"]):
+        result = runner.invoke(app, args, env={"TASKMAN_TASKS_DIR": str(tree)})
+        assert result.exit_code != 0
+        assert order_file.read_bytes() == persisted
+
+
+def test_reorder_has_no_two_digit_capacity_limit_and_preserves_hidden_siblings(tmp_path):
+    tree = tmp_path / "tasks"
+    ids = [new(tree, f"Task {index}") for index in range(105)]
+    order = reorder_item(tree, ids[-1], 2)
+    assert len(order) == 105
+    assert order[:4] == [ids[0], ids[-1], ids[1], ids[2]]
+    visible = query(collection(tree), keyword="Task 0")
+    assert [row["id"] for row in visible] == [ids[0]]
+    assert [row["id"] for row in ordered_siblings(tree, ids[0])][:4] == order[:4]
+
+
+def test_reorder_does_not_rewrite_completed_records(tmp_path):
+    tree = tmp_path / "tasks"
+    first = new(tree, "Done first")
+    second = new(tree, "Done second")
+    close(tree, first)
+    close(tree, second)
+    before = {path: path.read_bytes() for path in tree.rglob("*.md")}
+    assert reorder_item(tree, second, 1) == [second, first]
+    assert {path: path.read_bytes() for path in tree.rglob("*.md")} == before
+
+
+def test_hide_done_filter_composes_with_other_filters_and_context(tmp_path):
+    tree = tmp_path / "tasks"
+    epic = new(tree, "Epic", "epic")
+    open_id = new(tree, "Needle open", parent=epic)
+    done_id = new(tree, "Needle done", parent=epic)
+    runner.invoke(app, ["finalize", epic], env={"TASKMAN_TASKS_DIR": str(tree)})
+    close(tree, done_id)
+    rows = collection(tree)
+    hidden = query(
+        rows,
+        [{"field": "status", "op": "neq", "value": "done"}],
+        keyword="needle",
+        epic=epic,
+    )
+    assert [row["id"] for row in hidden] == [epic, open_id]
+    conflict = query(
+        rows,
+        [
+            {"field": "status", "op": "eq", "value": "done"},
+            {"field": "status", "op": "neq", "value": "done"},
+        ],
+        epic=epic,
+    )
+    assert conflict == []
+    restored = query(
+        rows,
+        [{"field": "status", "op": "eq", "value": "done"}],
+        keyword="needle",
+        epic=epic,
+    )
+    assert [row["id"] for row in restored] == [epic, done_id]

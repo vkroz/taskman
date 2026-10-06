@@ -329,7 +329,7 @@ def _make_handler(tasks_dir: Path):
             if not self._local_request() or self.headers.get('X-Taskman') != '1':
                 self._json(403, {'error': 'Only local Taskman UI requests are accepted.'})
                 return
-            if self.path not in ('/api/items', '/api/query', '/api/edit', '/api/discard', '/api/consolidate'):
+            if self.path not in ('/api/items', '/api/query', '/api/edit', '/api/discard', '/api/consolidate', '/api/reorder'):
                 self._json(404, {'error': 'Unknown endpoint'})
                 return
             try:
@@ -346,6 +346,7 @@ def _make_handler(tasks_dir: Path):
                     from taskman.commands.collection import edit_item
                     from taskman.commands.context import load_item
                     from taskman.model.revisions import invalidate_ancestors
+                    from taskman.model.ordering import reorder_item
                     with mutation_lock(tasks_dir):
                         if self.path == '/api/query':
                             rows = collection(tasks_dir)
@@ -359,6 +360,12 @@ def _make_handler(tasks_dir: Path):
                             from taskman.commands.context import discard_item
                             discard_item(tasks_dir, str(data.get('id', '')))
                             result = {'ok': True}
+                        elif self.path == '/api/reorder':
+                            item_id = data.get('id')
+                            position = data.get('position')
+                            if not isinstance(item_id, str):
+                                raise ValueError('Select a valid task ID')
+                            result = {'order': reorder_item(tasks_dir, item_id, position)}
                         else:
                             ids = data.get('ids', [])
                             if not isinstance(ids, list) or not all(isinstance(id, str) for id in ids):

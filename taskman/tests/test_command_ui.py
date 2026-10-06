@@ -8,6 +8,8 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+import pytest
+
 from typer.testing import CliRunner
 
 from taskman.cli import app
@@ -109,6 +111,12 @@ def test_render_page_contains_required_sections(tmp_path: Path) -> None:
     assert 'id="tree"' in html
     assert 'aria-label="Work views"' in html
     assert 'id="filters"' in html
+    assert 'id="filter-form"' in html
+    assert 'id="apply-filters"' in html
+    assert 'id="hide-done"' in html
+    assert 'aria-pressed="false"' in html
+    assert 'type="button" aria-label="Remove filter' in html
+    assert 'id="direction"' not in html
     assert 'id="editor"' in html
     assert 'id="preview"' in html
     assert 'Consolidated history' in html
@@ -189,6 +197,35 @@ def test_server_api_show_missing_returns_404(tmp_path: Path) -> None:
             assert e.code == 404
             raised = True
         assert raised
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_server_api_reorder_persists_and_rejects_invalid_position(tmp_path: Path) -> None:
+    from urllib.error import HTTPError
+
+    ids = [_new(tmp_path, title) for title in ("A", "B", "C")]
+    handler = _make_handler(tmp_path)
+    server = ThreadingHTTPServer(("localhost", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    def post(data):
+        request = urllib.request.Request(
+            f"http://localhost:{server.server_port}/api/reorder",
+            data=json.dumps(data).encode(),
+            headers={"Content-Type": "application/json", "X-Taskman": "1"},
+        )
+        with urllib.request.urlopen(request) as response:
+            return json.load(response)
+
+    try:
+        assert post({"id": ids[2], "position": 1})["order"] == [ids[2], ids[0], ids[1]]
+        before = (tmp_path / ".taskman-order.json").read_bytes()
+        with pytest.raises(HTTPError) as error:
+            post({"id": ids[0], "position": 99})
+        assert error.value.code == 400
+        assert (tmp_path / ".taskman-order.json").read_bytes() == before
     finally:
         server.shutdown()
         server.server_close()

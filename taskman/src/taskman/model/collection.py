@@ -63,7 +63,9 @@ def collection(tasks_dir: Path, include_archived=False) -> list[dict]:
                 "archived": wi.item_id in archived,
             }
         )
-    return rows
+    from taskman.model.ordering import apply_order
+
+    return apply_order(rows, tasks_dir)
 
 
 def field_value(row, key):
@@ -124,6 +126,11 @@ def query(
                     for v in values
                 ):
                     return False
+            elif op == "neq":
+                values = actual if isinstance(actual, list) else [actual]
+                excluded = [x.strip().casefold() for x in value.split(",")]
+                if any(text_value(v).casefold() in excluded for v in values):
+                    return False
             else:
                 raise ValueError("Unknown filter operator")
         return True
@@ -144,6 +151,8 @@ def query(
             children.setdefault(parent, []).append(row)
 
     def order(row):
+        if sort == "priority":
+            return (0, row.get("order", 0), row["id"])
         value = field_value(row, sort)
         # Numeric priorities and revisions should not sort lexicographically.
         if isinstance(value, (int, float)) or (

@@ -12,6 +12,7 @@ from taskman.model.collection import (
 )
 from taskman.model.yaml_io import write_file
 from taskman.model.revisions import invalidate_ancestors
+from taskman.model.ordering import reorder_item
 
 
 def edit_item(tasks_dir, item_id, title, body, reason):
@@ -112,3 +113,15 @@ def consolidate(ids: list[str] = typer.Argument(...), title: str = typer.Option(
 def history():
     """Retrieve consolidation summaries and original task IDs."""
     typer.echo(json.dumps(histories(get_tasks_dir()), indent=2))
+
+
+def reorder(
+    item_id: str = typer.Argument(..., help="Item ID to move."),
+    position: int = typer.Option(..., "--position", min=1, help="One-based sibling position."),
+):
+    """Move an item to a persisted position within its current parent."""
+    try:
+        order = reorder_item(get_tasks_dir(), item_id, position)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(json.dumps({"id": item_id, "position": position, "order": order}, indent=2))

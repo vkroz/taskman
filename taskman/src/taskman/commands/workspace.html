@@ -265,6 +265,21 @@
         color: #7a8191;
         background: #fafbfc;
       }
+      .row.drop-before {
+        box-shadow: inset 0 3px 0 var(--accent);
+      }
+      .row.drop-after {
+        box-shadow: inset 0 -3px 0 var(--accent);
+      }
+      .drag-handle {
+        color: var(--muted);
+        cursor: grab;
+        padding: 2px;
+        user-select: none;
+      }
+      .drag-handle:active {
+        cursor: grabbing;
+      }
       .row-title {
         display: flex;
         align-items: center;
@@ -609,11 +624,15 @@
                 <option value="id">ID</option>
                 <option value="type">Type</option>
               </select></label
-            ><button id="direction" aria-label="Reverse sort order">
-              ↑ Asc</button
-            ><button id="add-filter">＋ Filter</button>
+            ><button id="hide-done" type="button" aria-pressed="false">
+              Hide done</button
+            ><button id="add-filter" type="button">＋ Filter</button>
           </div>
-          <div id="filters"></div>
+          <form id="filter-form" novalidate>
+            <div id="filters"></div>
+            <button id="apply-filters" type="submit">Apply filters</button>
+            <span id="filter-error" class="message error" role="alert"></span>
+          </form>
         </section>
         <div class="workspace">
           <section class="list-pane surface" aria-label="Work items">
@@ -714,7 +733,9 @@
         selected = new Set(),
         selectedId = null,
         filters = [],
-        descending = false,
+        appliedFilters = [],
+        hideDone = false,
+        draggedId = null,
         editing = null,
         operation = null,
         serial = 0;
@@ -748,7 +769,8 @@
         $("#message").textContent = text;
       }
       function activeFilters() {
-        let f = filters.map((x) => ({ ...x }));
+        let f = appliedFilters.map((x) => ({ ...x }));
+        if (hideDone) f.push({ field: "status", op: "neq", value: "done" });
         if (view === "current")
           f.push({ field: "status", op: "eq", value: "active,backlog" });
         if (view === "backlog" || view === "done")
@@ -765,7 +787,7 @@
             keyword: $("#search").value,
             epic: $("#epic").value,
             sort: $("#sort").value,
-            descending,
+            descending: false,
           });
           if (n !== serial) return;
           rows = result.rows;
@@ -836,7 +858,7 @@
           if (hidden(r)) continue;
           let m = r.metadata,
             hasChildren = rows.some((x) => x.parent_id === r.id);
-          html += `<div class="row ${r.context ? "context" : ""} ${r.id === selectedId ? "selected" : ""}" data-id="${r.id}"><div class="row-title" style="--depth:${r.depth}"><button class="toggle" data-toggle="${r.id}" aria-label="${collapsed.has(r.id) ? "Expand" : "Collapse"} ${esc(m.title)}" ${hasChildren ? 'aria-expanded="' + !collapsed.has(r.id) + '"' : "disabled"}>${hasChildren ? (collapsed.has(r.id) ? "▸" : "▾") : "·"}</button><input type="checkbox" aria-label="Select ${esc(m.title)}" data-select="${r.id}" ${selected.has(r.id) ? "checked" : ""}><div><button class="title-button" data-open="${r.id}">${esc(m.title || r.id)}</button>${m.draft ? '<span class="draft">Draft</span>' : ""}${r.context ? '<div class="context-label">Parent context</div>' : ""}</div></div><span class="badge ${esc(m.status)}">${esc(m.status)}</span><span class="type type-col">${esc(m.type)}</span><span class="muted priority-col">${esc(m.priority)}</span></div>`;
+          html += `<div class="row ${r.context ? "context" : ""} ${r.id === selectedId ? "selected" : ""}" data-id="${r.id}"><div class="row-title" style="--depth:${r.depth}"><span class="drag-handle" draggable="${$("#sort").value === "priority"}" data-drag="${r.id}" role="button" aria-label="Drag ${esc(m.title)} to change priority">⋮⋮</span><button class="toggle" data-toggle="${r.id}" aria-label="${collapsed.has(r.id) ? "Expand" : "Collapse"} ${esc(m.title)}" ${hasChildren ? 'aria-expanded="' + !collapsed.has(r.id) + '"' : "disabled"}>${hasChildren ? (collapsed.has(r.id) ? "▸" : "▾") : "·"}</button><input type="checkbox" aria-label="Select ${esc(m.title)}" data-select="${r.id}" ${selected.has(r.id) ? "checked" : ""}><div><button class="title-button" data-open="${r.id}">${esc(m.title || r.id)}</button>${m.draft ? '<span class="draft">Draft</span>' : ""}${r.context ? '<div class="context-label">Parent context</div>' : ""}</div></div><span class="badge ${esc(m.status)}">${esc(m.status)}</span><span class="type type-col">${esc(m.type)}</span><span class="muted priority-col">${r.order + 1}</span></div>`;
         }
         if (!rows.length)
           html =
@@ -995,7 +1017,7 @@
                 )
                 .join(
                   "",
-                )}</select><input aria-label="Filter value ${i + 1}" data-filter="${i}" data-key="value" value="${esc(f.value)}" placeholder="Value"><button aria-label="Remove filter ${i + 1}" data-remove="${i}">✕</button></div>`,
+                )}</select><input aria-label="Filter value ${i + 1}" data-filter="${i}" data-key="value" value="${esc(f.value)}" placeholder="Value"><button type="button" aria-label="Remove filter ${i + 1}" data-remove="${i}">✕</button></div>`,
           )
           .join("");
       }
@@ -1003,12 +1025,14 @@
         if (e.target.dataset.filter !== undefined) {
           filters[+e.target.dataset.filter][e.target.dataset.key] =
             e.target.value;
-          refresh();
+          $("#filter-error").textContent = "Filters changed. Apply them to update the list.";
         }
       };
       $("#filters").onclick = (e) => {
         if (e.target.dataset.remove !== undefined) {
           filters.splice(+e.target.dataset.remove, 1);
+          appliedFilters = filters.map((filter) => ({ ...filter }));
+          $("#filter-error").textContent = "";
           renderFilters();
           refresh();
         }
@@ -1017,8 +1041,24 @@
         filters.push({ field: "status", op: "eq", value: "" });
         renderFilters();
       };
+      $("#filter-form").onsubmit = (e) => {
+        e.preventDefault();
+        const incomplete = filters.findIndex(
+          (filter) => !filter.field || !filter.op || !filter.value.trim(),
+        );
+        if (incomplete !== -1) {
+          $("#filter-error").textContent =
+            `Filter ${incomplete + 1} needs an attribute, operator and value.`;
+          $("#filters").querySelector(`[data-filter="${incomplete}"][data-key="value"]`)?.focus();
+          return;
+        }
+        appliedFilters = filters.map((filter) => ({ ...filter }));
+        $("#filter-error").textContent = "";
+        refresh();
+      };
       function clear() {
         filters = [];
+        appliedFilters = [];
         $("#search").value = "";
         $("#epic").value = "";
         renderFilters();
@@ -1038,9 +1078,10 @@
         all.forEach((r) => collapsed.add(r.id));
         render();
       };
-      $("#direction").onclick = () => {
-        descending = !descending;
-        $("#direction").textContent = descending ? "↓ Desc" : "↑ Asc";
+      $("#hide-done").onclick = () => {
+        hideDone = !hideDone;
+        $("#hide-done").setAttribute("aria-pressed", String(hideDone));
+        $("#hide-done").textContent = hideDone ? "✓ Done hidden" : "Hide done";
         refresh();
       };
       $("#epic").onchange = $("#sort").onchange = refresh;
@@ -1093,6 +1134,64 @@
           }
           render();
         }
+      };
+      $("#tree").ondragstart = (e) => {
+        const handle = e.target.closest("[data-drag]");
+        if (!handle || $("#sort").value !== "priority") return;
+        draggedId = handle.dataset.drag;
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", draggedId);
+      };
+      $("#tree").ondragover = (e) => {
+        const row = e.target.closest(".row[data-id]");
+        if (!row || !draggedId || row.dataset.id === draggedId) return;
+        const source = all.find((item) => item.id === draggedId);
+        const target = all.find((item) => item.id === row.dataset.id);
+        if (!source || !target || source.parent_id !== target.parent_id) return;
+        e.preventDefault();
+        $("#tree")
+          .querySelectorAll(".drop-before,.drop-after")
+          .forEach((item) => item.classList.remove("drop-before", "drop-after"));
+        const after = e.clientY >= row.getBoundingClientRect().top + row.offsetHeight / 2;
+        row.classList.add(after ? "drop-after" : "drop-before");
+      };
+      $("#tree").ondrop = async (e) => {
+        const row = e.target.closest(".row[data-id]");
+        if (!row || !draggedId || row.dataset.id === draggedId) return;
+        const source = all.find((item) => item.id === draggedId);
+        const target = all.find((item) => item.id === row.dataset.id);
+        if (!source || !target || source.parent_id !== target.parent_id) {
+          message("Tasks can only be reordered within the same parent.", true);
+          return;
+        }
+        e.preventDefault();
+        const after = row.classList.contains("drop-after");
+        const siblings = all
+          .filter(
+            (item) => !item.archived && item.parent_id === source.parent_id && item.id !== draggedId,
+          )
+          .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+        const targetIndex = siblings.findIndex((item) => item.id === target.id);
+        const position = targetIndex + (after ? 2 : 1);
+        try {
+          await api("/api/reorder", { id: draggedId, position });
+          message("Task priority updated.");
+          await refresh();
+        } catch (error) {
+          message(error.message, true);
+          await refresh();
+        } finally {
+          draggedId = null;
+          $("#tree")
+            .querySelectorAll(".drop-before,.drop-after")
+            .forEach((item) => item.classList.remove("drop-before", "drop-after"));
+        }
+      };
+      $("#tree").ondragend = () => {
+        draggedId = null;
+        $("#tree")
+          .querySelectorAll(".drop-before,.drop-after")
+          .forEach((item) => item.classList.remove("drop-before", "drop-after"));
       };
       document.addEventListener(
         "toggle",

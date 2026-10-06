@@ -28,7 +28,7 @@ from taskman.commands.worktree_status import worktree_status as _worktree_status
 from taskman.commands.context import context, update, record, depend, discard
 from taskman.model.locking import mutating
 from taskman.commands.install import install
-from taskman.commands.collection import browse, edit, consolidate, history
+from taskman.commands.collection import browse, edit, consolidate, history, reorder
 
 app = typer.Typer(
     name="taskman",
@@ -63,6 +63,7 @@ app.command("browse")(browse)
 app.command("edit")(mutating(edit))
 app.command("consolidate")(mutating(consolidate))
 app.command("history")(history)
+app.command("reorder")(mutating(reorder))
 app.command("validate")(_validate)
 app.command("ready")(_ready)
 app.command("waiting-on")(_waiting_on)
