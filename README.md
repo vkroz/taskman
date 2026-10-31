@@ -107,3 +107,58 @@ taskman browse --include-archived
 ```
 
 `browse` emits hierarchy-preserving JSON; contextual ancestors have `context: true` and do not match the query themselves. Use `show` or `context` with any retained ID for complete history. See [workspace design](docs/ui-design.md) for filtering and retention semantics.
+
+## Run with Docker
+
+The container serves the same workspace UI and HTTP API as `taskman ui`, through gunicorn, on `0.0.0.0` and the port in `PORT` (default `8080`). `taskman ui` remains the localhost process. `taskman serve` is the networked process the image starts.
+
+From the repository root:
+
+```sh
+cp .env.example .env
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+Put that value in `.env` as `TASKMAN_ACCESS_TOKEN`. Then build and start the app:
+
+```sh
+docker compose up -d --build
+```
+
+The service is at `http://127.0.0.1:8080/`. Sign in with the token, or send `Authorization: Bearer <token>` on API requests. `GET /health` is open and returns `{"status":"ok"}` when the task directory is writable.
+
+```sh
+docker compose ps
+docker compose logs -f taskman
+docker compose exec taskman taskman validate
+docker compose down
+```
+
+`docker compose down` keeps the named volume `taskman-data`. `docker compose down -v` deletes that volume and the tasks stored in it.
+
+### Configuration
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `TASKMAN_ACCESS_TOKEN` | yes | Shared secret for the login form and `Authorization: Bearer`. |
+| `PORT` | no | Published host port and the port inside the container. Default `8080`. |
+| `TASKMAN_TASKS_DIR` | set by Compose | Task tree inside the container. Compose sets `/data/tasks`. |
+| `TASKMAN_WEB_WORKERS` | no | Gunicorn worker processes. Default `2`. |
+
+Compose passes these in. Copy `.env.example` to `.env` for local values. `.env` is gitignored.
+
+The image command is `taskman serve`. With `TASKMAN_ACCESS_TOKEN` set, it execs gunicorn bound to `0.0.0.0:$PORT`. With the token unset, the process exits. The same command runs on a machine without Compose, from `taskman/` after `uv sync --extra dev --extra serve`:
+
+```sh
+TASKMAN_ACCESS_TOKEN='replace-with-a-long-random-token' TASKMAN_TASKS_DIR=/absolute/path/to/tasks uv run taskman serve
+```
+
+### Persistence
+
+Task files stay on a Docker volume mounted at `/data`. The task tree is `/data/tasks`. Consolidated history is written next to that tree, at `/data/docs/taskman-history`, so both sit on the volume. Restarting the container, rebuilding the image, and recreating the container keep the files while the volume exists.
+
+The volume stores the same markdown files the CLI already uses, so the container and the CLI share one tree. A shell in the container can run `taskman` against `TASKMAN_TASKS_DIR`. To put the files on a host path, replace the named volume with a bind mount such as `/var/lib/taskman:/data` or `./taskman-data:/data`. The process runs as uid `10001`; that user must be able to write the mounted directory. The volume is local to this Docker host. It survives container restarts and image rebuilds. Removing the volume removes the tasks.
+
+### Access
+
+The token is the access check for every route except `GET /health` and the login page. The login form sets an `HttpOnly` `SameSite=Lax` cookie whose value is an HMAC of the token. Mutating requests also send the `X-Taskman: 1` header the UI already uses. The server speaks plain HTTP, so the token is visible to anything on the path that can read the traffic. Keep a long random value in `.env` or the process environment. One shared secret covers every caller, and login attempts are not rate-limited.

@@ -21,6 +21,7 @@ from taskman.commands.queries import dependents as _dependents
 from taskman.commands.queries import ready as _ready
 from taskman.commands.queries import waiting_on as _waiting_on
 from taskman.commands.search import search as _search
+from taskman.commands.serve import serve as _serve
 from taskman.commands.show import show as _show
 from taskman.commands.ui import ui as _ui
 from taskman.commands.validate import validate as _validate
@@ -70,6 +71,7 @@ app.command("waiting-on")(_waiting_on)
 app.command("search")(_search)
 app.command("worktree-status")(_worktree_status)
 app.command("ui")(_ui)
+app.command("serve")(_serve)
 app.command("help")(_help)
 # --- auxiliary or temporary commands ---
 app.command("convert")(mutating(_convert))

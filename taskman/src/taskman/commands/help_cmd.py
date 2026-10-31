@@ -115,6 +115,13 @@ ENVIRONMENT
   TASKMAN_TASKS_DIR    Selects the shared tasks tree. If unset, searches from
                        the working directory up to the repository root for
                        tasks/. Multiple agents must use the same tree.
+  TASKMAN_ACCESS_TOKEN Shared secret for `taskman serve` (login cookie or
+                       Authorization: Bearer). Required before the process
+                       listens. `taskman ui` does not read it.
+  PORT                 TCP port for `taskman serve` (default 8080). The
+                       process binds 0.0.0.0.
+  TASKMAN_WEB_WORKERS  Gunicorn worker processes for `taskman serve`
+                       (default 2).
 """
 
 
