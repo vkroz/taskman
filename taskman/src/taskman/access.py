@@ -1,7 +1,7 @@
-"""Shared-secret access check for the networked Taskman server.
+"""Shared-secret access check for the Taskman server.
 
-The localhost ``taskman ui`` command does not use this module. ``taskman serve``
-and the WSGI app refuse to treat an empty value as a credential.
+``taskman serve`` refuses to start when this value is missing. The WSGI app
+rejects API calls with the same rule. ``GET /health`` does not use it.
 """
 from __future__ import annotations
 

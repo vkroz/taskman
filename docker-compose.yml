@@ -1,22 +1,37 @@
-# Local or single-host Taskman. From the repo root, with .env filled in:
+# App + Postgres. From the repo root, with .env filled in:
 #   docker compose up -d --build
-# Data is the named volume mounted at /data (tasks in /data/tasks).
 
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-taskman}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taskman}
+      POSTGRES_DB: ${POSTGRES_DB:-taskman}
+    volumes:
+      - taskman-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-taskman} -d ${POSTGRES_DB:-taskman}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
   taskman:
     build:
       context: .
       dockerfile: Dockerfile
     image: taskman:local
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: ${PORT:-8080}
+      TASKMAN_ACCESS_TOKEN: ${TASKMAN_ACCESS_TOKEN:?Set TASKMAN_ACCESS_TOKEN in .env}
+      TASKMAN_DATABASE_URL: postgresql://${POSTGRES_USER:-taskman}:${POSTGRES_PASSWORD:-taskman}@db:5432/${POSTGRES_DB:-taskman}
+      TASKMAN_WEB_WORKERS: ${TASKMAN_WEB_WORKERS:-2}
     ports:
       - "${PORT:-8080}:${PORT:-8080}"
-    environment:
-      PORT: "${PORT:-8080}"
-      TASKMAN_ACCESS_TOKEN: "${TASKMAN_ACCESS_TOKEN:?Set TASKMAN_ACCESS_TOKEN in .env}"
-      TASKMAN_TASKS_DIR: /data/tasks
-      TASKMAN_WEB_WORKERS: "${TASKMAN_WEB_WORKERS:-2}"
-    volumes:
-      - taskman-data:/data
     restart: unless-stopped
     healthcheck:
       test:
@@ -28,8 +43,8 @@ services:
         ]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 10
+      start_period: 20s
 
 volumes:
-  taskman-data:
+  taskman-db:

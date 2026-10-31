@@ -7,6 +7,8 @@ Arguments: `[product|epic|feature|task]`.
 
 Read [the shared workflow](../../references/workflow.md) for CLI syntax, context, journals and closure rules.
 
+Create items with `taskman new`. If an id already exists, run `taskman pull ID` and read `.taskman/tasks/ID.md` before editing the repository. Do not write live task files under `tasks/`. Copy any older file text into `taskman new` by hand.
+
 Establish the intended outcome, scope, observable acceptance criteria and meaningful quality gates from the user's request and repository context. Ask only about unresolved decisions that affect the outcome. For a bug, include reproduction, expected and actual behavior; create it as type `task`.
 
 For product work, update the project's existing vision, requirements or specification documents. For an epic or feature, create the parent and the minimum useful decomposition. For a single task, create only that task. Use `--parent` for hierarchy; do not invent separate slug-based links or mandatory tiers.
