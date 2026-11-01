@@ -168,3 +168,13 @@ def test_cli_rejects_non_ascii_and_out_of_range_ids_without_a_traceback(server):
         assert result.exit_code == 1, (value, result.output)
         assert result.exception is None or isinstance(result.exception, SystemExit)
         assert "Task id must be a positive integer" in (result.output + (result.stderr or ""))
+
+
+def test_validate_names_an_unavailable_database(server, monkeypatch):
+    def fail():
+        raise RuntimeError("postgres is down")
+
+    monkeypatch.setattr("taskman.httpapp.ping", fail)
+    result = runner.invoke(app, ["validate"], env=_env(server))
+    assert result.exit_code == 1
+    assert "database is unavailable" in (result.output + (result.stderr or ""))

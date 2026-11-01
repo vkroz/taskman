@@ -384,6 +384,12 @@ def validate() -> None:
         health = client.health()
         if health.get("status") != "ok":
             raise ApiError("Taskman health check did not return ok.")
+        try:
+            client.request("GET", "/ready", auth=False)
+        except ApiError as exc:
+            if exc.status == 503:
+                raise ApiError("Taskman server is up, but its database is unavailable.") from exc
+            raise
         client.request("GET", "/api/tasks")
         typer.echo("OK")
 

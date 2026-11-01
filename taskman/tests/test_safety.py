@@ -270,3 +270,24 @@ def test_report_script_uses_gtimeout_when_timeout_is_missing(tmp_path):
     )
     assert result.returncode == 0
     assert log.read_text().splitlines() == ["gtimeout 4", "hook claude"]
+
+
+def test_a_blank_env_token_does_not_hide_the_user_file_token(tmp_path, monkeypatch):
+    user = tmp_path / ".config" / "taskman"
+    user.mkdir(parents=True)
+    (user / "config.json").write_text(json.dumps({"url": "http://127.0.0.1:8080", "token": "user-secret"}))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("TASKMAN_ACCESS_TOKEN", "  ")
+    assert resolve_settings().token == "user-secret"
+
+
+def test_saving_the_url_tightens_an_existing_readable_config(tmp_path, monkeypatch):
+    user = tmp_path / ".config" / "taskman"
+    user.mkdir(parents=True)
+    existing = user / "config.json"
+    existing.write_text(json.dumps({"token": "user-secret"}))
+    existing.chmod(0o644)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    path = save_server_url("http://127.0.0.1:9090")
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert json.loads(path.read_text()) == {"token": "user-secret", "url": "http://127.0.0.1:9090"}

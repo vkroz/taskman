@@ -33,6 +33,8 @@ services:
     ports:
       # Loopback only. To reach the app from another machine, publish every
       # interface instead, for example "0.0.0.0:${PORT:-8080}:${PORT:-8080}".
+      # The app speaks plain HTTP and the bearer token travels in every
+      # request. Put a TLS reverse proxy in front before you do that.
       - "127.0.0.1:${PORT:-8080}:${PORT:-8080}"
     restart: unless-stopped
     healthcheck:
