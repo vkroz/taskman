@@ -95,7 +95,7 @@ Codex does not get a plugin hook from this repository. In a git checkout, run:
 taskman hooks install
 ```
 
-That writes `.git/hooks/post-commit`, which runs `taskman hook git commit --agent "$author"`. The author is the commit author from `git log -1 --format=%an`, then `git config user.name`, then the literal `git`. A post-commit hook from an older Taskman runs without `--agent`; `taskman hooks install` reports it, and `--force` replaces it and keeps a backup. Report a pull request with:
+That writes `.git/hooks/post-commit`, which runs `taskman hook git commit --agent "$author"`. The author is the commit author from `git log -1 --format=%an`, then `git config user.name`, then the literal `git`. A post-commit hook from an older Taskman runs without `--agent`, so it reports nothing and prints how to update it. `taskman hooks install` replaces an unmodified older Taskman hook and keeps a backup; a hook you edited needs `--force`. Report a pull request with:
 
 ```sh
 taskman report pr --url https://github.com/org/repo/pull/12 --agent codex

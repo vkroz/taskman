@@ -52,18 +52,26 @@ taskman hook git commit --agent "$author"
 # Present in a hook that already passes the author. An older Taskman hook has
 # only `taskman hook git commit`.
 _HOOK_CALL = "taskman hook git commit --agent"
+# Exact bodies written by earlier Taskman versions. `hooks install` replaces an
+# unmodified one without --force, because Taskman wrote every byte of it.
+_LEGACY_HOOK_BODIES = frozenset(
+    {"#!/bin/sh\n# Added by Taskman. Reports the commit for .taskman/active.\ntaskman hook git commit\n"}
+)
+_UPDATE_HOOK_HINT = "This post-commit hook may be from an older Taskman. Run `taskman hooks install` to update it."
 
 
 def _agent_option(help_text: str):
     return typer.Option("", "--agent", "--author", help=help_text)
 
 
-def _hook_agent(value: str) -> str:
-    """Trimmed --agent, or exit 1 with the required-author message."""
+def _hook_agent(value: str, hint: str = "") -> str:
+    """Trimmed --agent, or exit 1 with the required-author message and an optional hint."""
     try:
         return require_agent(value)
     except MissingAgent as exc:
         typer.echo(str(exc), err=True)
+        if hint:
+            typer.echo(hint, err=True)
         raise typer.Exit(1) from None
 
 
@@ -245,7 +253,7 @@ def hook_git(
     agent: str = _agent_option("Author recorded on the commit event. The installed hook passes the commit author. Required."),
 ) -> None:
     """Git-hook entry. `commit` reports HEAD for the active task."""
-    author = _hook_agent(agent)
+    author = _hook_agent(agent, hint=_UPDATE_HOOK_HINT)
     if action != "commit":
         typer.echo("Only `taskman hook git commit` is supported.", err=True)
         raise typer.Exit(0)
@@ -286,7 +294,10 @@ def hooks_install(force: bool = typer.Option(False, "--force", help="Replace an 
             typer.echo(f"Taskman post-commit hook already present at {destination}")
             _note_gitignore()
             return
-        if not force:
+        legacy = current in _LEGACY_HOOK_BODIES
+        if legacy:
+            typer.echo(f"Updating the older Taskman post-commit hook at {destination} to pass --agent.")
+        if not force and not legacy:
             if "taskman hook git commit" in current:
                 message = (
                     f"{destination} has an older Taskman hook that does not pass --agent. "

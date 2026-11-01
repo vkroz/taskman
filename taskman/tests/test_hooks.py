@@ -473,15 +473,43 @@ def test_hook_body_falls_back_to_git_config_user_name_then_git(tmp_path):
     assert _run_hook_body(empty, tmp_path / "b", {}) == "hook|git|commit|--agent|git|"
 
 
-def test_hooks_install_flags_an_older_hook_without_an_author(tmp_path, monkeypatch):
+_LEGACY_BODY = "#!/bin/sh\n# Added by Taskman. Reports the commit for .taskman/active.\ntaskman hook git commit\n"
+
+
+def test_hooks_install_upgrades_an_unmodified_older_hook(tmp_path, monkeypatch):
     repo = _repo(tmp_path)
     monkeypatch.chdir(repo)
     hook = repo / ".git" / "hooks" / "post-commit"
     hook.parent.mkdir(parents=True, exist_ok=True)
-    hook.write_text("#!/bin/sh\n# Added by Taskman. Reports the commit for .taskman/active.\ntaskman hook git commit\n")
+    hook.write_text(_LEGACY_BODY)
+    result = runner.invoke(app, ["hooks", "install"])
+    assert result.exit_code == 0, result.output
+    assert "Updating the older Taskman post-commit hook" in result.output
+    assert 'taskman hook git commit --agent "$author"' in hook.read_text()
+    backups = list(hook.parent.glob("post-commit.bak.*"))
+    assert [backup.read_text() for backup in backups] == [_LEGACY_BODY]
+
+
+def test_hooks_install_flags_a_modified_older_hook_without_an_author(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    monkeypatch.chdir(repo)
+    hook = repo / ".git" / "hooks" / "post-commit"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text(_LEGACY_BODY + "echo custom\n")
     refused = runner.invoke(app, ["hooks", "install"])
     assert refused.exit_code == 2
     assert "older Taskman hook" in (refused.output + (refused.stderr or ""))
+    assert "echo custom" in hook.read_text()
     forced = runner.invoke(app, ["hooks", "install", "--force"])
     assert forced.exit_code == 0, forced.output
     assert 'taskman hook git commit --agent "$author"' in hook.read_text()
+
+
+def test_git_hook_without_an_author_says_how_to_update_the_hook(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    monkeypatch.chdir(repo)
+    result = runner.invoke(app, ["hook", "git", "commit"])
+    assert result.exit_code == 1
+    text = result.output + (result.stderr or "")
+    assert AGENT_REQUIRED in text
+    assert "taskman hooks install" in text
