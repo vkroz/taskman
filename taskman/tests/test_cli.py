@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 from wsgiref.simple_server import WSGIRequestHandler, make_server
 
@@ -153,11 +154,31 @@ def test_the_author_is_trimmed_and_author_is_an_alias(server, tmp_path, monkeypa
     ]
 
 
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def _plain(text: str) -> str:
+    """Help text without ANSI escapes or rich's box-drawing borders, whitespace collapsed.
+
+    Typer decides at import time whether rich forces color (GITHUB_ACTIONS,
+    FORCE_COLOR, PY_COLORS), so the env passed to one invoke cannot turn it
+    off. Stripping the escapes keeps the assertion independent of the host.
+    """
+    text = _ANSI.sub("", text)
+    text = re.sub(r"[│╭╮╰╯─]", " ", text)
+    return " ".join(text.split())
+
+
 def test_help_calls_the_agent_the_author():
-    result = runner.invoke(app, ["pull", "--help"], env={"COLUMNS": "200"})
+    result = runner.invoke(
+        app,
+        ["pull", "--help"],
+        env={"COLUMNS": "200", "NO_COLOR": "1", "TERM": "dumb", "FORCE_COLOR": None, "GITHUB_ACTIONS": None},
+    )
     assert result.exit_code == 0
-    assert "--author" in result.output
-    assert "Author of these changes" in result.output
+    output = _plain(result.output)
+    assert "--author" in output
+    assert "Author of these changes" in output
 
 
 def test_validate_reports_ok(server):
