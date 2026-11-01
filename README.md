@@ -51,7 +51,7 @@ The app waits for Postgres, then creates tables if they are missing. Nothing in 
 | `POSTGRES_DB` | no | `taskman` | Database name. |
 | `TASKMAN_WEB_WORKERS` | no | `2` | gunicorn workers. |
 | `TASKMAN_URL` | CLI | `http://127.0.0.1:8080` | Server the CLI calls. |
-| `TASKMAN_AGENT` | no | | Name stored on events from this process. When this and `--agent` are unset, commands that record an event use the machine's short hostname. The server rejects a blank agent. |
+| `TASKMAN_AGENT` | no | | Name stored on events from this process. The CLI and the hooks use one order: `--agent`, then this variable, then the hook's own name (`claude-code` or `git`), then `claude-code` when Claude Code set `CLAUDECODE=1`, then the machine's short hostname. Blank values are skipped. The server rejects a blank agent. |
 | `TASKMAN_SESSION` | no | | Session id stored on events. |
 
 `taskman config --server http://127.0.0.1:8080` saves the URL in `~/.config/taskman/config.json` (mode `0600`). The CLI reads the server URL and token only from that user file and from the environment. A `.taskman/config.json` inside a repository is ignored, so a checkout cannot point the token at another host.
@@ -80,13 +80,13 @@ taskman activity --json
 taskman validate
 ```
 
-`close` is an alias of `complete`. `taskman pull` writes `.taskman/tasks/<id>.md` and `.taskman/active` in the current directory, and marks a backlog task active. That file is the working copy agents read. The server does not create it.
+`close` is an alias of `complete`. `taskman pull` writes `.taskman/tasks/<id>.md` and `.taskman/active` at the git repository root, adds `.taskman/` to that repository's `.gitignore` when it is missing, and marks a backlog task active. That file is the working copy agents read. The server does not create it. `taskman complete` removes `.taskman/active` when it names the completed task.
 
 `taskman ui` prints the server URL. It does not start a second server.
 
 ### Hooks
 
-Claude Code loads `plugins/tm/hooks/hooks.json` with the plugin. After a Bash `git commit` or `gh pr create`, and when a session stops with the line `Taskman completion: ID` in the transcript, the hook runs `taskman hook claude`. The active task id comes from `.taskman/active`.
+Claude Code loads `plugins/tm/hooks/hooks.json` with the plugin. After a Bash `git commit` or `gh pr create`, and when a session stops with the line `Taskman completion: ID` in the last assistant message, the hook runs `taskman hook claude`. The active task id comes from `.taskman/active`. The Stop hook skips a task that is already done, so `taskman complete` plus the marker line records one completion. The hook script limits the client to 4 seconds with `timeout`, or `gtimeout` on macOS with Homebrew coreutils. With neither, it runs the client unwrapped, and the client's 3-second network timeout applies.
 
 Codex does not get a plugin hook from this repository. In a git checkout, run:
 
@@ -129,7 +129,7 @@ Text files under `tasks/` in a repository are not imported. Copy the title and b
 - The dashboard shows the latest event on each task. It updates because the browser polls. The server does not call out to agents.
 - There is no delete, no draft/finalize step, and no rule that a parent stays open until every child is done. Completion is `taskman complete` or the Stop hook line above.
 - A pull event is recorded when an agent runs `taskman pull`, so the board can show who claimed the task before the first commit. The three hook events are commit, pull request, and completion.
-- Posting an event that is already stored returns 200 and that event. This covers a commit whose sha is already recorded for the task, and a completion that repeats the latest completion for the same agent and session. A post that inserts a row returns 201. The duplicate answer is 200 rather than 409 so a retry stays successful for the CLI and the hooks.
+- Posting an event that is already stored returns 200 and that event. This covers a commit whose sha is already recorded for the task, and a completion that repeats the task's latest event when that event is a completion for the same agent and session. A post that inserts a row returns 201. The duplicate answer is 200 rather than 409 so a retry stays successful for the CLI and the hooks.
 - Several gunicorn workers on one machine share Postgres. Run one app service against the database.
 
 ## Develop

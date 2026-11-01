@@ -48,7 +48,7 @@ When the work is done, run:
 taskman complete ID --message "What changed and how it was checked." --agent AGENT
 ```
 
-and include this line in the final message so the Stop hook records it if the command did not run:
+`complete` removes `.taskman/active` for that task, and the Stop hook skips a task that is already done, so the two steps record one completion. Include this line in the final message so the Stop hook records it if the command did not run:
 
 ```
 Taskman completion: ID

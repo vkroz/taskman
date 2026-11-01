@@ -104,7 +104,7 @@ def test_pull_defaults_a_non_empty_agent(server, tmp_path, monkeypatch):
 
 
 def test_complete_and_report_pr_default_a_non_empty_agent(server, tmp_path, monkeypatch):
-    from taskman.commands.work import default_agent
+    from taskman.agent import default_agent
 
     monkeypatch.chdir(tmp_path)
     env = _env(server)

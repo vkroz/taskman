@@ -171,7 +171,7 @@ def test_report_script_exits_zero_when_the_binary_lacks_hook(tmp_path):
     )
     assert result.returncode == 0
     assert "does not provide a hook command" in result.stderr
-    assert log.read_text().strip() == "hook --help"
+    assert log.read_text().strip() == "hook claude"
 
 
 def test_report_script_exits_zero_when_hook_claude_fails(tmp_path):
@@ -182,9 +182,8 @@ def test_report_script_exits_zero_when_hook_claude_fails(tmp_path):
         bin_dir,
         "taskman",
         "#!/bin/sh\n"
-        "if [ \"$1\" = hook ] && [ \"$2\" = --help ]; then exit 0; fi\n"
         "echo called >> \"%s\"\n"
-        "exit 2\n" % log,
+        "exit 1\n" % log,
     )
     env = os.environ.copy()
     env["PATH"] = _path_with_timeout(bin_dir)
@@ -208,7 +207,6 @@ def test_report_script_times_out_a_hung_binary(tmp_path):
         bin_dir,
         "taskman",
         "#!/bin/sh\n"
-        "if [ \"$1\" = hook ] && [ \"$2\" = --help ]; then exit 0; fi\n"
         "sleep 30\n"
         "exit 2\n",
     )
@@ -224,3 +222,51 @@ def test_report_script_times_out_a_hung_binary(tmp_path):
         timeout=10,
     )
     assert result.returncode == 0
+
+
+def _bare_path(bin_dir: Path) -> str:
+    """PATH with only ``cat`` and the stubs: no timeout and no gtimeout."""
+    cat = shutil.which("cat")
+    assert cat, "cat is required to exercise the hook script"
+    (bin_dir / "cat").symlink_to(cat)
+    return str(bin_dir)
+
+
+def test_report_script_runs_the_hook_without_timeout_or_gtimeout(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "log"
+    _stub(bin_dir, "taskman", "#!/bin/sh\necho \"$1 $2\" >> \"%s\"\nexit 0\n" % log)
+    env = {"PATH": _bare_path(bin_dir), "HOME": str(tmp_path / "empty-home")}
+    result = subprocess.run(
+        ["/bin/sh", str(SCRIPT)],
+        input="{}",
+        text=True,
+        capture_output=True,
+        env=env,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0
+    assert log.read_text().strip() == "hook claude"
+    assert "not reported" not in result.stderr
+
+
+def test_report_script_uses_gtimeout_when_timeout_is_missing(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "log"
+    _stub(bin_dir, "gtimeout", "#!/bin/sh\necho \"gtimeout $1\" >> \"%s\"\nshift\nexec \"$@\"\n" % log)
+    _stub(bin_dir, "taskman", "#!/bin/sh\necho \"$1 $2\" >> \"%s\"\nexit 0\n" % log)
+    env = {"PATH": _bare_path(bin_dir), "HOME": str(tmp_path / "empty-home")}
+    result = subprocess.run(
+        ["/bin/sh", str(SCRIPT)],
+        input="{}",
+        text=True,
+        capture_output=True,
+        env=env,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0
+    assert log.read_text().splitlines() == ["gtimeout 4", "hook claude"]

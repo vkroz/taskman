@@ -18,6 +18,7 @@ from pathlib import Path
 
 import typer
 
+from taskman.agent import resolve_agent
 from taskman.client import ApiError, client_from_env
 from taskman.workingcopy import active_task_id, clear_active, ensure_gitignore, repo_root
 
@@ -145,12 +146,19 @@ def _handle_claude(payload: dict) -> None:
     event = payload.get("hook_event_name") or payload.get("hook_event") or ""
     cwd = Path(payload.get("cwd") or Path.cwd())
     session = str(payload.get("session_id") or os.environ.get("TASKMAN_SESSION") or "")
-    agent = os.environ.get("TASKMAN_AGENT") or "claude-code"
+    agent = resolve_agent(fallback="claude-code")
     task_id = active_task_id(cwd)
     if event == "Stop":
         transcript = payload.get("transcript_path") or ""
         if task_id and transcript and _completion_marker(Path(transcript), task_id):
-            _client().request(
+            client = _client()
+            # `taskman complete` may already have recorded this completion
+            # under another agent or session name. Do not add a second one.
+            if client.request("GET", f"/api/tasks/{task_id}").get("status") == "done":
+                clear_active(cwd)
+                typer.echo(f"task {task_id} is already done; completion not reported again")
+                return
+            client.request(
                 "POST",
                 f"/api/tasks/{task_id}/complete",
                 {"message": "completed", "agent": agent, "session": session},
@@ -213,7 +221,7 @@ def hook_git(action: str = typer.Argument(..., help="commit")) -> None:
         raise typer.Exit(0)
     try:
         sha, subject = _git_head(repo_root(cwd))
-        agent = os.environ.get("TASKMAN_AGENT") or "git"
+        agent = resolve_agent(fallback="git")
         session = os.environ.get("TASKMAN_SESSION") or ""
         _post_event(task_id, "commit", agent, session, commit_sha=sha, message=subject)
         typer.echo(f"reported commit {sha[:12]} for {task_id}")

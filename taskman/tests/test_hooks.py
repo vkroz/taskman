@@ -320,3 +320,69 @@ def test_hook_client_timeout_is_shorter_than_the_shell_timeout(server, tmp_path,
     result = runner.invoke(app, ["hook", "git", "commit"], env=_env(server))
     assert result.exit_code == 0
     assert seen["timeout"] <= 4
+
+
+def _stop(server: str, repo: Path, transcript: Path, session: str = "sess-9"):
+    return runner.invoke(
+        app,
+        ["hook", "claude"],
+        input=json.dumps({
+            "hook_event_name": "Stop",
+            "session_id": session,
+            "cwd": str(repo),
+            "transcript_path": str(transcript),
+        }),
+        env=_env(server),
+    )
+
+
+def test_cli_complete_clears_active_and_the_stop_hook_adds_no_second_completion(server, tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    monkeypatch.chdir(repo)
+    task_id = _task(server, repo)
+    env = {**_env(server), "TASKMAN_AGENT": "laptop", "TASKMAN_SESSION": ""}
+    finished = runner.invoke(app, ["complete", task_id, "--message", "shipped"], env=env)
+    assert finished.exit_code == 0, finished.output
+    assert not (repo / ".taskman" / "active").exists()
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text(_assistant(f"Taskman completion: {task_id}") + "\n")
+    assert _stop(server, repo, transcript).exit_code == 0
+    shown = json.loads(runner.invoke(app, ["context", task_id], env=_env(server)).output)
+    assert [event["kind"] for event in shown["events"]] == ["completion"]
+
+
+def test_stop_hook_skips_a_task_that_is_already_done(server, tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    monkeypatch.chdir(repo)
+    task_id = _task(server, repo)
+    # Completed elsewhere: the server says done but this checkout still names the task.
+    moved = runner.invoke(app, ["move", task_id, "done"], env=_env(server))
+    assert moved.exit_code == 0, moved.output
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text(_assistant(f"Taskman completion: {task_id}") + "\n")
+    result = _stop(server, repo, transcript)
+    assert result.exit_code == 0, result.output
+    assert "already done" in result.output
+    assert not (repo / ".taskman" / "active").exists()
+    shown = json.loads(runner.invoke(app, ["context", task_id], env=_env(server)).output)
+    assert shown["events"] == []
+
+
+def test_complete_leaves_an_active_marker_for_another_task(server, tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    monkeypatch.chdir(repo)
+    task_id = _task(server, repo)
+    other = json.loads(runner.invoke(app, ["new", "--title", "Other", "--json"], env=_env(server)).output)["id"]
+    finished = runner.invoke(app, ["complete", str(other)], env=_env(server))
+    assert finished.exit_code == 0, finished.output
+    assert (repo / ".taskman" / "active").read_text().strip() == task_id
+
+
+def test_hooks_strip_a_blank_taskman_agent(server, tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    monkeypatch.chdir(repo)
+    task_id = _task(server, repo)
+    result = runner.invoke(app, ["hook", "git", "commit"], env={**_env(server), "TASKMAN_AGENT": "   "})
+    assert result.exit_code == 0, result.output
+    shown = json.loads(runner.invoke(app, ["context", task_id], env=_env(server)).output)
+    assert [(event["kind"], event["agent"]) for event in shown["events"]] == [("commit", "git")]

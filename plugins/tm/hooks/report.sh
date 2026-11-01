@@ -7,16 +7,24 @@ payload=$(cat)
 
 report() {
   bin=$1
-  if ! command -v timeout >/dev/null 2>&1; then
-    echo "timeout is not available; activity was not reported" >&2
-    return 0
+  # Stop the client after 4 s, which is shorter than Claude's 5 s hook timeout.
+  # macOS has no `timeout`; Homebrew coreutils installs it as `gtimeout`.
+  # With neither, run the client unwrapped: its own 3 s network timeout applies.
+  if command -v timeout >/dev/null 2>&1; then
+    limit="timeout 4"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    limit="gtimeout 4"
+  else
+    limit=""
   fi
-  if ! timeout 2 "$bin" hook --help >/dev/null 2>&1; then
+  # $limit is unquoted on purpose so that an empty value expands to nothing.
+  printf '%s' "$payload" | $limit "$bin" hook claude >/dev/null 2>&1
+  status=$?
+  if [ "$status" -eq 2 ]; then
     echo "taskman at $bin does not provide a hook command; activity was not reported" >&2
-    return 0
+  elif [ "$status" -eq 124 ]; then
+    echo "taskman hook timed out; activity was not reported" >&2
   fi
-  # Shorter than Claude's hook timeout so a stuck client cannot hold the turn.
-  printf '%s' "$payload" | timeout 4 "$bin" hook claude >/dev/null 2>&1 || true
   return 0
 }
 

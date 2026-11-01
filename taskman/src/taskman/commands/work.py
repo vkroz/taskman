@@ -2,17 +2,16 @@
 from __future__ import annotations
 
 import json
-import os
-import socket
 import sys
 from pathlib import Path
 from urllib.parse import urlencode
 
 import typer
 
+from taskman.agent import resolve_agent
 from taskman.client import ApiError, client_from_env
 from taskman.config import resolve_settings, save_server_url
-from taskman.workingcopy import write_working_copy
+from taskman.workingcopy import clear_active_if, write_working_copy
 
 
 def _exit(exc: Exception) -> None:
@@ -42,19 +41,9 @@ def _body(path: str | None) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
-def default_agent() -> str:
-    """Name recorded when the caller does not pass one. Never empty."""
-    host = socket.gethostname().split(".")[0].strip()
-    return host or "taskman"
-
-
 def _agent(value: str) -> str:
-    """Name stored on an event. Never empty.
-
-    Order is the flag, then ``TASKMAN_AGENT``, then the short hostname.
-    """
-    chosen = (value or "").strip() or os.environ.get("TASKMAN_AGENT", "").strip()
-    return chosen or default_agent()
+    """Name stored on an event. Never empty. See :func:`taskman.agent.resolve_agent`."""
+    return resolve_agent(value)
 
 
 def _session(value: str) -> str:
@@ -262,11 +251,15 @@ def complete(
     """Mark a task done and record a completion event."""
 
     def run():
+        ident = _task_id(task_id)
         result = client_from_env().request(
             "POST",
-            f"/api/tasks/{_task_id(task_id)}/complete",
+            f"/api/tasks/{ident}/complete",
             {"message": message, "agent": _agent(agent), "session": _session(session)},
         )
+        # The Stop hook must not report this completion again, and later
+        # commits must not be attributed to the finished task.
+        clear_active_if(Path.cwd(), ident)
         _echo_task(result["task"], as_json)
 
     _guard(run)
@@ -336,6 +329,7 @@ def report_completion(
             f"/api/tasks/{task_id}/complete",
             {"message": message, "agent": _agent(agent), "session": _session(session)},
         )
+        clear_active_if(Path.cwd(), task_id)
         typer.echo(f"completed {task_id}")
 
     _guard(run)

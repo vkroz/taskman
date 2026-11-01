@@ -84,3 +84,11 @@ def active_task_id(start: Path) -> str | None:
 def clear_active(start: Path) -> None:
     marker = repo_root(start) / ".taskman" / "active"
     marker.unlink(missing_ok=True)
+
+
+def clear_active_if(start: Path, task_id) -> bool:
+    """Remove ``.taskman/active`` when it names ``task_id``. Returns True if removed."""
+    if active_task_id(start) != str(task_id):
+        return False
+    clear_active(start)
+    return True

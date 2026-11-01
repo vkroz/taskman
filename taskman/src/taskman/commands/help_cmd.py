@@ -38,10 +38,15 @@ GET /health is liveness and does not open a database connection. GET /ready
 checks Postgres. Neither requires the token. The flight-control page keeps
 the token in the browser tab and sends it as Authorization: Bearer.
 
-When --agent and TASKMAN_AGENT are both unset, commands that record an
-event store the short hostname. The server rejects a blank agent. Repeating a
-commit with the same sha, or a completion for the same agent and session,
-returns 200 and the event already stored. A new event returns 201.
+The CLI and the hooks resolve the agent name the same way: --agent, then
+TASKMAN_AGENT, then the hook's own name (claude-code or git), then
+claude-code when CLAUDECODE=1, then the short hostname. Blank values are
+skipped. The server rejects a blank agent. Repeating a commit with the same
+sha, or a completion that matches the task's latest event for the same agent
+and session, returns 200 and the event already stored. A new event returns 201.
+
+`complete` clears .taskman/active when it names the completed task. The Stop
+hook does not report a completion for a task that is already done.
 """
 
 
