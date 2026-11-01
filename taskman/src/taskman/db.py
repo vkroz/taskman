@@ -88,8 +88,17 @@ def wait_for_database(url: str, attempts: int = 30, delay: float = 1.0) -> None:
     raise RuntimeError(f"Postgres is not ready: {last}")
 
 
+# Advisory lock key that serializes concurrent migrations from several processes.
+_MIGRATE_LOCK = 0x74616D67  # "tamg"
+
+
 def migrate(url: str | None = None) -> None:
-    """Create tables if they are missing. Safe to run from each worker."""
+    """Create tables if they are missing. ``taskman serve`` runs this once before gunicorn starts.
+
+    A transaction-scoped advisory lock serializes concurrent runs, for example
+    two app containers that start together.
+    """
     with connect(url) as conn:
+        conn.execute("SELECT pg_advisory_xact_lock(%s)", (_MIGRATE_LOCK,))
         for statement in STATEMENTS:
             conn.execute(statement)

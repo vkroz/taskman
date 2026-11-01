@@ -160,3 +160,11 @@ def test_serve_refuses_to_start_without_a_token(database):
     text = (result.output or "") + (result.stderr or "")
     assert result.exit_code == 1
     assert "TASKMAN_ACCESS_TOKEN" in text
+
+
+def test_cli_rejects_non_ascii_and_out_of_range_ids_without_a_traceback(server):
+    for value in ("²", "99999999999999999999", "0"):
+        result = runner.invoke(app, ["show", value], env=_env(server))
+        assert result.exit_code == 1, (value, result.output)
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+        assert "Task id must be a positive integer" in (result.output + (result.stderr or ""))

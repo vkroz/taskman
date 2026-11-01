@@ -231,3 +231,83 @@ def test_duplicate_event_post_returns_200(database):
     events = json.loads(body)["events"]
     assert [event["kind"] for event in events] == ["commit", "completion", "commit"]
     assert len([event for event in events if event["commit_sha"] == "abc123def456"]) == 1
+
+
+def _call_headers(method, path, token=TOKEN):
+    environ = {
+        "REQUEST_METHOD": method,
+        "PATH_INFO": path,
+        "QUERY_STRING": "",
+        "SERVER_NAME": "taskman.local",
+        "SERVER_PORT": "8080",
+        "SERVER_PROTOCOL": "HTTP/1.1",
+        "wsgi.input": BytesIO(b""),
+        "wsgi.errors": BytesIO(),
+        "CONTENT_LENGTH": "0",
+    }
+    if token is not None:
+        environ["HTTP_AUTHORIZATION"] = f"Bearer {token}"
+    captured = {}
+
+    def start_response(status, headers, exc_info=None):
+        captured["status"] = status
+        captured["headers"] = dict(headers)
+
+    body = b"".join(application(environ, start_response))
+    return int(captured["status"].split()[0]), captured["headers"], body
+
+
+def _sha256_source(text: str) -> str:
+    import base64
+    import hashlib
+
+    return "'sha256-" + base64.b64encode(hashlib.sha256(text.encode("utf-8")).digest()).decode() + "'"
+
+
+def test_page_csp_allows_only_its_own_inline_script_and_style(database):
+    code, headers, body = _call_headers("GET", "/", token=None)
+    assert code == 200
+    page = body.decode("utf-8")
+    script = page.split("<script>", 1)[1].split("</script>", 1)[0]
+    style = page.split("<style>", 1)[1].split("</style>", 1)[0]
+    csp = headers["Content-Security-Policy"]
+    assert f"script-src {_sha256_source(script)};" in csp
+    assert f"style-src {_sha256_source(style)};" in csp
+    assert "default-src 'none'" in csp
+    assert "connect-src 'self'" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert "unsafe-inline" not in csp
+    assert headers["X-Frame-Options"] == "DENY"
+    assert headers["Referrer-Policy"] == "no-referrer"
+
+
+def test_json_responses_send_framing_and_referrer_headers(database):
+    for method, path, token in (("GET", "/health", None), ("GET", "/api/tasks", None), ("GET", "/api/tasks", TOKEN)):
+        _code, headers, _body = _call_headers(method, path, token=token)
+        assert headers["Content-Security-Policy"] == "default-src 'none'; frame-ancestors 'none'"
+        assert headers["X-Frame-Options"] == "DENY"
+        assert headers["Referrer-Policy"] == "no-referrer"
+
+
+def test_out_of_range_and_non_ascii_ids_are_rejected_without_a_500(database):
+    code, body = _call("POST", "/api/tasks", {"title": "Ids", "type": "task", "body": ""})
+    task_id = json.loads(body)["id"]
+    for path in ("/api/tasks/99999999999999999999", "/api/tasks/9223372036854775808", "/api/tasks/²", "/api/tasks/0"):
+        code, _body = _call("GET", path)
+        assert code == 404, path
+    code, body = _call("POST", "/api/tasks", {"title": "Child", "type": "task", "body": "", "parent_id": 2**63})
+    assert code == 400
+    code, body = _call("PUT", f"/api/tasks/{task_id}/dependencies", {"depends_on": [2**63]})
+    assert code == 400
+    code, body = _call("PUT", f"/api/tasks/{task_id}/dependencies", {"depends_on": [-1]})
+    assert code == 400
+
+
+def test_ready_logs_why_it_failed(monkeypatch, capsys):
+    def fail():
+        raise RuntimeError("postgres is down")
+
+    monkeypatch.setattr("taskman.httpapp.ping", fail)
+    code, _body = _call("GET", "/ready", token=None)
+    assert code == 503
+    assert "readiness check failed: RuntimeError: postgres is down" in capsys.readouterr().err

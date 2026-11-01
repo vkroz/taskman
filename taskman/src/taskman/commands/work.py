@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from urllib.parse import urlencode
@@ -28,9 +29,11 @@ def _guard(fn):
 
 
 def _task_id(value: str) -> int:
-    if not str(value).isdigit():
-        raise ApiError(f"Task id must be an integer: {value}")
-    return int(value)
+    # ASCII digits and the Postgres BIGINT range. str.isdigit() also accepts "²".
+    text = str(value)
+    if not re.fullmatch(r"[0-9]{1,19}", text) or not 1 <= int(text) <= 2**63 - 1:
+        raise ApiError(f"Task id must be a positive integer: {value}")
+    return int(text)
 
 
 def _body(path: str | None) -> str:

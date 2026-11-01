@@ -13,6 +13,10 @@ TYPES = {"task", "feat", "epic"}
 STATUSES = {"backlog", "active", "done"}
 EVENT_KINDS = {"pull", "commit", "pull_request", "completion", "note"}
 
+# Transaction-scoped advisory lock that serializes dependency changes, so two
+# concurrent updates cannot each pass the cycle check and together form a cycle.
+_DEPENDENCY_LOCK = 0x74617364  # "tasd"
+
 
 class TaskmanError(Exception):
     def __init__(self, status: int, message: str) -> None:
@@ -60,8 +64,10 @@ def _event(row: dict) -> dict:
     }
 
 
-def _require_task(conn: Connection, task_id: int) -> dict:
-    row = conn.execute("SELECT * FROM tasks WHERE id = %s", (task_id,)).fetchone()
+def _require_task(conn: Connection, task_id: int, *, lock: bool = False) -> dict:
+    """Return the task row. ``lock`` holds it FOR UPDATE until the transaction ends."""
+    query = "SELECT * FROM tasks WHERE id = %s" + (" FOR UPDATE" if lock else "")
+    row = conn.execute(query, (task_id,)).fetchone()
     if row is None:
         raise TaskmanError(404, f"task not found: {task_id}")
     return row
@@ -156,6 +162,7 @@ def _reaches(graph: dict[int, set[int]], start: int, target: int) -> bool:
 
 
 def set_dependencies(conn: Connection, task_id: int, depends_on: list[int]) -> list[int]:
+    conn.execute("SELECT pg_advisory_xact_lock(%s)", (_DEPENDENCY_LOCK,))
     _require_task(conn, task_id)
     unique: list[int] = []
     for dep in depends_on:
@@ -220,8 +227,11 @@ def add_event(
     task, and a completion that repeats the latest completion for the same
     agent and session. The HTTP route answers 201 for a new row and 200 for
     that replay. 200, not 409, so a retry stays a success for the CLI and hooks.
+
+    The task row is locked FOR UPDATE, so concurrent posts for one task run
+    the duplicate check one at a time and cannot both insert.
     """
-    _require_task(conn, task_id)
+    _require_task(conn, task_id, lock=True)
     if kind not in EVENT_KINDS:
         raise TaskmanError(400, "Unknown event kind.")
     message = (message or "")[:4000]

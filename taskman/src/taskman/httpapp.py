@@ -5,7 +5,11 @@ The browser polls ``/api/dashboard``. The server does not open connections to ag
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
+import re
+import sys
 from taskman.access import configured_access_token, secrets_equal
 from taskman.db import ping
 from taskman.store import (
@@ -128,6 +132,29 @@ _PAGE = """<!doctype html>
 """
 
 
+def _inline_hash(tag: str) -> str:
+    """CSP source for the inline <script> or <style> block in ``_PAGE``."""
+    content = _PAGE.split(f"<{tag}>", 1)[1].split(f"</{tag}>", 1)[0]
+    digest = hashlib.sha256(content.encode("utf-8")).digest()
+    return "'sha256-" + base64.b64encode(digest).decode("ascii") + "'"
+
+
+# The page may run only its own inline script and style, may call only this
+# origin, and may not be framed. JSON responses allow nothing.
+_PAGE_CSP = (
+    "default-src 'none'; "
+    f"script-src {_inline_hash('script')}; "
+    f"style-src {_inline_hash('style')}; "
+    "connect-src 'self'; img-src 'none'; "
+    "frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+)
+_API_CSP = "default-src 'none'; frame-ancestors 'none'"
+
+# Largest value of a Postgres BIGINT, the type of every id column.
+_MAX_ID = 2**63 - 1
+_ID_TEXT = re.compile(r"[0-9]{1,19}")
+
+
 def _status_line(status: int) -> str:
     phrases = {
         200: "OK",
@@ -143,12 +170,22 @@ def _status_line(status: int) -> str:
     return f"{status} {phrases.get(status, 'Error')}"
 
 
-def _send(start_response, status: int, body: bytes, content_type: str, extra: list[tuple[str, str]] | None = None):
+def _send(
+    start_response,
+    status: int,
+    body: bytes,
+    content_type: str,
+    extra: list[tuple[str, str]] | None = None,
+    csp: str = _API_CSP,
+):
     headers = [
         ("Content-Type", content_type),
         ("Content-Length", str(len(body))),
         ("Cache-Control", "no-store"),
         ("X-Content-Type-Options", "nosniff"),
+        ("Content-Security-Policy", csp),
+        ("X-Frame-Options", "DENY"),
+        ("Referrer-Policy", "no-referrer"),
     ]
     if extra:
         headers.extend(extra)
@@ -192,16 +229,21 @@ def _read_json(environ: dict, limit: int = 1_000_000) -> dict:
 def _task_id(path: str, prefix: str) -> tuple[int, str]:
     rest = path[len(prefix) :]
     ident, _, tail = rest.partition("/")
-    if not ident.isdigit():
+    # ASCII digits only: str.isdigit() also accepts characters such as "²".
+    if not _ID_TEXT.fullmatch(ident) or not 1 <= int(ident) <= _MAX_ID:
         raise TaskmanError(404, "task not found")
     return int(ident), tail
+
+
+def _is_id(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= _MAX_ID
 
 
 def _optional_int(value, name: str) -> int | None:
     if value is None or value == "":
         return None
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TaskmanError(400, f"{name} must be an integer.")
+    if not _is_id(value):
+        raise TaskmanError(400, f"{name} must be a task id.")
     return value
 
 
@@ -245,7 +287,7 @@ def _route(method: str, path: str, data: dict):
         return 200, with_connection(update_task, task_id, **fields)
     if tail == "dependencies" and method == "PUT":
         raw = data.get("depends_on", [])
-        if not isinstance(raw, list) or not all(isinstance(item, int) and not isinstance(item, bool) for item in raw):
+        if not isinstance(raw, list) or not all(_is_id(item) for item in raw):
             raise TaskmanError(400, "depends_on must be a list of task ids.")
         ids = with_connection(set_dependencies, task_id, raw)
         return 200, {"task_id": task_id, "depends_on": ids}
@@ -290,11 +332,12 @@ def dispatch(environ, start_response, token):
         if method == "GET" and path == "/ready":
             try:
                 ping()
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 — any failure means not ready
+                print(f"readiness check failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
                 return _json(start_response, 503, {"status": "unavailable"})
             return _json(start_response, 200, {"status": "ok"})
         if method == "GET" and path == "/":
-            return _send(start_response, 200, _PAGE.encode("utf-8"), "text/html; charset=utf-8")
+            return _send(start_response, 200, _PAGE.encode("utf-8"), "text/html; charset=utf-8", csp=_PAGE_CSP)
         if token is None:
             return _json(start_response, 503, {"error": "TASKMAN_ACCESS_TOKEN is not configured."})
         if not _authorized(environ, token):
