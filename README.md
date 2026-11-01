@@ -140,6 +140,6 @@ uv sync --extra dev --extra serve
 uv run pytest
 ```
 
-Pytest uses `TASKMAN_TEST_DATABASE_URL` when it is set. Otherwise it starts a Postgres 16 container named `taskman-pytest-pg` on port 54329. Plugin sources live under `plugins/tm/`. Edit those files, not the `.claude/` symlinks.
+Pytest uses `TASKMAN_TEST_DATABASE_URL` when it is set. Otherwise it starts a Postgres 16 container named `taskman-pytest-pg-test` on port 54329. The tests TRUNCATE every Taskman table, so they refuse a database whose name does not end in `_test`. See [CONTRIBUTING.md](CONTRIBUTING.md). Plugin sources live under `plugins/tm/`. Edit those files, not the `.claude/` symlinks.
 
 Branch names are `feat/*` or `chore/*`. Do not push to `main`. The path into `main` is described in [CONTRIBUTING.md](CONTRIBUTING.md).
