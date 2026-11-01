@@ -4,12 +4,42 @@ from __future__ import annotations
 from pathlib import Path
 
 
+def repo_root(start: Path) -> Path:
+    """Directory that contains ``.git``, or ``start`` when this is not a checkout."""
+    current = start.resolve()
+    for directory in (current, *current.parents):
+        if (directory / ".git").exists():
+            return directory
+    return current
+
+
+def task_filename(task_id) -> str:
+    """Numeric id only. A server-provided title or path must not become a filename."""
+    text = str(task_id).strip()
+    if not text.isdigit():
+        raise ValueError(f"task id must be numeric: {task_id!r}")
+    return text
+
+
+def ensure_gitignore(root: Path) -> bool:
+    """Append ``.taskman/`` when it is missing. Returns True if the file changed."""
+    path = root / ".gitignore"
+    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+    entries = {line.strip() for line in existing.splitlines()}
+    if ".taskman/" in entries or ".taskman" in entries:
+        return False
+    prefix = "" if not existing or existing.endswith("\n") else "\n"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(f"{prefix}.taskman/\n")
+    return True
+
+
 def render_working_copy(payload: dict, server_url: str) -> str:
     task = payload["task"]
     lines = [
         f"# {task['title']}",
         "",
-        f"- id: {task['id']}",
+        f"- id: {task_filename(task['id'])}",
         f"- type: {task['type']}",
         f"- status: {task['status']}",
         f"- server: {server_url}",
@@ -28,24 +58,29 @@ def render_working_copy(payload: dict, server_url: str) -> str:
     return "\n".join(lines)
 
 
-def write_working_copy(root: Path, payload: dict, server_url: str) -> Path:
-    task_id = str(payload["task"]["id"])
+def write_working_copy(start: Path, payload: dict, server_url: str) -> Path:
+    root = repo_root(start)
+    task_id = task_filename(payload["task"]["id"])
     directory = root / ".taskman" / "tasks"
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{task_id}.md"
     path.write_text(render_working_copy(payload, server_url), encoding="utf-8")
     (root / ".taskman" / "active").write_text(task_id + "\n", encoding="utf-8")
+    ensure_gitignore(root)
     return path
 
 
 def active_task_id(start: Path) -> str | None:
-    for directory in (start, *start.parents):
-        marker = directory / ".taskman" / "active"
-        if marker.is_file():
-            text = marker.read_text(encoding="utf-8").strip()
-            first = text.splitlines()[0].strip() if text else ""
-            if first.isdigit():
-                return first
-        if (directory / ".git").exists():
-            break
+    marker = repo_root(start) / ".taskman" / "active"
+    if not marker.is_file():
+        return None
+    text = marker.read_text(encoding="utf-8").strip()
+    first = text.splitlines()[0].strip() if text else ""
+    if first.isdigit():
+        return first
     return None
+
+
+def clear_active(start: Path) -> None:
+    marker = repo_root(start) / ".taskman" / "active"
+    marker.unlink(missing_ok=True)

@@ -47,6 +47,11 @@ STATEMENTS = (
     )
     """,
     "CREATE INDEX IF NOT EXISTS events_task_created_idx ON events (task_id, created_at DESC, id DESC)",
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS events_commit_sha_once
+    ON events (task_id, kind, commit_sha)
+    WHERE kind = 'commit' AND commit_sha <> ''
+    """,
 )
 
 

@@ -91,3 +91,84 @@ def test_create_show_and_dashboard_round_trip(database):
     assert "abc123def456"[:12] in row["detail"]
     code, body = _call("POST", "/api/tasks", {"title": "", "type": "task", "body": ""})
     assert code == 400
+
+
+def test_bearer_scheme_is_case_insensitive(database):
+    code, body = _call("POST", "/api/tasks", {"title": "Case", "type": "task", "body": ""})
+    assert code == 201
+    task_id = json.loads(body)["id"]
+    raw = b""
+    environ_token = "bEaReR " + TOKEN
+    # Reuse _call's header builder by passing the mixed-case token through a direct call.
+    from io import BytesIO
+    from taskman.httpapp import application
+
+    environ = {
+        "REQUEST_METHOD": "GET",
+        "PATH_INFO": f"/api/tasks/{task_id}",
+        "QUERY_STRING": "",
+        "SERVER_NAME": "taskman.local",
+        "SERVER_PORT": "8080",
+        "SERVER_PROTOCOL": "HTTP/1.1",
+        "wsgi.version": (1, 0),
+        "wsgi.url_scheme": "http",
+        "wsgi.input": BytesIO(raw),
+        "wsgi.errors": BytesIO(),
+        "wsgi.multithread": False,
+        "wsgi.multiprocess": False,
+        "wsgi.run_once": False,
+        "CONTENT_LENGTH": "0",
+        "HTTP_AUTHORIZATION": environ_token,
+    }
+    captured = {}
+
+    def start_response(status, headers, exc_info=None):
+        captured["status"] = status
+
+    payload = b"".join(application(environ, start_response))
+    assert int(captured["status"].split()[0]) == 200
+    assert json.loads(payload)["title"] == "Case"
+
+
+def test_unknown_event_kind_is_400_and_oversized_body_is_413(database):
+    code, body = _call("POST", "/api/tasks", {"title": "Events", "type": "task", "body": ""})
+    task_id = json.loads(body)["id"]
+    code, body = _call("POST", f"/api/tasks/{task_id}/events", {"kind": "nope"})
+    assert code == 400
+    assert b"Unknown event kind" in body
+    from io import BytesIO
+    from taskman.httpapp import application
+
+    environ = {
+        "REQUEST_METHOD": "POST",
+        "PATH_INFO": "/api/tasks",
+        "QUERY_STRING": "",
+        "SERVER_NAME": "taskman.local",
+        "SERVER_PORT": "8080",
+        "SERVER_PROTOCOL": "HTTP/1.1",
+        "wsgi.version": (1, 0),
+        "wsgi.url_scheme": "http",
+        "wsgi.input": BytesIO(b"{}"),
+        "wsgi.errors": BytesIO(),
+        "wsgi.multithread": False,
+        "wsgi.multiprocess": False,
+        "wsgi.run_once": False,
+        "CONTENT_LENGTH": "2000000",
+        "CONTENT_TYPE": "application/json",
+        "HTTP_AUTHORIZATION": f"Bearer {TOKEN}",
+    }
+    captured = {}
+
+    def start_response(status, headers, exc_info=None):
+        captured["status"] = status
+
+    application(environ, start_response)
+    assert int(captured["status"].split()[0]) == 413
+
+
+def test_pull_rejects_an_empty_agent(database):
+    code, body = _call("POST", "/api/tasks", {"title": "Claim", "type": "task", "body": ""})
+    task_id = json.loads(body)["id"]
+    code, body = _call("POST", f"/api/tasks/{task_id}/pull", {"agent": "  ", "session": ""})
+    assert code == 400
+    assert b"Agent is required" in body

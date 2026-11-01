@@ -24,7 +24,7 @@ The stack is two services:
 | Service | Role |
 | --- | --- |
 | `db` | Postgres 16. Named volume `taskman-db` mounted at `/var/lib/postgresql/data`. |
-| `taskman` | Image `taskman:local`. Command `taskman serve`. gunicorn on `0.0.0.0:$PORT`. |
+| `taskman` | Image `taskman:local`. Command `taskman serve`. gunicorn on `0.0.0.0:$PORT` inside the container. Compose publishes that port on `127.0.0.1` only. |
 
 `http://127.0.0.1:8080/` is the flight-control page. Paste the token into the page; it stays in the browser tab and is sent as `Authorization: Bearer`. `GET /health` is open and returns `{"status":"ok"}` when Postgres answers.
 
@@ -54,7 +54,11 @@ The app waits for Postgres, then creates tables if they are missing. Nothing in 
 | `TASKMAN_AGENT` | no | | Name stored on events from this process. |
 | `TASKMAN_SESSION` | no | | Session id stored on events. |
 
-`taskman config --server http://127.0.0.1:8080` saves the URL in `~/.config/taskman/config.json`. The token should stay in the environment. A config file may also contain `"token"`, but do not commit that file.
+`taskman config --server http://127.0.0.1:8080` saves the URL in `~/.config/taskman/config.json` (mode `0600`). The CLI reads the server URL and token only from that user file and from the environment. A `.taskman/config.json` inside a repository is ignored, so a checkout cannot point the token at another host.
+
+The Compose database password defaults to `taskman`. Change `POSTGRES_PASSWORD` in `.env` before anyone else can reach the machine. Keep the value URL-safe; Compose embeds it in `TASKMAN_DATABASE_URL`.
+
+`taskman install` exits 0 when a requested host CLI is missing, including when every host is skipped, and prints a warning with the command to finish. That keeps `install.sh` from failing after the CLI itself is installed. It exits 2 when a platform name or source is invalid, or when a host CLI is present and its plugin command fails.
 
 ### CLI
 

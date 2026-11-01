@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import json
+import os
+import socket
 import sys
 from pathlib import Path
+from urllib.parse import urlencode
 
 import typer
 
@@ -39,10 +42,17 @@ def _body(path: str | None) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
-def _agent(value: str) -> str:
-    import os
+def default_agent() -> str:
+    """Name recorded when the caller does not pass one. Never empty."""
+    host = socket.gethostname().split(".")[0].strip()
+    return host or "taskman"
 
-    return value or os.environ.get("TASKMAN_AGENT", "")
+
+def _agent(value: str, *, required: bool = False) -> str:
+    chosen = (value or "").strip() or os.environ.get("TASKMAN_AGENT", "").strip()
+    if chosen:
+        return chosen
+    return default_agent() if required else ""
 
 
 def _session(value: str) -> str:
@@ -87,7 +97,7 @@ def list_items(
     """List tasks stored on the server."""
 
     def run():
-        path = "/api/tasks" if not status else f"/api/tasks?status={status}"
+        path = "/api/tasks" if not status else "/api/tasks?" + urlencode({"status": status})
         payload = client_from_env().request("GET", path)
         if as_json:
             typer.echo(json.dumps(payload["tasks"]))
@@ -204,10 +214,14 @@ def pull(
         payload = client.request(
             "POST",
             f"/api/tasks/{_task_id(task_id)}/pull",
-            {"agent": _agent(agent), "session": _session(session)},
+            {"agent": _agent(agent, required=True), "session": _session(session)},
         )
         path = write_working_copy(Path.cwd(), payload, client.base_url)
         typer.echo(str(path))
+        typer.echo(
+            "Working copy is under .taskman/ at the git repo root. That directory is listed in .gitignore.",
+            err=True,
+        )
 
     _guard(run)
 

@@ -134,6 +134,7 @@ def _status_line(status: int) -> str:
         400: "Bad Request",
         401: "Unauthorized",
         404: "Not Found",
+        413: "Payload Too Large",
         405: "Method Not Allowed",
         500: "Internal Server Error",
         503: "Service Unavailable",
@@ -161,7 +162,7 @@ def _json(start_response, status: int, payload, extra=None):
 def _authorized(environ: dict, token: str) -> bool:
     header = environ.get("HTTP_AUTHORIZATION", "")
     scheme, separator, provided = header.partition(" ")
-    if not separator or scheme != "Bearer":
+    if not separator or scheme.lower() != "bearer":
         return False
     return secrets_equal(provided, token)
 
@@ -171,8 +172,10 @@ def _read_json(environ: dict, limit: int = 1_000_000) -> dict:
         length = int(environ.get("CONTENT_LENGTH") or "0")
     except ValueError as exc:
         raise TaskmanError(400, "Invalid request size.") from exc
-    if length < 0 or length > limit:
+    if length < 0:
         raise TaskmanError(400, "Invalid request size.")
+    if length > limit:
+        raise TaskmanError(413, "Request body is too large.")
     raw = environ["wsgi.input"].read(length) if length else b""
     if not raw:
         return {}

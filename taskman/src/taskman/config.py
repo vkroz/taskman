@@ -1,4 +1,9 @@
-"""Where the CLI finds the server URL and access token."""
+"""Where the CLI finds the server URL and access token.
+
+Only the environment and the user file ``~/.config/taskman/config.json`` are
+trusted. A repository ``.taskman/config.json`` is ignored so a checkout cannot
+choose the host that receives the access token, or hide the user's token.
+"""
 from __future__ import annotations
 
 import json
@@ -18,17 +23,6 @@ def user_config_path() -> Path:
     return Path.home() / ".config" / "taskman" / "config.json"
 
 
-def _config_candidates() -> list[Path]:
-    paths: list[Path] = []
-    cwd = Path.cwd()
-    for directory in (cwd, *cwd.parents):
-        paths.append(directory / ".taskman" / "config.json")
-        if (directory / ".git").exists():
-            break
-    paths.append(user_config_path())
-    return paths
-
-
 def _read_json(path: Path) -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -38,25 +32,20 @@ def _read_json(path: Path) -> dict:
 
 
 def resolve_settings() -> Settings:
-    """Environment variables win over a config file. The token is optional here.
-
-    Callers that talk to the API reject an empty token. ``taskman config`` can
-    still print the resolved URL when the token is missing.
-    """
-    found: dict = {}
-    found_path: Path | None = None
-    for path in _config_candidates():
-        if path.is_file():
-            found = _read_json(path)
-            found_path = path
-            break
+    """Environment variables override the user config. Repo config is not read."""
+    path = user_config_path()
+    found = _read_json(path) if path.is_file() else {}
     url = os.environ.get("TASKMAN_URL") or str(found.get("url") or "http://127.0.0.1:8080")
     env_token = os.environ.get("TASKMAN_ACCESS_TOKEN")
     if env_token is None:
         token = str(found.get("token") or "")
     else:
         token = env_token
-    return Settings(url=url.strip().rstrip("/"), token=token.strip(), config_path=found_path)
+    return Settings(
+        url=url.strip().rstrip("/"),
+        token=token.strip(),
+        config_path=path if path.is_file() else None,
+    )
 
 
 def save_server_url(url: str) -> Path:
@@ -64,5 +53,12 @@ def save_server_url(url: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     current = _read_json(path) if path.is_file() else {}
     current["url"] = url.strip().rstrip("/")
-    path.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
+    payload = (json.dumps(current, indent=2) + "\n").encode("utf-8")
+    # Create with 0600 before writing so the token is not briefly world-readable.
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(descriptor, payload)
+    finally:
+        os.close(descriptor)
+    path.chmod(0o600)
     return path

@@ -47,3 +47,15 @@ def test_pull_marks_backlog_work_active(database):
         assert payload["task"]["status"] == "active"
         assert payload["events"][0]["kind"] == "pull"
         assert payload["events"][0]["agent"] == "codex"
+
+
+def test_the_same_commit_sha_is_stored_once(database):
+    with connect(database) as conn:
+        task = create_task(conn, "Commit", "", "task", None)
+        from taskman.store import add_event
+
+        first = add_event(conn, task["id"], "commit", agent="git", commit_sha="abc123", message="one")
+        second = add_event(conn, task["id"], "commit", agent="claude-code", commit_sha="abc123", message="again")
+        assert first["id"] == second["id"]
+        count = conn.execute("SELECT count(*) AS n FROM events WHERE kind = 'commit'").fetchone()["n"]
+        assert count == 1

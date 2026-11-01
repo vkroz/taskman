@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/report.sh\"",
-            "timeout": 20
+            "timeout": 5
           }
         ]
       }
@@ -18,7 +18,7 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/report.sh\"",
-            "timeout": 20
+            "timeout": 5
           }
         ]
       }

@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from psycopg import Connection
+from psycopg.errors import UniqueViolation
 
 from taskman.db import connect
 
@@ -220,6 +221,8 @@ def add_event(
     session = (session or "")[:200]
     commit_sha = (commit_sha or "")[:80]
     pr_url = (pr_url or "")[:500]
+    if kind == "pull" and not agent.strip():
+        raise TaskmanError(400, "Agent is required.")
     latest = conn.execute(
         """
         SELECT * FROM events
@@ -236,15 +239,35 @@ def add_event(
         and latest["session"] == session
     ):
         return _event(latest)
-    row = conn.execute(
-        """
-        INSERT INTO events (task_id, kind, agent, session, commit_sha, message, pr_url)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-        RETURNING *
-        """,
-        (task_id, kind, agent, session, commit_sha, message, pr_url),
-    ).fetchone()
-    conn.execute("UPDATE tasks SET updated_at = now() WHERE id = %s", (task_id,))
+    if kind == "commit" and commit_sha:
+        existing = conn.execute(
+            """
+            SELECT * FROM events
+            WHERE task_id = %s AND kind = 'commit' AND commit_sha = %s
+            """,
+            (task_id, commit_sha),
+        ).fetchone()
+        if existing:
+            return _event(existing)
+    try:
+        with conn.transaction():
+            row = conn.execute(
+                """
+                INSERT INTO events (task_id, kind, agent, session, commit_sha, message, pr_url)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING *
+                """,
+                (task_id, kind, agent, session, commit_sha, message, pr_url),
+            ).fetchone()
+            conn.execute("UPDATE tasks SET updated_at = now() WHERE id = %s", (task_id,))
+    except UniqueViolation:
+        row = conn.execute(
+            """
+            SELECT * FROM events
+            WHERE task_id = %s AND kind = 'commit' AND commit_sha = %s
+            """,
+            (task_id, commit_sha),
+        ).fetchone()
     return _event(row)
 
 

@@ -143,7 +143,11 @@ def install(
     if present:
         typer.echo("Start a fresh host session to load the plugin.")
     elif missing:
-        typer.echo("No plugins registered. Install a host CLI and re-run the command shown above.", err=True)
+        typer.echo(
+            "Warning: no plugins were installed because every requested host CLI is missing. "
+            "No plugins registered. Install a host CLI and re-run the command shown above.",
+            err=True,
+        )
     typer.echo(
         "Point the CLI at the server with TASKMAN_URL and TASKMAN_ACCESS_TOKEN, "
         "or `taskman config --server URL`. In each git checkout, run `taskman hooks install` "

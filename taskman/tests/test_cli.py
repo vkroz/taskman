@@ -89,6 +89,20 @@ def test_wrong_token_is_rejected_by_the_cli(server):
     assert "Authentication required" in (result.output + (result.stderr or ""))
 
 
+def test_pull_defaults_a_non_empty_agent(server, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    env = _env(server)
+    env.pop("TASKMAN_AGENT", None)
+    created = runner.invoke(app, ["new", "--title", "Named agent", "--json"], env=env)
+    assert created.exit_code == 0, created.output
+    task_id = str(json.loads(created.output)["id"])
+    pulled = runner.invoke(app, ["pull", task_id], env=env)
+    assert pulled.exit_code == 0, pulled.output
+    shown = json.loads(runner.invoke(app, ["context", task_id], env=env).output)
+    assert shown["events"][0]["kind"] == "pull"
+    assert shown["events"][0]["agent"]
+
+
 def test_validate_reports_ok(server):
     result = runner.invoke(app, ["validate"], env=_env(server))
     assert result.exit_code == 0, result.output
