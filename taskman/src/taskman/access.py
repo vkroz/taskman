@@ -1,7 +1,7 @@
 """Shared-secret access check for the Taskman server.
 
 ``taskman serve`` refuses to start when this value is missing. The WSGI app
-rejects API calls with the same rule. ``GET /health`` does not use it.
+rejects API calls with the same rule. ``GET /health`` and ``GET /ready`` do not use it.
 """
 from __future__ import annotations
 

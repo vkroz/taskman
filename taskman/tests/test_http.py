@@ -47,6 +47,9 @@ def test_health_is_open_and_the_page_has_no_task_data(database):
     code, body = _call("GET", "/health", token=None)
     assert code == 200
     assert json.loads(body) == {"status": "ok"}
+    code, body = _call("GET", "/ready", token=None)
+    assert code == 200
+    assert json.loads(body) == {"status": "ok"}
     code, page = _call("GET", "/", token=None)
     assert code == 200
     assert b"flight control" in page.lower()
@@ -65,9 +68,15 @@ def test_missing_and_wrong_tokens_are_rejected(database):
     assert b"Secret title" not in body
 
 
-def test_health_reports_unavailable_when_postgres_is_down(monkeypatch):
-    monkeypatch.setenv("TASKMAN_DATABASE_URL", "postgresql://taskman:taskman@127.0.0.1:1/taskman")
+def test_health_stays_up_when_readiness_cannot_reach_postgres(monkeypatch):
+    def fail():
+        raise RuntimeError("postgres is down")
+
+    monkeypatch.setattr("taskman.httpapp.ping", fail)
     code, body = _call("GET", "/health", token=None)
+    assert code == 200
+    assert json.loads(body) == {"status": "ok"}
+    code, body = _call("GET", "/ready", token=None)
     assert code == 503
     assert json.loads(body)["status"] == "unavailable"
 
@@ -172,3 +181,53 @@ def test_pull_rejects_an_empty_agent(database):
     code, body = _call("POST", f"/api/tasks/{task_id}/pull", {"agent": "  ", "session": ""})
     assert code == 400
     assert b"Agent is required" in body
+
+
+def test_complete_and_events_reject_an_empty_agent(database):
+    code, body = _call("POST", "/api/tasks", {"title": "Claim", "type": "task", "body": ""})
+    task_id = json.loads(body)["id"]
+    code, body = _call("POST", f"/api/tasks/{task_id}/complete", {"message": "done", "agent": " "})
+    assert code == 400
+    assert b"Agent is required" in body
+    code, body = _call(
+        "POST",
+        f"/api/tasks/{task_id}/events",
+        {"kind": "pull_request", "agent": "", "pr_url": "https://example.com/pull/1"},
+    )
+    assert code == 400
+    assert b"Agent is required" in body
+    code, body = _call("GET", f"/api/tasks/{task_id}/context")
+    assert json.loads(body)["events"] == []
+
+
+def test_duplicate_event_post_returns_200(database):
+    code, body = _call("POST", "/api/tasks", {"title": "Events", "type": "task", "body": ""})
+    task_id = json.loads(body)["id"]
+    commit = {"kind": "commit", "agent": "codex", "commit_sha": "abc123def456", "message": "first cut"}
+    code, body = _call("POST", f"/api/tasks/{task_id}/events", commit)
+    assert code == 201
+    first = json.loads(body)
+    code, body = _call(
+        "POST",
+        f"/api/tasks/{task_id}/events",
+        {"kind": "commit", "agent": "git", "commit_sha": "abc123def456", "message": "again"},
+    )
+    assert code == 200
+    assert json.loads(body)["id"] == first["id"]
+    completion = {"kind": "completion", "agent": "codex", "session": "sess", "message": "shipped"}
+    code, body = _call("POST", f"/api/tasks/{task_id}/events", completion)
+    assert code == 201
+    done = json.loads(body)
+    code, body = _call("POST", f"/api/tasks/{task_id}/events", {**completion, "message": "shipped again"})
+    assert code == 200
+    assert json.loads(body)["id"] == done["id"]
+    code, body = _call(
+        "POST",
+        f"/api/tasks/{task_id}/events",
+        {"kind": "commit", "agent": "codex", "commit_sha": "fff999", "message": "second"},
+    )
+    assert code == 201
+    code, body = _call("GET", f"/api/tasks/{task_id}/context")
+    events = json.loads(body)["events"]
+    assert [event["kind"] for event in events] == ["commit", "completion", "commit"]
+    assert len([event for event in events if event["commit_sha"] == "abc123def456"]) == 1

@@ -212,16 +212,24 @@ def add_event(
     commit_sha: str = "",
     message: str = "",
     pr_url: str = "",
-) -> dict:
+) -> tuple[dict, bool]:
+    """Insert an event. Returns the stored row and whether this call inserted it.
+
+    A blank agent is rejected for every kind. Two posts store nothing new and
+    the second value is False: a commit whose sha is already stored for the
+    task, and a completion that repeats the latest completion for the same
+    agent and session. The HTTP route answers 201 for a new row and 200 for
+    that replay. 200, not 409, so a retry stays a success for the CLI and hooks.
+    """
     _require_task(conn, task_id)
     if kind not in EVENT_KINDS:
         raise TaskmanError(400, "Unknown event kind.")
     message = (message or "")[:4000]
-    agent = (agent or "")[:200]
+    agent = (agent or "").strip()[:200]
     session = (session or "")[:200]
     commit_sha = (commit_sha or "")[:80]
     pr_url = (pr_url or "")[:500]
-    if kind == "pull" and not agent.strip():
+    if not agent:
         raise TaskmanError(400, "Agent is required.")
     latest = conn.execute(
         """
@@ -238,7 +246,7 @@ def add_event(
         and latest["agent"] == agent
         and latest["session"] == session
     ):
-        return _event(latest)
+        return _event(latest), False
     if kind == "commit" and commit_sha:
         existing = conn.execute(
             """
@@ -248,7 +256,7 @@ def add_event(
             (task_id, commit_sha),
         ).fetchone()
         if existing:
-            return _event(existing)
+            return _event(existing), False
     try:
         with conn.transaction():
             row = conn.execute(
@@ -268,7 +276,8 @@ def add_event(
             """,
             (task_id, commit_sha),
         ).fetchone()
-    return _event(row)
+        return _event(row), False
+    return _event(row), True
 
 
 def list_events(conn: Connection, task_id: int) -> list[dict]:
@@ -314,7 +323,9 @@ def pull_task(conn: Connection, task_id: int, agent: str, session: str) -> dict:
 
 def complete_task(conn: Connection, task_id: int, message: str, agent: str, session: str) -> dict:
     _require_task(conn, task_id)
-    event = add_event(conn, task_id, "completion", agent=agent, session=session, message=message or "completed")
+    event, _created = add_event(
+        conn, task_id, "completion", agent=agent, session=session, message=message or "completed"
+    )
     task = update_task(conn, task_id, status="done")
     return {"task": task, "event": event}
 

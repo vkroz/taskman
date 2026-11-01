@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, staging]
+  push:
+    branches: [staging]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: taskman
+          POSTGRES_PASSWORD: taskman
+          POSTGRES_DB: taskman
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U taskman -d taskman"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TASKMAN_TEST_DATABASE_URL: postgresql://taskman:taskman@127.0.0.1:5432/taskman
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        working-directory: taskman
+        run: uv sync --frozen --extra dev --extra serve
+      - name: Run tests
+        working-directory: taskman
+        run: uv run pytest

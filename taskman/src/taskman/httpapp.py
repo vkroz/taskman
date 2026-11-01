@@ -1,6 +1,7 @@
-"""WSGI application: dashboard, task API, and an open health check.
+"""WSGI application: dashboard, task API, liveness, and readiness.
 
 The browser polls ``/api/dashboard``. The server does not open connections to agents.
+``GET /health`` does not touch Postgres. ``GET /ready`` runs ``SELECT 1``.
 """
 from __future__ import annotations
 
@@ -251,7 +252,7 @@ def _route(method: str, path: str, data: dict):
     if tail == "context" and method == "GET":
         return 200, with_connection(context, task_id)
     if tail == "events" and method == "POST":
-        event = with_connection(
+        event, created = with_connection(
             add_event,
             task_id,
             _text(data, "kind"),
@@ -261,7 +262,11 @@ def _route(method: str, path: str, data: dict):
             message=_text(data, "message"),
             pr_url=_text(data, "pr_url"),
         )
-        return 201, event
+        # 201 only when a row was inserted. A duplicate commit sha, or a
+        # completion that repeats the latest one for the same agent and
+        # session, returns 200 and the stored event. 409 would turn a
+        # successful retry into an error for the CLI and the hooks.
+        return (201 if created else 200), event
     if tail == "pull" and method == "POST":
         return 200, with_connection(pull_task, task_id, _text(data, "agent"), _text(data, "session"))
     if tail == "complete" and method == "POST":
@@ -281,6 +286,8 @@ def dispatch(environ, start_response, token):
         query_status = parse_qs(environ.get("QUERY_STRING", "")).get("status", [None])[0]
     try:
         if method == "GET" and path == "/health":
+            return _json(start_response, 200, {"status": "ok"})
+        if method == "GET" and path == "/ready":
             try:
                 ping()
             except Exception:

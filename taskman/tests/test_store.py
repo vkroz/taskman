@@ -54,8 +54,26 @@ def test_the_same_commit_sha_is_stored_once(database):
         task = create_task(conn, "Commit", "", "task", None)
         from taskman.store import add_event
 
-        first = add_event(conn, task["id"], "commit", agent="git", commit_sha="abc123", message="one")
-        second = add_event(conn, task["id"], "commit", agent="claude-code", commit_sha="abc123", message="again")
+        first, created = add_event(conn, task["id"], "commit", agent="git", commit_sha="abc123", message="one")
+        second, replayed = add_event(
+            conn, task["id"], "commit", agent="claude-code", commit_sha="abc123", message="again"
+        )
+        assert created is True
+        assert replayed is False
         assert first["id"] == second["id"]
         count = conn.execute("SELECT count(*) AS n FROM events WHERE kind = 'commit'").fetchone()["n"]
         assert count == 1
+
+
+def test_a_blank_agent_is_rejected_for_every_event(database):
+    with connect(database) as conn:
+        task = create_task(conn, "Named", "", "task", None)
+        from taskman.store import add_event
+
+        for kind in ("pull", "commit", "pull_request", "completion", "note"):
+            with pytest.raises(TaskmanError) as exc:
+                add_event(conn, task["id"], kind, agent="  ", commit_sha="abc", pr_url="https://example.com/1")
+            assert exc.value.status == 400
+            assert exc.value.message == "Agent is required."
+        count = conn.execute("SELECT count(*) AS n FROM events").fetchone()["n"]
+        assert count == 0

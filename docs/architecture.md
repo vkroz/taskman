@@ -6,6 +6,8 @@ The process does not open a git checkout, import `tasks/` files, or connect to a
 
 The flight-control page is static HTML plus a browser poll of `GET /api/dashboard` every three seconds. Rows come from the latest event on each task: who reported it, the event kind, and the commit, pull request, or completion detail.
 
-Access is a single bearer token from `TASKMAN_ACCESS_TOKEN`. `GET /health` does not require it and runs `SELECT 1`.
+Access is a single bearer token from `TASKMAN_ACCESS_TOKEN`. `GET /health` and `GET /ready` do not require it. `/health` is liveness and does not open a database connection. `/ready` is the readiness check and runs `SELECT 1`.
+
+`POST /api/tasks/{id}/events` returns 201 when it inserts a row. When the post matches an event already stored — the same commit sha, or a completion that repeats the latest completion for the same agent and session — the response is 200 and that stored event. 200 keeps a retry successful. 409 would make the CLI and the hooks treat a stored event as a failure. Every event requires a non-empty agent.
 
 Docker Compose runs that app next to Postgres and stores the database on the named volume `taskman-db`. The Compose file has no cloud-vendor fields. Hosting it somewhere else means running the same two containers and injecting the same environment variables.

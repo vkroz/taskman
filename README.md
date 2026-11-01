@@ -26,7 +26,7 @@ The stack is two services:
 | `db` | Postgres 16. Named volume `taskman-db` mounted at `/var/lib/postgresql/data`. |
 | `taskman` | Image `taskman:local`. Command `taskman serve`. gunicorn on `0.0.0.0:$PORT` inside the container. Compose publishes that port on `127.0.0.1` only. |
 
-`http://127.0.0.1:8080/` is the flight-control page. Paste the token into the page; it stays in the browser tab and is sent as `Authorization: Bearer`. `GET /health` is open and returns `{"status":"ok"}` when Postgres answers.
+`http://127.0.0.1:8080/` is the flight-control page. Paste the token into the page; it stays in the browser tab and is sent as `Authorization: Bearer`. `GET /health` is liveness: it does not open a database connection and returns `{"status":"ok"}` when the process is up. `GET /ready` is readiness: it runs `SELECT 1` and returns `{"status":"unavailable"}` with status 503 when Postgres does not answer. Neither check requires the token. The image and Compose healthchecks call `/ready`.
 
 ```sh
 docker compose ps
@@ -51,7 +51,7 @@ The app waits for Postgres, then creates tables if they are missing. Nothing in 
 | `POSTGRES_DB` | no | `taskman` | Database name. |
 | `TASKMAN_WEB_WORKERS` | no | `2` | gunicorn workers. |
 | `TASKMAN_URL` | CLI | `http://127.0.0.1:8080` | Server the CLI calls. |
-| `TASKMAN_AGENT` | no | | Name stored on events from this process. |
+| `TASKMAN_AGENT` | no | | Name stored on events from this process. When this and `--agent` are unset, commands that record an event use the machine's short hostname. The server rejects a blank agent. |
 | `TASKMAN_SESSION` | no | | Session id stored on events. |
 
 `taskman config --server http://127.0.0.1:8080` saves the URL in `~/.config/taskman/config.json` (mode `0600`). The CLI reads the server URL and token only from that user file and from the environment. A `.taskman/config.json` inside a repository is ignored, so a checkout cannot point the token at another host.
@@ -129,6 +129,7 @@ Text files under `tasks/` in a repository are not imported. Copy the title and b
 - The dashboard shows the latest event on each task. It updates because the browser polls. The server does not call out to agents.
 - There is no delete, no draft/finalize step, and no rule that a parent stays open until every child is done. Completion is `taskman complete` or the Stop hook line above.
 - A pull event is recorded when an agent runs `taskman pull`, so the board can show who claimed the task before the first commit. The three hook events are commit, pull request, and completion.
+- Posting an event that is already stored returns 200 and that event. This covers a commit whose sha is already recorded for the task, and a completion that repeats the latest completion for the same agent and session. A post that inserts a row returns 201. The duplicate answer is 200 rather than 409 so a retry stays successful for the CLI and the hooks.
 - Several gunicorn workers on one machine share Postgres. Run one app service against the database.
 
 ## Develop
@@ -140,3 +141,5 @@ uv run pytest
 ```
 
 Pytest uses `TASKMAN_TEST_DATABASE_URL` when it is set. Otherwise it starts a Postgres 16 container named `taskman-pytest-pg` on port 54329. Plugin sources live under `plugins/tm/`. Edit those files, not the `.claude/` symlinks.
+
+Branch names are `feat/*` or `chore/*`. Do not push to `main`. The path into `main` is described in [CONTRIBUTING.md](CONTRIBUTING.md).

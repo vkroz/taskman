@@ -48,11 +48,13 @@ def default_agent() -> str:
     return host or "taskman"
 
 
-def _agent(value: str, *, required: bool = False) -> str:
+def _agent(value: str) -> str:
+    """Name stored on an event. Never empty.
+
+    Order is the flag, then ``TASKMAN_AGENT``, then the short hostname.
+    """
     chosen = (value or "").strip() or os.environ.get("TASKMAN_AGENT", "").strip()
-    if chosen:
-        return chosen
-    return default_agent() if required else ""
+    return chosen or default_agent()
 
 
 def _session(value: str) -> str:
@@ -214,7 +216,7 @@ def pull(
         payload = client.request(
             "POST",
             f"/api/tasks/{_task_id(task_id)}/pull",
-            {"agent": _agent(agent, required=True), "session": _session(session)},
+            {"agent": _agent(agent), "session": _session(session)},
         )
         path = write_working_copy(Path.cwd(), payload, client.base_url)
         typer.echo(str(path))

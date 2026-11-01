@@ -34,8 +34,14 @@ Files already stored under a repository's tasks/ directory are not imported.
 Copy their text into `taskman new` yourself.
 
 The access check is one shared bearer token. There are no user accounts.
-GET /health does not require the token. The flight-control page keeps the
-token in the browser tab and sends it as Authorization: Bearer.
+GET /health is liveness and does not open a database connection. GET /ready
+checks Postgres. Neither requires the token. The flight-control page keeps
+the token in the browser tab and sends it as Authorization: Bearer.
+
+When --agent and TASKMAN_AGENT are both unset, commands that record an
+event store the short hostname. The server rejects a blank agent. Repeating a
+commit with the same sha, or a completion for the same agent and session,
+returns 200 and the event already stored. A new event returns 201.
 """
 
 

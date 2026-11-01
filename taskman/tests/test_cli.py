@@ -103,6 +103,30 @@ def test_pull_defaults_a_non_empty_agent(server, tmp_path, monkeypatch):
     assert shown["events"][0]["agent"]
 
 
+def test_complete_and_report_pr_default_a_non_empty_agent(server, tmp_path, monkeypatch):
+    from taskman.commands.work import default_agent
+
+    monkeypatch.chdir(tmp_path)
+    env = _env(server)
+    env.pop("TASKMAN_AGENT", None)
+    created = runner.invoke(app, ["new", "--title", "Named agent", "--json"], env=env)
+    assert created.exit_code == 0, created.output
+    task_id = str(json.loads(created.output)["id"])
+    finished = runner.invoke(app, ["complete", task_id, "--message", "shipped"], env=env)
+    assert finished.exit_code == 0, finished.output
+    reported = runner.invoke(
+        app,
+        ["report", "pr", "--task", task_id, "--url", "https://example.com/pull/7", "--agent", "   "],
+        env=env,
+    )
+    assert reported.exit_code == 0, reported.output
+    shown = json.loads(runner.invoke(app, ["context", task_id], env=env).output)
+    agents = {event["kind"]: event["agent"] for event in shown["events"]}
+    assert agents["completion"] == default_agent()
+    assert agents["pull_request"] == default_agent()
+    assert "" not in agents.values()
+
+
 def test_validate_reports_ok(server):
     result = runner.invoke(app, ["validate"], env=_env(server))
     assert result.exit_code == 0, result.output
