@@ -7,7 +7,7 @@ Arguments: `[task|feature|epic] ID`.
 
 Read [the shared workflow](../../references/workflow.md) for CLI syntax, context, journals and closure rules.
 
-Before editing the repository, run `taskman pull ID` and read `.taskman/tasks/ID.md`. The server is the source of truth. Do not write live task files under `tasks/`. When the work is finished, run `taskman complete ID --message "..."` and include the line `Taskman completion: ID` in the final message. Commits and pull requests are reported by the Claude Code hook or, after `taskman hooks install`, by the git post-commit hook.
+Before editing the repository, run `taskman pull ID --agent <author>` and read `.taskman/tasks/ID.md`. The server is the source of truth. Do not write live task files under `tasks/`. When the work is finished, run `taskman complete ID --message "..." --agent <author>` and include the line `Taskman completion: ID` in the final message. Commits and pull requests are reported by the Claude Code hook or, after `taskman hooks install`, by the git post-commit hook.
 
 Read the target context and relevant repository rules. For a parent, inspect the existing decomposition and execute ready children in dependency order. Create missing work only within the authorized scope; avoid duplicate tasks.
 

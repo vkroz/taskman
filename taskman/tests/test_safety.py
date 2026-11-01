@@ -155,7 +155,7 @@ def test_report_script_exits_zero_when_the_binary_lacks_hook(tmp_path):
         bin_dir,
         "taskman",
         "#!/bin/sh\n"
-        "echo \"$1 $2\" >> \"%s\"\n"
+        "echo \"$*\" >> \"%s\"\n"
         "exit 2\n" % log,
     )
     env = os.environ.copy()
@@ -170,8 +170,8 @@ def test_report_script_exits_zero_when_the_binary_lacks_hook(tmp_path):
         check=False,
     )
     assert result.returncode == 0
-    assert "does not provide a hook command" in result.stderr
-    assert log.read_text().strip() == "hook claude"
+    assert "does not support 'hook claude --agent'" in result.stderr
+    assert log.read_text().strip() == "hook claude --agent claude-code"
 
 
 def test_report_script_exits_zero_when_hook_claude_fails(tmp_path):
@@ -236,7 +236,7 @@ def test_report_script_runs_the_hook_without_timeout_or_gtimeout(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log = tmp_path / "log"
-    _stub(bin_dir, "taskman", "#!/bin/sh\necho \"$1 $2\" >> \"%s\"\nexit 0\n" % log)
+    _stub(bin_dir, "taskman", "#!/bin/sh\necho \"$*\" >> \"%s\"\nexit 0\n" % log)
     env = {"PATH": _bare_path(bin_dir), "HOME": str(tmp_path / "empty-home")}
     result = subprocess.run(
         ["/bin/sh", str(SCRIPT)],
@@ -248,7 +248,7 @@ def test_report_script_runs_the_hook_without_timeout_or_gtimeout(tmp_path):
         timeout=10,
     )
     assert result.returncode == 0
-    assert log.read_text().strip() == "hook claude"
+    assert log.read_text().strip() == "hook claude --agent claude-code"
     assert "not reported" not in result.stderr
 
 
@@ -257,7 +257,7 @@ def test_report_script_uses_gtimeout_when_timeout_is_missing(tmp_path):
     bin_dir.mkdir()
     log = tmp_path / "log"
     _stub(bin_dir, "gtimeout", "#!/bin/sh\necho \"gtimeout $1\" >> \"%s\"\nshift\nexec \"$@\"\n" % log)
-    _stub(bin_dir, "taskman", "#!/bin/sh\necho \"$1 $2\" >> \"%s\"\nexit 0\n" % log)
+    _stub(bin_dir, "taskman", "#!/bin/sh\necho \"$*\" >> \"%s\"\nexit 0\n" % log)
     env = {"PATH": _bare_path(bin_dir), "HOME": str(tmp_path / "empty-home")}
     result = subprocess.run(
         ["/bin/sh", str(SCRIPT)],
@@ -269,7 +269,7 @@ def test_report_script_uses_gtimeout_when_timeout_is_missing(tmp_path):
         timeout=10,
     )
     assert result.returncode == 0
-    assert log.read_text().splitlines() == ["gtimeout 4", "hook claude"]
+    assert log.read_text().splitlines() == ["gtimeout 4", "hook claude --agent claude-code"]
 
 
 def test_a_blank_env_token_does_not_hide_the_user_file_token(tmp_path, monkeypatch):

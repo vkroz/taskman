@@ -18,10 +18,11 @@ report() {
     limit=""
   fi
   # $limit is unquoted on purpose so that an empty value expands to nothing.
-  printf '%s' "$payload" | $limit "$bin" hook claude >/dev/null 2>&1
+  # Every event from this hook records the author as claude-code.
+  printf '%s' "$payload" | $limit "$bin" hook claude --agent claude-code >/dev/null 2>&1
   status=$?
   if [ "$status" -eq 2 ]; then
-    echo "taskman at $bin does not provide a hook command; activity was not reported" >&2
+    echo "taskman at $bin does not support 'hook claude --agent'; update taskman. Activity was not reported" >&2
   elif [ "$status" -eq 124 ]; then
     echo "taskman hook timed out; activity was not reported" >&2
   fi

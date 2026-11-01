@@ -7,7 +7,7 @@ Arguments: `[product|epic|feature] [ID]`.
 
 Read [the shared workflow](../../references/workflow.md) for CLI syntax, context, journals and closure rules.
 
-Run `taskman pull ID` and read `.taskman/tasks/ID.md` before changing the repository. Record the design note with `taskman update` and `taskman record`. Do not write live task files under `tasks/`.
+Run `taskman pull ID --agent <author>` and read `.taskman/tasks/ID.md` before changing the repository. Record the design note with `taskman update` and `taskman record ... --agent <author>`. Do not write live task files under `tasks/`.
 
 Read the current requirements, architecture, implementation and target context. Identify the concrete design decision, alternatives that matter, and evidence supporting the choice. Preserve existing constraints and unrelated decisions.
 

@@ -240,7 +240,7 @@ def add_event(
     commit_sha = (commit_sha or "")[:80]
     pr_url = (pr_url or "")[:500]
     if not agent:
-        raise TaskmanError(400, "Agent is required.")
+        raise TaskmanError(400, "Agent is required: name who authored these changes.")
     latest = conn.execute(
         """
         SELECT * FROM events

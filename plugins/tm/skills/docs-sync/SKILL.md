@@ -7,7 +7,7 @@ Arguments: `[ID]`.
 
 Read [the shared workflow](../../references/workflow.md) for CLI syntax, context, journals and closure rules.
 
-Run `taskman pull ID` and read `.taskman/tasks/ID.md` for the completed item. Do not edit historical files under `tasks/` as if they were the live store.
+Run `taskman pull ID --agent <author>` and read `.taskman/tasks/ID.md` for the completed item. Do not edit historical files under `tasks/` as if they were the live store.
 
 Read the specified item's context, completion summary and changed artifacts. If an existing `tasks/docs-sync-queue.txt` is present, it can identify candidates; the Python CLI does not automatically populate that legacy queue.
 

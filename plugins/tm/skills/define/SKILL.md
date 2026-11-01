@@ -7,7 +7,7 @@ Arguments: `[product|epic|feature|task]`.
 
 Read [the shared workflow](../../references/workflow.md) for CLI syntax, context, journals and closure rules.
 
-Create items with `taskman new`. If an id already exists, run `taskman pull ID` and read `.taskman/tasks/ID.md` before editing the repository. Do not write live task files under `tasks/`. Copy any older file text into `taskman new` by hand.
+Create items with `taskman new`. If an id already exists, run `taskman pull ID --agent <author>` and read `.taskman/tasks/ID.md` before editing the repository. Do not write live task files under `tasks/`. Copy any older file text into `taskman new` by hand.
 
 Establish the intended outcome, scope, observable acceptance criteria and meaningful quality gates from the user's request and repository context. Ask only about unresolved decisions that affect the outcome. For a bug, include reproduction, expected and actual behavior; create it as type `task`.
 

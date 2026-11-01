@@ -37,7 +37,7 @@ def server(database):
 
 def _env(base: str) -> dict[str, str]:
     env = os.environ.copy()
-    env.update({"TASKMAN_URL": base, "TASKMAN_ACCESS_TOKEN": TOKEN, "TASKMAN_AGENT": "codex"})
+    env.update({"TASKMAN_URL": base, "TASKMAN_ACCESS_TOKEN": TOKEN})
     return env
 
 
@@ -89,42 +89,75 @@ def test_wrong_token_is_rejected_by_the_cli(server):
     assert "Authentication required" in (result.output + (result.stderr or ""))
 
 
-def test_pull_defaults_a_non_empty_agent(server, tmp_path, monkeypatch):
+AGENT_REQUIRED = "--agent <author> is required: name who authored these changes"
+
+
+def _event_commands(task_id: str) -> list[list[str]]:
+    """Every CLI command that records an event, without --agent."""
+    return [
+        ["pull", task_id],
+        ["record", task_id, "--message", "note"],
+        ["complete", task_id],
+        ["close", task_id],
+        ["report", "commit", "--task", task_id, "--sha", "abc123"],
+        ["report", "pr", "--task", task_id, "--url", "https://example.com/pull/7"],
+        ["report", "completion", "--task", task_id],
+    ]
+
+
+@pytest.mark.parametrize("blank", [None, "", "   "])
+def test_every_event_command_requires_an_author(server, tmp_path, monkeypatch, blank):
     monkeypatch.chdir(tmp_path)
-    env = _env(server)
-    env.pop("TASKMAN_AGENT", None)
-    created = runner.invoke(app, ["new", "--title", "Named agent", "--json"], env=env)
+    created = runner.invoke(app, ["new", "--title", "Authored", "--json"], env=_env(server))
     assert created.exit_code == 0, created.output
     task_id = str(json.loads(created.output)["id"])
-    pulled = runner.invoke(app, ["pull", task_id], env=env)
+    for command in _event_commands(task_id):
+        args = command if blank is None else [*command, "--agent", blank]
+        result = runner.invoke(app, args, env=_env(server))
+        assert result.exit_code == 1, (args, result.output)
+        assert AGENT_REQUIRED in (result.output + (result.stderr or "")), args
+    shown = json.loads(runner.invoke(app, ["context", task_id], env=_env(server)).output)
+    assert shown["events"] == []
+    assert shown["task"]["status"] == "backlog"
+
+
+def test_the_author_ignores_the_environment(server, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    env = {**_env(server), "CLAUDECODE": "1", "USER": "from-env"}
+    created = runner.invoke(app, ["new", "--title", "Authored", "--json"], env=env)
+    task_id = str(json.loads(created.output)["id"])
+    result = runner.invoke(app, ["pull", task_id], env=env)
+    assert result.exit_code == 1
+    assert AGENT_REQUIRED in (result.output + (result.stderr or ""))
+
+
+def test_the_author_is_trimmed_and_author_is_an_alias(server, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    created = runner.invoke(app, ["new", "--title", "Authored", "--json"], env=_env(server))
+    task_id = str(json.loads(created.output)["id"])
+    pulled = runner.invoke(app, ["pull", task_id, "--agent", "  Ada Lovelace  "], env=_env(server))
     assert pulled.exit_code == 0, pulled.output
-    shown = json.loads(runner.invoke(app, ["context", task_id], env=env).output)
-    assert shown["events"][0]["kind"] == "pull"
-    assert shown["events"][0]["agent"]
-
-
-def test_complete_and_report_pr_default_a_non_empty_agent(server, tmp_path, monkeypatch):
-    from taskman.agent import default_agent
-
-    monkeypatch.chdir(tmp_path)
-    env = _env(server)
-    env.pop("TASKMAN_AGENT", None)
-    created = runner.invoke(app, ["new", "--title", "Named agent", "--json"], env=env)
-    assert created.exit_code == 0, created.output
-    task_id = str(json.loads(created.output)["id"])
-    finished = runner.invoke(app, ["complete", task_id, "--message", "shipped"], env=env)
-    assert finished.exit_code == 0, finished.output
     reported = runner.invoke(
         app,
-        ["report", "pr", "--task", task_id, "--url", "https://example.com/pull/7", "--agent", "   "],
-        env=env,
+        ["report", "pr", "--task", task_id, "--url", "https://example.com/pull/7", "--author", "\tcodex "],
+        env=_env(server),
     )
     assert reported.exit_code == 0, reported.output
-    shown = json.loads(runner.invoke(app, ["context", task_id], env=env).output)
-    agents = {event["kind"]: event["agent"] for event in shown["events"]}
-    assert agents["completion"] == default_agent()
-    assert agents["pull_request"] == default_agent()
-    assert "" not in agents.values()
+    finished = runner.invoke(app, ["complete", task_id, "--agent", " claude-code"], env=_env(server))
+    assert finished.exit_code == 0, finished.output
+    shown = json.loads(runner.invoke(app, ["context", task_id], env=_env(server)).output)
+    assert [(event["kind"], event["agent"]) for event in shown["events"]] == [
+        ("pull", "Ada Lovelace"),
+        ("pull_request", "codex"),
+        ("completion", "claude-code"),
+    ]
+
+
+def test_help_calls_the_agent_the_author():
+    result = runner.invoke(app, ["pull", "--help"], env={"COLUMNS": "200"})
+    assert result.exit_code == 0
+    assert "--author" in result.output
+    assert "Author of these changes" in result.output
 
 
 def test_validate_reports_ok(server):

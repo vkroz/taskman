@@ -1,9 +1,12 @@
 """Report commits, pull requests, and completion from host hooks.
 
-Claude Code runs ``hooks/report.sh``, which executes ``taskman hook claude``.
-Codex has no hook entry in this plugin; ``taskman hooks install`` writes a git
-post-commit hook that runs ``taskman hook git commit``. Hooks exit 0 when the
-server cannot be reached so a commit or agent turn is not blocked.
+Claude Code runs ``hooks/report.sh``, which executes
+``taskman hook claude --agent claude-code``. Codex has no hook entry in this
+plugin; ``taskman hooks install`` writes a git post-commit hook that runs
+``taskman hook git commit --agent <commit author>``. ``--agent`` names the
+author of the changes and is required; nothing reads it from the environment.
+Hooks exit 0 when the server cannot be reached so a commit or agent turn is
+not blocked.
 """
 from __future__ import annotations
 
@@ -18,7 +21,7 @@ from pathlib import Path
 
 import typer
 
-from taskman.agent import resolve_agent
+from taskman.agent import MissingAgent, require_agent
 from taskman.client import ApiError, client_from_env
 from taskman.workingcopy import active_task_id, clear_active, ensure_gitignore, repo_root
 
@@ -35,7 +38,33 @@ _COMMIT = re.compile(
 _PR_COMMAND = re.compile(r"(?:^|&&|\|\||;|\n)\s*gh\s+pr\s+create\b", re.MULTILINE)
 _PR_URL = re.compile(r"https://\S+/pull/\d+")
 _COMPLETION = re.compile(r"^Taskman completion:\s*(\d+)\s*$", re.MULTILINE)
-_HOOK_BODY = "#!/bin/sh\n# Added by Taskman. Reports the commit for .taskman/active.\ntaskman hook git commit\n"
+# The commit author is recorded as --agent: `git log -1 --format=%an`, then
+# `git config user.name`, then the literal `git`.
+_HOOK_BODY = """#!/bin/sh
+# Added by Taskman. Reports the commit for .taskman/active.
+# Records the commit author as --agent: git log -1 --format=%an, then
+# git config user.name, then "git".
+author=$(git log -1 --format=%an 2>/dev/null)
+[ -n "$author" ] || author=$(git config user.name 2>/dev/null)
+[ -n "$author" ] || author=git
+taskman hook git commit --agent "$author"
+"""
+# Present in a hook that already passes the author. An older Taskman hook has
+# only `taskman hook git commit`.
+_HOOK_CALL = "taskman hook git commit --agent"
+
+
+def _agent_option(help_text: str):
+    return typer.Option("", "--agent", "--author", help=help_text)
+
+
+def _hook_agent(value: str) -> str:
+    """Trimmed --agent, or exit 1 with the required-author message."""
+    try:
+        return require_agent(value)
+    except MissingAgent as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
 
 
 def _fail_open(exc: Exception) -> None:
@@ -142,11 +171,10 @@ def _completion_marker(path: Path, task_id: str) -> bool:
     return task_id in _COMPLETION.findall(text)
 
 
-def _handle_claude(payload: dict) -> None:
+def _handle_claude(payload: dict, agent: str) -> None:
     event = payload.get("hook_event_name") or payload.get("hook_event") or ""
     cwd = Path(payload.get("cwd") or Path.cwd())
     session = str(payload.get("session_id") or os.environ.get("TASKMAN_SESSION") or "")
-    agent = resolve_agent(fallback="claude-code")
     task_id = active_task_id(cwd)
     if event == "Stop":
         transcript = payload.get("transcript_path") or ""
@@ -189,8 +217,11 @@ def _handle_claude(payload: dict) -> None:
 
 
 @hook_app.command("claude")
-def hook_claude() -> None:
+def hook_claude(
+    agent: str = _agent_option("Author recorded on the events. The plugin hook passes claude-code. Required."),
+) -> None:
     """Read a Claude Code hook payload on stdin and report commit, PR, or completion."""
+    author = _hook_agent(agent)
     raw = sys.stdin.read()
     if not raw.strip():
         typer.echo("taskman hook claude expects a JSON payload on stdin.", err=True)
@@ -203,14 +234,18 @@ def hook_claude() -> None:
     if not isinstance(payload, dict):
         raise typer.Exit(0)
     try:
-        _handle_claude(payload)
+        _handle_claude(payload, author)
     except Exception as exc:  # noqa: BLE001 — a hook must not block the editor
         _fail_open(exc)
 
 
 @hook_app.command("git")
-def hook_git(action: str = typer.Argument(..., help="commit")) -> None:
+def hook_git(
+    action: str = typer.Argument(..., help="commit"),
+    agent: str = _agent_option("Author recorded on the commit event. The installed hook passes the commit author. Required."),
+) -> None:
     """Git-hook entry. `commit` reports HEAD for the active task."""
+    author = _hook_agent(agent)
     if action != "commit":
         typer.echo("Only `taskman hook git commit` is supported.", err=True)
         raise typer.Exit(0)
@@ -221,9 +256,8 @@ def hook_git(action: str = typer.Argument(..., help="commit")) -> None:
         raise typer.Exit(0)
     try:
         sha, subject = _git_head(repo_root(cwd))
-        agent = resolve_agent(fallback="git")
         session = os.environ.get("TASKMAN_SESSION") or ""
-        _post_event(task_id, "commit", agent, session, commit_sha=sha, message=subject)
+        _post_event(task_id, "commit", author, session, commit_sha=sha, message=subject)
         typer.echo(f"reported commit {sha[:12]} for {task_id}")
     except Exception as exc:  # noqa: BLE001 — a git hook must not reject the commit
         _fail_open(exc)
@@ -248,15 +282,22 @@ def hooks_install(force: bool = typer.Option(False, "--force", help="Replace an 
     destination = hooks_dir / "post-commit"
     if destination.exists():
         current = destination.read_text(encoding="utf-8", errors="replace")
-        if "taskman hook git commit" in current and not force:
+        if _HOOK_CALL in current and not force:
             typer.echo(f"Taskman post-commit hook already present at {destination}")
             _note_gitignore()
             return
         if not force:
-            typer.echo(
-                f"{destination} already exists. Merge `taskman hook git commit` into it, or re-run with --force.",
-                err=True,
-            )
+            if "taskman hook git commit" in current:
+                message = (
+                    f"{destination} has an older Taskman hook that does not pass --agent. "
+                    "Re-run with --force to replace it; the old file is backed up."
+                )
+            else:
+                message = (
+                    f"{destination} already exists. Merge `{_HOOK_CALL} \"$author\"` into it, "
+                    "or re-run with --force."
+                )
+            typer.echo(message, err=True)
             raise typer.Exit(2)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         backup = destination.with_name(f"post-commit.bak.{stamp}")
@@ -267,9 +308,10 @@ def hooks_install(force: bool = typer.Option(False, "--force", help="Replace an 
     typer.echo(f"Installed {destination}")
     _note_gitignore()
     typer.echo(
-        "Claude Code loads plugin hooks for commits, pull requests, and completion. "
+        "This hook records the commit author (git log -1 --format=%an) as --agent. "
+        "Claude Code loads plugin hooks for commits, pull requests, and completion, recorded as claude-code. "
         "Codex uses this git hook for commits. After `gh pr create`, run "
-        "`taskman report pr --url <pull-request-url>` when no plugin hook is active."
+        "`taskman report pr --url <pull-request-url> --agent <author>` when no plugin hook is active."
     )
 
 

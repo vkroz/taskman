@@ -74,7 +74,7 @@ def test_a_blank_agent_is_rejected_for_every_event(database):
             with pytest.raises(TaskmanError) as exc:
                 add_event(conn, task["id"], kind, agent="  ", commit_sha="abc", pr_url="https://example.com/1")
             assert exc.value.status == 400
-            assert exc.value.message == "Agent is required."
+            assert exc.value.message == "Agent is required: name who authored these changes."
         count = conn.execute("SELECT count(*) AS n FROM events").fetchone()["n"]
         assert count == 0
 

@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 
 import typer
 
-from taskman.agent import resolve_agent
+from taskman.agent import MissingAgent, require_agent
 from taskman.client import ApiError, client_from_env
 from taskman.config import resolve_settings, save_server_url
 from taskman.workingcopy import clear_active_if, write_working_copy
@@ -24,7 +24,7 @@ def _exit(exc: Exception) -> None:
 def _guard(fn):
     try:
         return fn()
-    except (ApiError, OSError) as exc:
+    except (ApiError, OSError, MissingAgent) as exc:
         _exit(exc)
 
 
@@ -44,9 +44,19 @@ def _body(path: str | None) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
+def _agent_option():
+    """--agent (alias --author): who authored the changes. Required by every event command."""
+    return typer.Option(
+        "",
+        "--agent",
+        "--author",
+        help="Author of these changes, for example your name, claude-code, or codex. Required.",
+    )
+
+
 def _agent(value: str) -> str:
-    """Name stored on an event. Never empty. See :func:`taskman.agent.resolve_agent`."""
-    return resolve_agent(value)
+    """Trimmed author name. Raises MissingAgent when it is missing or blank."""
+    return require_agent(value)
 
 
 def _session(value: str) -> str:
@@ -198,17 +208,18 @@ def context(task_id: str) -> None:
 
 def pull(
     task_id: str,
-    agent: str = typer.Option("", "--agent", help="Name recorded on the pull event."),
+    agent: str = _agent_option(),
     session: str = typer.Option("", "--session"),
 ) -> None:
     """Copy a task into .taskman/tasks/<id>.md and remember it as the active task."""
 
     def run():
+        author = _agent(agent)
         client = client_from_env()
         payload = client.request(
             "POST",
             f"/api/tasks/{_task_id(task_id)}/pull",
-            {"agent": _agent(agent), "session": _session(session)},
+            {"agent": author, "session": _session(session)},
         )
         path = write_working_copy(Path.cwd(), payload, client.base_url)
         typer.echo(str(path))
@@ -223,19 +234,20 @@ def pull(
 def record(
     task_id: str,
     message: str = typer.Option(..., "--message"),
-    agent: str = typer.Option("", "--agent"),
+    agent: str = _agent_option(),
     session: str = typer.Option("", "--session"),
 ) -> None:
     """Attach a note to a task."""
 
     def run():
+        author = _agent(agent)
         event = client_from_env().request(
             "POST",
             f"/api/tasks/{_task_id(task_id)}/events",
             {
                 "kind": "note",
                 "message": message,
-                "agent": _agent(agent),
+                "agent": author,
                 "session": _session(session),
             },
         )
@@ -247,18 +259,19 @@ def record(
 def complete(
     task_id: str,
     message: str = typer.Option("", "--message"),
-    agent: str = typer.Option("", "--agent"),
+    agent: str = _agent_option(),
     session: str = typer.Option("", "--session"),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Mark a task done and record a completion event."""
 
     def run():
+        author = _agent(agent)
         ident = _task_id(task_id)
         result = client_from_env().request(
             "POST",
             f"/api/tasks/{ident}/complete",
-            {"message": message, "agent": _agent(agent), "session": _session(session)},
+            {"message": message, "agent": author, "session": _session(session)},
         )
         # The Stop hook must not report this completion again, and later
         # commits must not be attributed to the finished task.
@@ -271,7 +284,7 @@ def complete(
 def close(
     task_id: str,
     message: str = typer.Option("", "--message"),
-    agent: str = typer.Option("", "--agent"),
+    agent: str = _agent_option(),
     session: str = typer.Option("", "--session"),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
@@ -299,7 +312,7 @@ def report_commit(
     task: str | None = typer.Option(None, "--task"),
     sha: str = typer.Option("", "--sha"),
     message: str = typer.Option("", "--message"),
-    agent: str = typer.Option("", "--agent"),
+    agent: str = _agent_option(),
     session: str = typer.Option("", "--session"),
 ) -> None:
     """Report a commit for a task."""
@@ -310,7 +323,7 @@ def report_pr(
     task: str | None = typer.Option(None, "--task"),
     url: str = typer.Option(..., "--url"),
     message: str = typer.Option("", "--message"),
-    agent: str = typer.Option("", "--agent"),
+    agent: str = _agent_option(),
     session: str = typer.Option("", "--session"),
 ) -> None:
     """Report a pull request URL for a task."""
@@ -320,17 +333,18 @@ def report_pr(
 def report_completion(
     task: str | None = typer.Option(None, "--task"),
     message: str = typer.Option("", "--message"),
-    agent: str = typer.Option("", "--agent"),
+    agent: str = _agent_option(),
     session: str = typer.Option("", "--session"),
 ) -> None:
     """Report completion. Prefer `taskman complete` so the status becomes done."""
 
     def run():
+        author = _agent(agent)
         task_id = _resolve_task(task)
         client_from_env().request(
             "POST",
             f"/api/tasks/{task_id}/complete",
-            {"message": message, "agent": _agent(agent), "session": _session(session)},
+            {"message": message, "agent": author, "session": _session(session)},
         )
         clear_active_if(Path.cwd(), task_id)
         typer.echo(f"completed {task_id}")
@@ -351,11 +365,12 @@ def _resolve_task(task: str | None) -> int:
 
 def _send_event(kind: str, task: str | None, agent: str, session: str, **fields: str) -> None:
     def run():
+        author = _agent(agent)
         task_id = _resolve_task(task)
         event = client_from_env().request(
             "POST",
             f"/api/tasks/{task_id}/events",
-            {"kind": kind, "agent": _agent(agent), "session": _session(session), **fields},
+            {"kind": kind, "agent": author, "session": _session(session), **fields},
         )
         typer.echo(json.dumps(event))
 

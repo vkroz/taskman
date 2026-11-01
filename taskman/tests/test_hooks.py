@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import threading
 from pathlib import Path
@@ -39,7 +40,7 @@ def server(database):
 
 def _env(base: str) -> dict[str, str]:
     env = os.environ.copy()
-    env.update({"TASKMAN_URL": base, "TASKMAN_ACCESS_TOKEN": TOKEN, "TASKMAN_AGENT": "claude-code"})
+    env.update({"TASKMAN_URL": base, "TASKMAN_ACCESS_TOKEN": TOKEN})
     return env
 
 
@@ -80,7 +81,7 @@ def test_commit_pr_and_completion_hooks(server, tmp_path, monkeypatch):
     sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
     commit = runner.invoke(
         app,
-        ["hook", "claude"],
+        ["hook", "claude", "--agent", "claude-code"],
         input=json.dumps(
             {
                 "hook_event_name": "PostToolUse",
@@ -96,7 +97,7 @@ def test_commit_pr_and_completion_hooks(server, tmp_path, monkeypatch):
     assert commit.exit_code == 0, commit.output
     pr = runner.invoke(
         app,
-        ["hook", "claude"],
+        ["hook", "claude", "--agent", "claude-code"],
         input=json.dumps(
             {
                 "hook_event_name": "PostToolUse",
@@ -125,7 +126,7 @@ def test_commit_pr_and_completion_hooks(server, tmp_path, monkeypatch):
     transcript.write_text(earlier + "\n" + latest + "\n")
     done = runner.invoke(
         app,
-        ["hook", "claude"],
+        ["hook", "claude", "--agent", "claude-code"],
         input=json.dumps(
             {
                 "hook_event_name": "Stop",
@@ -152,7 +153,7 @@ def test_commit_pr_and_completion_hooks(server, tmp_path, monkeypatch):
     # The same Stop payload does not insert a second completion.
     runner.invoke(
         app,
-        ["hook", "claude"],
+        ["hook", "claude", "--agent", "claude-code"],
         input=json.dumps(
             {
                 "hook_event_name": "Stop",
@@ -172,7 +173,7 @@ def test_hook_without_an_active_task_does_not_fail(server, tmp_path, monkeypatch
     monkeypatch.chdir(repo)
     result = runner.invoke(
         app,
-        ["hook", "git", "commit"],
+        ["hook", "git", "commit", "--agent", "Test"],
         env=_env(server),
     )
     assert result.exit_code == 0
@@ -186,7 +187,7 @@ def test_hook_fails_open_when_the_server_is_down(tmp_path, monkeypatch):
     (repo / ".taskman" / "active").write_text("1\n")
     result = runner.invoke(
         app,
-        ["hook", "git", "commit"],
+        ["hook", "git", "commit", "--agent", "Test"],
         env={**os.environ, "TASKMAN_URL": "http://127.0.0.1:1", "TASKMAN_ACCESS_TOKEN": TOKEN},
     )
     assert result.exit_code == 0
@@ -234,7 +235,7 @@ def test_completion_requires_an_exact_line_in_the_last_assistant_message(server,
     )
     result = runner.invoke(
         app,
-        ["hook", "claude"],
+        ["hook", "claude", "--agent", "claude-code"],
         input=json.dumps({
             "hook_event_name": "Stop",
             "session_id": "sess-9",
@@ -255,7 +256,7 @@ def test_pull_request_url_without_gh_pr_create_is_ignored(server, tmp_path, monk
     task_id = _task(server, repo)
     result = runner.invoke(
         app,
-        ["hook", "claude"],
+        ["hook", "claude", "--agent", "claude-code"],
         input=json.dumps({
             "hook_event_name": "PostToolUse",
             "tool_name": "Bash",
@@ -285,13 +286,13 @@ def test_commit_variants_report_once_and_a_failed_commit_does_not(server, tmp_pa
         "tool_response": {"stdout": "", "stderr": ""},
     }
     (repo / "missing").mkdir()
-    first = runner.invoke(app, ["hook", "claude"], input=json.dumps(payload), env=_env(server))
+    first = runner.invoke(app, ["hook", "claude", "--agent", "claude-code"], input=json.dumps(payload), env=_env(server))
     assert first.exit_code == 0, first.output
-    second = runner.invoke(app, ["hook", "claude"], input=json.dumps(payload), env=_env(server))
+    second = runner.invoke(app, ["hook", "claude", "--agent", "claude-code"], input=json.dumps(payload), env=_env(server))
     assert second.exit_code == 0, second.output
     failed = runner.invoke(
         app,
-        ["hook", "claude"],
+        ["hook", "claude", "--agent", "claude-code"],
         input=json.dumps({
             **payload,
             "tool_response": {"stdout": "", "stderr": "nothing to commit, working tree clean"},
@@ -317,7 +318,7 @@ def test_hook_client_timeout_is_shorter_than_the_shell_timeout(server, tmp_path,
         raise ApiError("down")
 
     monkeypatch.setattr("taskman.client.Client.request", request)
-    result = runner.invoke(app, ["hook", "git", "commit"], env=_env(server))
+    result = runner.invoke(app, ["hook", "git", "commit", "--agent", "Test"], env=_env(server))
     assert result.exit_code == 0
     assert seen["timeout"] <= 4
 
@@ -325,7 +326,7 @@ def test_hook_client_timeout_is_shorter_than_the_shell_timeout(server, tmp_path,
 def _stop(server: str, repo: Path, transcript: Path, session: str = "sess-9"):
     return runner.invoke(
         app,
-        ["hook", "claude"],
+        ["hook", "claude", "--agent", "claude-code"],
         input=json.dumps({
             "hook_event_name": "Stop",
             "session_id": session,
@@ -340,8 +341,8 @@ def test_cli_complete_clears_active_and_the_stop_hook_adds_no_second_completion(
     repo = _repo(tmp_path)
     monkeypatch.chdir(repo)
     task_id = _task(server, repo)
-    env = {**_env(server), "TASKMAN_AGENT": "laptop", "TASKMAN_SESSION": ""}
-    finished = runner.invoke(app, ["complete", task_id, "--message", "shipped"], env=env)
+    env = {**_env(server), "TASKMAN_SESSION": ""}
+    finished = runner.invoke(app, ["complete", task_id, "--message", "shipped", "--agent", "laptop"], env=env)
     assert finished.exit_code == 0, finished.output
     assert not (repo / ".taskman" / "active").exists()
     transcript = tmp_path / "transcript.jsonl"
@@ -373,16 +374,114 @@ def test_complete_leaves_an_active_marker_for_another_task(server, tmp_path, mon
     monkeypatch.chdir(repo)
     task_id = _task(server, repo)
     other = json.loads(runner.invoke(app, ["new", "--title", "Other", "--json"], env=_env(server)).output)["id"]
-    finished = runner.invoke(app, ["complete", str(other)], env=_env(server))
+    finished = runner.invoke(app, ["complete", str(other), "--agent", "codex"], env=_env(server))
     assert finished.exit_code == 0, finished.output
     assert (repo / ".taskman" / "active").read_text().strip() == task_id
 
 
-def test_hooks_strip_a_blank_taskman_agent(server, tmp_path, monkeypatch):
+AGENT_REQUIRED = "--agent <author> is required: name who authored these changes"
+
+
+def test_hooks_trim_the_author(server, tmp_path, monkeypatch):
     repo = _repo(tmp_path)
     monkeypatch.chdir(repo)
     task_id = _task(server, repo)
-    result = runner.invoke(app, ["hook", "git", "commit"], env={**_env(server), "TASKMAN_AGENT": "   "})
+    result = runner.invoke(app, ["hook", "git", "commit", "--agent", "  Ada Lovelace  "], env=_env(server))
     assert result.exit_code == 0, result.output
     shown = json.loads(runner.invoke(app, ["context", task_id], env=_env(server)).output)
-    assert [(event["kind"], event["agent"]) for event in shown["events"]] == [("commit", "git")]
+    assert [(event["kind"], event["agent"]) for event in shown["events"]] == [("commit", "Ada Lovelace")]
+
+
+@pytest.mark.parametrize("command", [["hook", "git", "commit"], ["hook", "claude"]])
+@pytest.mark.parametrize("blank", [None, "   "])
+def test_hooks_require_an_explicit_author(server, tmp_path, monkeypatch, command, blank):
+    repo = _repo(tmp_path)
+    monkeypatch.chdir(repo)
+    task_id = _task(server, repo)
+    args = command if blank is None else [*command, "--agent", blank]
+    payload = json.dumps({
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "cwd": str(repo),
+        "tool_input": {"command": "git commit -m 'first cut'"},
+        "tool_response": {"stdout": ""},
+    })
+    result = runner.invoke(app, args, input=payload, env={**_env(server), "CLAUDECODE": "1"})
+    assert result.exit_code == 1
+    assert AGENT_REQUIRED in (result.output + (result.stderr or ""))
+    shown = json.loads(runner.invoke(app, ["context", task_id], env=_env(server)).output)
+    assert shown["events"] == []
+
+
+def test_installed_post_commit_hook_records_the_commit_author(server, tmp_path, monkeypatch):
+    if shutil.which("taskman") is None:
+        pytest.skip("the taskman console script must be on PATH for a real git hook")
+    repo = _repo(tmp_path)
+    monkeypatch.chdir(repo)
+    task_id = _task(server, repo)
+    installed = runner.invoke(app, ["hooks", "install"])
+    assert installed.exit_code == 0, installed.output
+    assert 'taskman hook git commit --agent "$author"' in (repo / ".git" / "hooks" / "post-commit").read_text()
+    subprocess.run(
+        ["git", "-c", "user.name=Ada Author", "-c", "user.email=ada@example.com", "commit", "--allow-empty", "-m", "hooked"],
+        cwd=repo,
+        env=_env(server),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    shown = json.loads(runner.invoke(app, ["context", task_id], env=_env(server)).output)
+    assert [(event["kind"], event["agent"], event["message"]) for event in shown["events"]] == [
+        ("commit", "Ada Author", "hooked")
+    ]
+
+
+def _run_hook_body(repo: Path, tmp_path: Path, extra_env: dict[str, str]) -> str:
+    """Run the installed hook body with a stub taskman. Returns the stub's arguments."""
+    from taskman.commands.hook_cmd import _HOOK_BODY
+
+    stub_dir = tmp_path / "stub"
+    stub_dir.mkdir(parents=True)
+    log = tmp_path / "args"
+    stub = stub_dir / "taskman"
+    stub.write_text('#!/bin/sh\nprintf "%s|" "$@" > "' + str(log) + '"\n')
+    stub.chmod(0o755)
+    hook = tmp_path / "post-commit"
+    hook.write_text(_HOOK_BODY)
+    hook.chmod(0o755)
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {
+        "PATH": f"{stub_dir}{os.pathsep}{os.environ['PATH']}",
+        "HOME": str(home),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": str(home / "gitconfig"),
+        **extra_env,
+    }
+    subprocess.run([str(hook)], cwd=repo, env=env, check=True)
+    return log.read_text()
+
+
+def test_hook_body_falls_back_to_git_config_user_name_then_git(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    _git(empty, "init")
+    # No commit yet, so `git log -1` fails and user.name is used.
+    _git(empty, "config", "user.name", "Config Name")
+    assert _run_hook_body(empty, tmp_path / "a", {}) == "hook|git|commit|--agent|Config Name|"
+    _git(empty, "config", "--unset", "user.name")
+    assert _run_hook_body(empty, tmp_path / "b", {}) == "hook|git|commit|--agent|git|"
+
+
+def test_hooks_install_flags_an_older_hook_without_an_author(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    monkeypatch.chdir(repo)
+    hook = repo / ".git" / "hooks" / "post-commit"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text("#!/bin/sh\n# Added by Taskman. Reports the commit for .taskman/active.\ntaskman hook git commit\n")
+    refused = runner.invoke(app, ["hooks", "install"])
+    assert refused.exit_code == 2
+    assert "older Taskman hook" in (refused.output + (refused.stderr or ""))
+    forced = runner.invoke(app, ["hooks", "install", "--force"])
+    assert forced.exit_code == 0, forced.output
+    assert 'taskman hook git commit --agent "$author"' in hook.read_text()

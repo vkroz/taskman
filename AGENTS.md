@@ -4,7 +4,7 @@
 
 Taskman is a general-purpose tool and the shared source of truth for development work performed by Codex, Claude Code, or another agent. Store requirements, plans, decisions, progress, and verification evidence in the Taskman server so another agent can continue from that context. Reservoir is a real-world testing ground; keep project-specific assumptions out of Taskman's core.
 
-The server keeps tasks in Postgres. Agents use the `taskman` CLI over HTTP. Before editing a repository for an existing item, run `taskman pull ID` and read the working copy under `.taskman/tasks/`. The server does not write the checkout. Hooks report commits, pull requests, and completion. The web UI is a flight-control view of those reports. Deployment of the product under work is outside this workflow.
+The server keeps tasks in Postgres. Agents use the `taskman` CLI over HTTP. Before editing a repository for an existing item, run `taskman pull ID --agent <author>` (the author of your changes, for example `codex`) and read the working copy under `.taskman/tasks/`. The server does not write the checkout. Hooks report commits, pull requests, and completion. The web UI is a flight-control view of those reports. Deployment of the product under work is outside this workflow.
 
 ## Project Structure & Module Organization
 

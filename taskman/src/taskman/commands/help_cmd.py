@@ -25,10 +25,20 @@ A task id is an integer assigned by the server. Status is backlog, active, or
 done. `pull` moves a backlog task to active and records who pulled it.
 `complete` marks it done.
 
+--agent (alias --author) names the AUTHOR of the changes an event records:
+a person, claude-code, codex, and so on. Taskman does not control agents.
+Every command that records an event requires it: pull, record, complete,
+close, report commit|pr|completion, and hook claude|git. It is read only from
+the command line. A missing or blank value fails with
+"--agent <author> is required: name who authored these changes".
+Surrounding whitespace is trimmed. The server also rejects a blank author.
+
 Hooks report commits, pull requests, and completion. Claude Code runs the
-plugin hook. Codex and other git clients use `taskman hooks install`, which
-writes a post-commit hook. Pull requests without a plugin hook are reported
-with `taskman report pr --url URL`.
+plugin hook, which records the author as claude-code. Codex and other git
+clients use `taskman hooks install`, which writes a post-commit hook that
+records the commit author: `git log -1 --format=%an`, then
+`git config user.name`, then `git`. Pull requests without a plugin hook are
+reported with `taskman report pr --url URL --agent AUTHOR`.
 
 Files already stored under a repository's tasks/ directory are not imported.
 Copy their text into `taskman new` yourself.
@@ -38,12 +48,9 @@ GET /health is liveness and does not open a database connection. GET /ready
 checks Postgres. Neither requires the token. The flight-control page keeps
 the token in the browser tab and sends it as Authorization: Bearer.
 
-The CLI and the hooks resolve the agent name the same way: --agent, then
-TASKMAN_AGENT, then the hook's own name (claude-code or git), then
-claude-code when CLAUDECODE=1, then the short hostname. Blank values are
-skipped. The server rejects a blank agent. Repeating a commit with the same
-sha, or a completion that matches the task's latest event for the same agent
-and session, returns 200 and the event already stored. A new event returns 201.
+Repeating a commit with the same sha, or a completion that matches the task's
+latest event for the same author and session, returns 200 and the event
+already stored. A new event returns 201.
 
 `complete` clears .taskman/active when it names the completed task. The Stop
 hook does not report a completion for a task that is already done.

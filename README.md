@@ -51,7 +51,6 @@ The app waits for Postgres, then creates tables if they are missing. Nothing in 
 | `POSTGRES_DB` | no | `taskman` | Database name. |
 | `TASKMAN_WEB_WORKERS` | no | `2` | gunicorn workers. |
 | `TASKMAN_URL` | CLI | `http://127.0.0.1:8080` | Server the CLI calls. |
-| `TASKMAN_AGENT` | no | | Name stored on events from this process. The CLI and the hooks use one order: `--agent`, then this variable, then the hook's own name (`claude-code` or `git`), then `claude-code` when Claude Code set `CLAUDECODE=1`, then the machine's short hostname. Blank values are skipped. The server rejects a blank agent. |
 | `TASKMAN_SESSION` | no | | Session id stored on events. |
 
 `taskman config --server http://127.0.0.1:8080` saves the URL in `~/.config/taskman/config.json` (mode `0600`). The CLI reads the server URL and token only from that user file and from the environment. A `.taskman/config.json` inside a repository is ignored, so a checkout cannot point the token at another host.
@@ -74,11 +73,13 @@ taskman depend ID --on OTHER
 taskman ready --json
 taskman context ID
 taskman pull ID --agent codex --session local
-taskman record ID --message "Use the existing parser."
-taskman complete ID --message "Export writes the file."
+taskman record ID --message "Use the existing parser." --agent codex
+taskman complete ID --message "Export writes the file." --agent codex
 taskman activity --json
 taskman validate
 ```
+
+`--agent` (alias `--author`) names the **author** of the changes an event records: a person, `claude-code`, `codex`, and so on. Taskman does not control agents. Every command that records an event requires it: `pull`, `record`, `complete`, `close`, `report commit|pr|completion`, and `hook claude|git`. The value comes only from the command line; no environment variable or default fills it in. A missing or blank value fails with `--agent <author> is required: name who authored these changes`. Surrounding whitespace is trimmed. The server also rejects a blank author.
 
 `close` is an alias of `complete`. `taskman pull` writes `.taskman/tasks/<id>.md` and `.taskman/active` at the git repository root, adds `.taskman/` to that repository's `.gitignore` when it is missing, and marks a backlog task active. That file is the working copy agents read. The server does not create it. `taskman complete` removes `.taskman/active` when it names the completed task.
 
@@ -86,7 +87,7 @@ taskman validate
 
 ### Hooks
 
-Claude Code loads `plugins/tm/hooks/hooks.json` with the plugin. After a Bash `git commit` or `gh pr create`, and when a session stops with the line `Taskman completion: ID` in the last assistant message, the hook runs `taskman hook claude`. The active task id comes from `.taskman/active`. The Stop hook skips a task that is already done, so `taskman complete` plus the marker line records one completion. The hook script limits the client to 4 seconds with `timeout`, or `gtimeout` on macOS with Homebrew coreutils. With neither, it runs the client unwrapped, and the client's 3-second network timeout applies.
+Claude Code loads `plugins/tm/hooks/hooks.json` with the plugin. After a Bash `git commit` or `gh pr create`, and when a session stops with the line `Taskman completion: ID` in the last assistant message, the hook runs `taskman hook claude --agent claude-code`, so every event it reports records `claude-code` as the author. The active task id comes from `.taskman/active`. The Stop hook skips a task that is already done, so `taskman complete` plus the marker line records one completion. The hook script limits the client to 4 seconds with `timeout`, or `gtimeout` on macOS with Homebrew coreutils. With neither, it runs the client unwrapped, and the client's 3-second network timeout applies.
 
 Codex does not get a plugin hook from this repository. In a git checkout, run:
 
@@ -94,13 +95,13 @@ Codex does not get a plugin hook from this repository. In a git checkout, run:
 taskman hooks install
 ```
 
-That writes `.git/hooks/post-commit`, which runs `taskman hook git commit`. Report a pull request with:
+That writes `.git/hooks/post-commit`, which runs `taskman hook git commit --agent "$author"`. The author is the commit author from `git log -1 --format=%an`, then `git config user.name`, then the literal `git`. A post-commit hook from an older Taskman runs without `--agent`; `taskman hooks install` reports it, and `--force` replaces it and keeps a backup. Report a pull request with:
 
 ```sh
-taskman report pr --url https://github.com/org/repo/pull/12
+taskman report pr --url https://github.com/org/repo/pull/12 --agent codex
 ```
 
-Hooks exit 0 when the server is unreachable so a commit is not rejected. Set `TASKMAN_URL`, `TASKMAN_ACCESS_TOKEN`, and optionally `TASKMAN_AGENT` where the hook runs.
+Hooks exit 0 when the server is unreachable so a commit is not rejected. Set `TASKMAN_URL` and `TASKMAN_ACCESS_TOKEN` where the hook runs.
 
 ### Install the CLI and plugins
 

@@ -1,26 +1,25 @@
-"""One agent-name resolver for the CLI and the hooks."""
+"""--agent names the author of the changes. It comes only from the command line."""
 from __future__ import annotations
 
-from taskman.agent import default_agent, resolve_agent
+import pytest
+
+from taskman.agent import AGENT_REQUIRED, MissingAgent, require_agent
 
 
-def test_flag_then_env_then_fallback_then_default(monkeypatch):
-    monkeypatch.delenv("CLAUDECODE", raising=False)
-    monkeypatch.setenv("TASKMAN_AGENT", " codex ")
-    assert resolve_agent(" flag ") == "flag"
-    assert resolve_agent("  ", fallback="git") == "codex"
-    monkeypatch.setenv("TASKMAN_AGENT", "   ")
-    assert resolve_agent("", fallback=" git ") == "git"
-    assert resolve_agent(None) == default_agent()
-    assert resolve_agent("") != ""
+def test_the_author_is_trimmed():
+    assert require_agent("  Ada Lovelace \t") == "Ada Lovelace"
+    assert require_agent("claude-code") == "claude-code"
 
 
-def test_claude_code_sessions_default_to_the_hook_name(monkeypatch):
-    monkeypatch.delenv("TASKMAN_AGENT", raising=False)
-    monkeypatch.setenv("CLAUDECODE", "1")
-    assert resolve_agent("") == "claude-code"
-    monkeypatch.delenv("CLAUDECODE")
-    monkeypatch.setattr("taskman.agent.socket.gethostname", lambda: "laptop.local")
-    assert resolve_agent("") == "laptop"
-    monkeypatch.setattr("taskman.agent.socket.gethostname", lambda: "")
-    assert resolve_agent("") == "taskman"
+@pytest.mark.parametrize("value", [None, "", "   ", "\t\n"])
+def test_a_missing_or_blank_author_is_rejected(value):
+    with pytest.raises(MissingAgent) as exc:
+        require_agent(value)
+    assert str(exc.value) == AGENT_REQUIRED == "--agent <author> is required: name who authored these changes"
+
+
+def test_the_environment_is_never_consulted(monkeypatch):
+    for name in ("CLAUDECODE", "USER", "HOSTNAME"):
+        monkeypatch.setenv(name, "from-env")
+    with pytest.raises(MissingAgent):
+        require_agent("")
