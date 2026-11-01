@@ -34,6 +34,6 @@ Set `TASKMAN_TEST_DATABASE_URL` to a disposable database, for example `postgresq
 
 When `TASKMAN_TEST_DATABASE_URL` or `CI` is set and Postgres is unreachable, the database tests fail. Without either variable, they skip when Docker is missing or the container cannot start.
 
-Continuous integration runs the tests against a Postgres 16 service and does not build the Compose stack.
+Continuous integration runs the tests on Python 3.11 and 3.12 against a Postgres 16 service, and runs `docker build` on the server image. It does not start the Compose stack. The image installs the exact versions in `taskman/uv.lock` with `uv sync --frozen`.
 
 See the [README](README.md) for how to run the server.

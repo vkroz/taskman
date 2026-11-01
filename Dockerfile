@@ -3,21 +3,28 @@
 
 FROM python:3.12-slim
 
+# uv installs the exact versions in taskman/uv.lock, the same set CI tests.
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /bin/uv
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_ROOT_USER_ACTION=ignore \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_PROJECT_ENVIRONMENT=/app/venv \
+    PATH="/app/venv/bin:$PATH" \
     PORT=8080
 
-WORKDIR /app
+WORKDIR /app/taskman
 
 RUN groupadd --gid 10001 taskman \
     && useradd --uid 10001 --gid taskman --home-dir /home/taskman --create-home taskman
 
-COPY taskman/pyproject.toml taskman/README.md /app/taskman/
-COPY taskman/src /app/taskman/src
+# Dependencies first so a source-only change reuses this layer.
+COPY taskman/pyproject.toml taskman/uv.lock taskman/README.md ./
+RUN uv sync --frozen --no-install-project --extra serve
 
-RUN pip install --no-cache-dir "/app/taskman[serve]"
+COPY taskman/src ./src
+RUN uv sync --frozen --no-editable --extra serve
 
 USER taskman
 
