@@ -2,30 +2,27 @@
 
 ## Product purpose
 
-Taskman is a general-purpose tool and the shared source of truth for development work performed by Codex, Claude Code, or another agent. Store requirements, plans, decisions, progress, and verification evidence in Taskman so another agent can continue from that context. Reservoir is a real-world testing ground; keep project-specific assumptions out of Taskman's core.
+Taskman is a general-purpose tool and the shared source of truth for development work performed by Codex, Claude Code, or another agent. Store requirements, plans, decisions, progress, and verification evidence in the Taskman server so another agent can continue from that context. Reservoir is a real-world testing ground; keep project-specific assumptions out of Taskman's core.
 
-Agents execute the lifecycle through local acceptance. The UI creates and edits open work, discards eligible drafts, consolidates completed history, and displays hierarchy, dependencies, progress, and verification. Deployment is outside this workflow.
-
-The CLI supports every operation available in the UI and installs the shared plugin through platform adapters. Open tasks may be refined to reach their agreed outcome. Closed tasks, including requirements and evidence, are immutable; subsequent changes require a new linked task. Journal significant decisions, reasons, and scope refinements during work; summarize them before closing.
+The server keeps tasks in Postgres. Agents use the `taskman` CLI over HTTP. Before editing a repository for an existing item, run `taskman pull ID --agent <author>` (the author of your changes, for example `codex`) and read the working copy under `.taskman/tasks/`. The server does not write the checkout. Hooks report commits, pull requests, and completion. The web UI is a flight-control view of those reports. Deployment of the product under work is outside this workflow.
 
 ## Project Structure & Module Organization
 
-This repository ships the `taskman` marketplace for Codex and Claude Code and its `tm` software-development lifecycle plugin. Marketplace metadata lives in `.claude-plugin/marketplace.json`; plugin manifests, skills, agents, rules, and the legacy task script live under `plugins/tm/`. Product documentation is in `docs/`. The repository's own work items are stored in `tasks/`.
+This repository ships the `taskman` marketplace for Codex and Claude Code and its `tm` software-development lifecycle plugin. Marketplace metadata lives in `.claude-plugin/marketplace.json`; plugin manifests, skills, agents, rules, hooks, and the legacy task script live under `plugins/tm/`. Product documentation is in `docs/`. Files under `tasks/` are historical text from the file-backed edition. They are not imported into Postgres.
 
-`taskman/` is the Python 3.11+ replacement for `plugins/tm/scripts/taskman.sh`. Its `src/taskman/model/` modules handle names, layout, graphs, identifiers, and YAML; `src/taskman/commands/` implements Typer commands; `tests/` mirrors those behaviors with pytest.
+`taskman/` is the Python 3.11+ server and HTTP CLI. `src/taskman/db.py` and `store.py` talk to Postgres; `httpapp.py` is the WSGI app; `commands/` implements the CLI. `tests/` covers the API, storage, hooks, and installer.
 
 ## Build, Test, and Development Commands
 
 Run Python commands from `taskman/`:
 
 ```bash
-uv sync --extra dev             # create/update the development environment
-uv run pytest                   # run the full test suite
-uv run pytest tests/test_model_names.py -q
-uv run taskman --help           # exercise the local CLI entry point
+uv sync --extra dev --extra serve   # create/update the development environment
+uv run pytest                        # full suite; starts Postgres via Docker unless TASKMAN_TEST_DATABASE_URL is set
+uv run taskman --help                # exercise the local CLI entry point
 ```
 
-From the repository root, `taskman validate` checks current work-item metadata. Test plugin changes by installing the checkout through `taskman install` and starting fresh sessions in both hosts, as described in `README.md`.
+From the repository root, `docker compose up -d --build` runs the server and Postgres. `taskman validate` checks that the server is reachable and the token works. Test plugin changes by installing the checkout through `taskman install` and starting a fresh host session, as described in `README.md`.
 
 ## Coding Style & Naming Conventions
 
@@ -41,4 +38,4 @@ Add pytest coverage beside every `taskman` behavior change, including success an
 
 Recent commits use concise, imperative subjects such as `Ship ...`, `Enable ...`, `Remove ...`, and `Update ...`; several append the closed task or feature. Keep each commit scoped to one outcome. Pull requests should state the affected plugin or CLI behavior, link the work item when applicable, list verification performed, and update user-facing documentation when commands or workflows change.
 
-Never edit lifecycle files under `tasks/` directly. Use the Python `taskman` CLI so names, frontmatter, and status transitions stay synchronized. The shell script is for legacy data only; it does not enforce the current lifecycle contract.
+Do not treat files under `tasks/` as the live store. Create and update work with the Python `taskman` CLI against the server. Copy any historical file text into `taskman new` by hand. The shell script under `plugins/tm/scripts/` is legacy and does not talk to the server.

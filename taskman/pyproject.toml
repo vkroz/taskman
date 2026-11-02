@@ -8,12 +8,15 @@ license = { text = "MIT" }
 authors = [{ name = "VovKa" }]
 dependencies = [
     "typer>=0.12",
-    "ruamel.yaml>=0.18",
+    "psycopg[binary]>=3.2",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
+]
+serve = [
+    "gunicorn>=23",
 ]
 
 [project.scripts]

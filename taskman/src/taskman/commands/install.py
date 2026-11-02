@@ -9,6 +9,8 @@ from pathlib import Path
 
 import typer
 
+from taskman.config import save_server_url
+
 
 @dataclass(frozen=True)
 class Platform:
@@ -26,7 +28,10 @@ class Platform:
                 return False
             current = (existing.get("marketplaceSource") or {}).get("source") or existing.get("path") or existing.get("repo")
             if current != source:
-                raise typer.BadParameter(f"{self.executable} already has a taskman marketplace from {current!r}; choose that source or remove that registration explicitly")
+                raise typer.BadParameter(
+                    f"{self.executable} already has a taskman marketplace from {current!r}; "
+                    "choose that source or remove that registration explicitly"
+                )
             return True
         except (ValueError, TypeError, AttributeError) as exc:
             if isinstance(exc, typer.BadParameter):
@@ -50,23 +55,7 @@ def run(args: list[str]) -> str:
     return result.stdout
 
 
-def install(
-    platform: list[str] | None = typer.Option(None, "--platform", help="Target platform; repeat to install into multiple hosts."),
-    source: str = typer.Option("vkroz/taskman", "--source", help="GitHub repository or local Taskman checkout."),
-    list_platforms: bool = typer.Option(False, "--list-platforms", help="Show supported installation adapters."),
-) -> None:
-    """Install the plugin into selected platforms; the Taskman CLI is shared."""
-    if list_platforms:
-        typer.echo("\n".join(PLATFORMS))
-        return
-    if not platform:
-        raise typer.BadParameter("choose at least one --platform; see --list-platforms")
-    targets = list(dict.fromkeys(platform))
-    for name in targets:
-        if name not in PLATFORMS:
-            raise typer.BadParameter(f"unsupported platform: {name}; available: {', '.join(PLATFORMS)}")
-        if not shutil.which(PLATFORMS[name].executable):
-            raise typer.BadParameter(f"install {PLATFORMS[name].executable} before installing its Taskman plugin")
+def _validate_source(source: str) -> str:
     local = Path(source).expanduser()
     if local.exists():
         local = local.resolve()
@@ -77,24 +66,90 @@ def install(
                 raise ValueError("expected the taskman marketplace with plugin tm")
         except (ValueError, OSError) as exc:
             raise typer.BadParameter(f"invalid local Taskman marketplace: {exc}") from exc
-        source = str(local)
-    elif source.startswith(("/", ".", "~")):
+        return str(local)
+    if source.startswith(("/", ".", "~")):
         raise typer.BadParameter(f"local source does not exist: {source}")
-    elif source.startswith("-"):
+    if source.startswith("-"):
         raise typer.BadParameter("source must be a repository or directory")
+    return source
 
-    # Resolve all target registrations before changing any host.
-    registered = {name: PLATFORMS[name].source_registered(source) for name in targets}
+
+def _register(name: str, source: str) -> None:
+    adapter = PLATFORMS[name]
+    registered = adapter.source_registered(source)
+    if not registered:
+        run([adapter.executable, "plugin", "marketplace", "add", source])
+    if name == "claude-code" and registered:
+        run([adapter.executable, "plugin", "marketplace", "update", "taskman"])
+    run([adapter.executable, *adapter.install_args])
+    if name == "claude-code":
+        run([adapter.executable, "plugin", "update", "tm@taskman", "--scope", "user"])
+
+
+def _skip_message(name: str, source: str) -> str:
+    executable = PLATFORMS[name].executable
+    return (
+        f"Skipped {name}: {executable} is not on PATH. "
+        f"Install {executable}, then run: taskman install --platform {name} --source {source}"
+    )
+
+
+def install(
+    platform: list[str] | None = typer.Option(None, "--platform", help="Target platform; repeat to install into multiple hosts."),
+    source: str = typer.Option("vkroz/taskman", "--source", help="GitHub repository or local Taskman checkout."),
+    server: str | None = typer.Option(None, "--server", help="Save this Taskman server URL for the CLI."),
+    list_platforms: bool = typer.Option(False, "--list-platforms", help="Show supported installation adapters."),
+) -> None:
+    """Register the plugin for each host CLI that is installed.
+
+    A missing host CLI is skipped with the command to finish later. The command
+    exits 0 in that case, including when every requested host is missing.
+    It exits 2 when a platform name or source is invalid, or when a host CLI
+    is present but its plugin command fails.
+    """
+    if list_platforms:
+        typer.echo("\n".join(PLATFORMS))
+        return
+    if server:
+        if not server.startswith(("http://", "https://")):
+            raise typer.BadParameter("server URL must start with http:// or https://")
+        path = save_server_url(server)
+        typer.echo(f"Saved Taskman server URL to {path}")
+    if not platform:
+        if server:
+            return
+        raise typer.BadParameter("choose at least one --platform; see --list-platforms")
+    targets = list(dict.fromkeys(platform))
     for name in targets:
-        adapter = PLATFORMS[name]
-        if not registered[name]:
-            run([adapter.executable, "plugin", "marketplace", "add", source])
-        # Local sources are read on install. Explicit refresh handles host caches.
-        if name == "claude-code" and registered[name]:
-            run([adapter.executable, "plugin", "marketplace", "update", "taskman"])
-        run([adapter.executable, *adapter.install_args])
-        if name == "claude-code":
-            # install is a no-op for an existing plugin; update is required.
-            run([adapter.executable, "plugin", "update", "tm@taskman", "--scope", "user"])
+        if name not in PLATFORMS:
+            raise typer.BadParameter(f"unsupported platform: {name}; available: {', '.join(PLATFORMS)}")
+    source = _validate_source(source)
+    present = [name for name in targets if shutil.which(PLATFORMS[name].executable)]
+    missing = [name for name in targets if name not in present]
+    failures: list[str] = []
+    for name in present:
+        try:
+            _register(name, source)
+        except typer.BadParameter as exc:
+            failures.append(f"{name}: {exc}")
+            continue
         typer.echo(f"Installed Taskman plugin for {name}.")
-    typer.echo("Use a fresh session to load the plugin. Taskman data stays in the selected project's tasks directory.")
+    for name in missing:
+        typer.echo(_skip_message(name, source), err=True)
+    if failures:
+        for line in failures:
+            typer.echo(line, err=True)
+        raise typer.Exit(2)
+    if present:
+        typer.echo("Start a fresh host session to load the plugin.")
+    elif missing:
+        typer.echo(
+            "Warning: no plugins were installed because every requested host CLI is missing. "
+            "No plugins registered. Install a host CLI and re-run the command shown above.",
+            err=True,
+        )
+    typer.echo(
+        "Point the CLI at the server with TASKMAN_URL and TASKMAN_ACCESS_TOKEN, "
+        "or `taskman config --server URL`. In each git checkout, run `taskman hooks install` "
+        "so commits are reported when the host has no plugin hook."
+    )

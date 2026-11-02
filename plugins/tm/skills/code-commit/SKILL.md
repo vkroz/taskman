@@ -59,7 +59,7 @@ EOF
 ## Safety Rules
 
 - NEVER amend published commits unless the user explicitly requests it
-- NEVER use `--no-verify` to skip hooks unless explicitly instructed
+- NEVER use `--no-verify` to skip hooks unless explicitly instructed. A Taskman post-commit hook reports the commit for `.taskman/active` when `taskman hooks install` has been run.
 - NEVER force-push to `main`/`master`
 - NEVER commit automatically — only when the user explicitly asks
 - If a pre-commit hook fails, fix the underlying issue and create a **new** commit; do NOT amend

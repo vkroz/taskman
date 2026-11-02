@@ -1,0 +1,54 @@
+# App + Postgres. From the repo root, with .env filled in:
+#   docker compose up -d --build
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-taskman}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taskman}
+      POSTGRES_DB: ${POSTGRES_DB:-taskman}
+    volumes:
+      - taskman-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-taskman} -d ${POSTGRES_DB:-taskman}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  taskman:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: taskman:local
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: ${PORT:-8080}
+      TASKMAN_ACCESS_TOKEN: ${TASKMAN_ACCESS_TOKEN:?Set TASKMAN_ACCESS_TOKEN in .env}
+      TASKMAN_DATABASE_URL: postgresql://${POSTGRES_USER:-taskman}:${POSTGRES_PASSWORD:-taskman}@db:5432/${POSTGRES_DB:-taskman}
+      TASKMAN_WEB_WORKERS: ${TASKMAN_WEB_WORKERS:-2}
+    ports:
+      # Loopback only. To reach the app from another machine, publish every
+      # interface instead, for example "0.0.0.0:${PORT:-8080}:${PORT:-8080}".
+      # The app speaks plain HTTP and the bearer token travels in every
+      # request. Put a TLS reverse proxy in front before you do that.
+      - "127.0.0.1:${PORT:-8080}:${PORT:-8080}"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8080') + '/ready', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  taskman-db:
