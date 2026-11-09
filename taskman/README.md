@@ -11,4 +11,4 @@ uv run taskman help
 
 Commands cover creation, nested planning, dependencies, execution status, shared context, attributed journals, verification and closure. All task mutations go through the CLI or the UI's shared backend. Closed tasks are immutable.
 
-`TASKMAN_URL` and `TASKMAN_ACCESS_TOKEN` select the server. `taskman serve` is that server: gunicorn on `0.0.0.0:$PORT`, Postgres from `TASKMAN_DATABASE_URL`. Install the server extra with `uv sync --extra dev --extra serve`. The Docker setup in the [project README](../README.md) runs the app and Postgres.
+`TASKMAN_URL` and `TASKMAN_ACCESS_TOKEN` select the server. `taskman serve` is that server: gunicorn on `0.0.0.0:$PORT`, Postgres from `TASKMAN_DATABASE_URL` or from `TASKMAN_DB_SOCKET`, `TASKMAN_DB_NAME`, `TASKMAN_DB_USER`, and `TASKMAN_DB_PASSWORD`. `taskman migrate` applies the schema and exits. Install the server extra with `uv sync --extra dev --extra serve`. The Docker setup in the [project README](../README.md) runs the app and Postgres.

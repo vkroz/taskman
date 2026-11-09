@@ -19,7 +19,7 @@ and do not commit it.
 Commands:
   new, list, show, update, move, depend, ready, context, pull, record
   complete (alias close), activity, report, validate
-  hook claude|git, hooks install, config, install, serve, ui
+  hook claude|git, hooks install, config, install, migrate, serve, ui
 
 A task id is an integer assigned by the server. Status is backlog, active, or
 done. `pull` moves a backlog task to active and records who pulled it.
@@ -42,6 +42,10 @@ reported with `taskman report pr --url URL --agent AUTHOR`.
 
 Files already stored under a repository's tasks/ directory are not imported.
 Copy their text into `taskman new` yourself.
+
+`taskman migrate` applies the schema and exits. `taskman serve` does that too,
+then starts the server. The connection is TASKMAN_DATABASE_URL, or
+TASKMAN_DB_SOCKET, TASKMAN_DB_NAME, TASKMAN_DB_USER, and TASKMAN_DB_PASSWORD.
 
 The access check is one shared bearer token. There are no user accounts.
 GET /health is liveness and does not open a database connection. GET /ready

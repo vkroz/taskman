@@ -37,7 +37,7 @@ docker compose down
 
 `docker compose down` keeps the database volume. `docker compose down -v` deletes it.
 
-The app waits for Postgres, then creates tables if they are missing. Nothing in this repository is specific to a cloud vendor. The same Compose file is the application. A later deploy swaps only the outer hosting config.
+The app waits for Postgres, then creates tables if they are missing. `taskman migrate` does only that step and exits, so a deploy can migrate before it starts the new process. Docker Compose stays the local setup and does not mention a cloud vendor. A push to `staging` or `main` deploys this same image to Cloud Run. That pipeline is described in [docs/deploy.md](docs/deploy.md).
 
 ### Environment
 
@@ -45,10 +45,14 @@ The app waits for Postgres, then creates tables if they are missing. Nothing in 
 | --- | --- | --- | --- |
 | `TASKMAN_ACCESS_TOKEN` | yes for the server | | Shared bearer token. Not committed. |
 | `PORT` | no | `8080` | Published host port and the port inside the app container. |
-| `TASKMAN_DATABASE_URL` | set by Compose | `postgresql://taskman:taskman@db:5432/taskman` | Postgres URL the app uses. |
+| `TASKMAN_DATABASE_URL` | set by Compose | `postgresql://taskman:taskman@db:5432/taskman` | Postgres connection string. When this is set, the socket variables below are ignored. |
 | `POSTGRES_USER` | no | `taskman` | Database user. Use a URL-safe password. |
 | `POSTGRES_PASSWORD` | no | `taskman` | Database password for local Compose. |
 | `POSTGRES_DB` | no | `taskman` | Database name. |
+| `TASKMAN_DB_SOCKET` | cloud only | | Directory of the Cloud SQL unix socket, for example `/cloudsql/project:region:instance`. Used only when `TASKMAN_DATABASE_URL` is unset. |
+| `TASKMAN_DB_NAME` | cloud only | | Database name for that socket connection. |
+| `TASKMAN_DB_USER` | cloud only | | Database user for that socket connection. |
+| `TASKMAN_DB_PASSWORD` | cloud only | | Database password. Surrounding whitespace is removed. Secret Manager mounts this on Cloud Run. |
 | `TASKMAN_WEB_WORKERS` | no | `2` | gunicorn workers. |
 | `TASKMAN_URL` | CLI | `http://127.0.0.1:8080` | Server the CLI calls. |
 | `TASKMAN_SESSION` | no | | Session id stored on events. |

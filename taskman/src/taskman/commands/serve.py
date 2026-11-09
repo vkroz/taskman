@@ -1,4 +1,8 @@
-"""Network server. gunicorn binds 0.0.0.0 and PORT after Postgres is ready."""
+"""Network server. gunicorn binds 0.0.0.0 and PORT after Postgres is ready.
+
+``taskman migrate`` applies the same schema and exits, so a deploy can migrate
+before it starts the new revision.
+"""
 from __future__ import annotations
 
 import os
@@ -70,11 +74,29 @@ def gunicorn_argv(config: ServeConfig) -> list[str]:
     ]
 
 
+def migrate_command() -> None:
+    """Apply the database schema and exit.
+
+    Uses the same connection settings as ``taskman serve``. Safe to run more
+    than once. Does not require TASKMAN_ACCESS_TOKEN and does not start a server.
+    """
+    try:
+        url = database_url()
+        wait_for_database(url)
+        migrate(url)
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo("Database schema is up to date.")
+
+
 def serve() -> None:
     """Serve the API and flight-control page on 0.0.0.0.
 
-    Requires TASKMAN_ACCESS_TOKEN and TASKMAN_DATABASE_URL. Waits for Postgres,
-    creates tables, then execs gunicorn on PORT (default 8080).
+    Requires TASKMAN_ACCESS_TOKEN and either TASKMAN_DATABASE_URL or the
+    TASKMAN_DB_SOCKET, TASKMAN_DB_NAME, TASKMAN_DB_USER, and TASKMAN_DB_PASSWORD
+    settings. Waits for Postgres, creates tables, then execs gunicorn on PORT
+    (default 8080).
     """
     try:
         config = serve_config()

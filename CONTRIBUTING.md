@@ -36,4 +36,6 @@ When `TASKMAN_TEST_DATABASE_URL` or `CI` is set and Postgres is unreachable, the
 
 Continuous integration runs the tests on Python 3.11 and 3.12 against a Postgres 16 service, and runs `docker build` on the server image. It does not start the Compose stack. The image installs the exact versions in `taskman/uv.lock` with `uv sync --frozen`.
 
+A push to `staging` or `main` deploys to Cloud Run after those jobs pass. Pull requests do not deploy. See [docs/deploy.md](docs/deploy.md).
+
 See the [README](README.md) for how to run the server.

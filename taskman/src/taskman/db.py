@@ -1,6 +1,11 @@
 """Postgres connection, readiness, and schema migration.
 
 The server talks only to this database. It does not read or write a git checkout.
+
+``TASKMAN_DATABASE_URL`` is the connection string when it is set. Local Compose
+sets it. When it is unset, ``TASKMAN_DB_SOCKET``, ``TASKMAN_DB_NAME``,
+``TASKMAN_DB_USER``, and ``TASKMAN_DB_PASSWORD`` build a connection to a Cloud
+SQL unix socket. The password is the value mounted from Secret Manager.
 """
 from __future__ import annotations
 
@@ -10,6 +15,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 import psycopg
+from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 
 STATEMENTS = (
@@ -55,11 +61,46 @@ STATEMENTS = (
 )
 
 
+_SOCKET_SETTINGS = (
+    "TASKMAN_DB_SOCKET",
+    "TASKMAN_DB_NAME",
+    "TASKMAN_DB_USER",
+    "TASKMAN_DB_PASSWORD",
+)
+
+
 def database_url() -> str:
-    url = os.environ.get("TASKMAN_DATABASE_URL", "").strip()
-    if not url:
-        raise RuntimeError("TASKMAN_DATABASE_URL is not set.")
-    return url
+    """Return the Postgres connection string.
+
+    A non-empty ``TASKMAN_DATABASE_URL`` wins, which is how Docker Compose
+    selects the ``db`` service. Otherwise the four ``TASKMAN_DB_*`` variables
+    must all be set. Surrounding whitespace is removed from every value so a
+    secret mounted with a trailing newline does not become part of the password.
+    """
+    explicit = os.environ.get("TASKMAN_DATABASE_URL", "").strip()
+    if explicit:
+        return explicit
+    values = {name: os.environ.get(name, "").strip() for name in _SOCKET_SETTINGS}
+    if all(values.values()):
+        # host is the directory that contains the Cloud SQL socket file
+        # .s.PGSQL.5432, for example /cloudsql/project:region:instance.
+        return make_conninfo(
+            host=values["TASKMAN_DB_SOCKET"],
+            dbname=values["TASKMAN_DB_NAME"],
+            user=values["TASKMAN_DB_USER"],
+            password=values["TASKMAN_DB_PASSWORD"],
+        )
+    missing = [name for name in _SOCKET_SETTINGS if not values[name]]
+    if len(missing) == len(_SOCKET_SETTINGS):
+        raise RuntimeError(
+            "TASKMAN_DATABASE_URL is not set. Set it, or set TASKMAN_DB_SOCKET, "
+            "TASKMAN_DB_NAME, TASKMAN_DB_USER, and TASKMAN_DB_PASSWORD."
+        )
+    raise RuntimeError(
+        "TASKMAN_DATABASE_URL is not set. To connect through a Cloud SQL socket, also set: "
+        + ", ".join(missing)
+        + "."
+    )
 
 
 @contextmanager

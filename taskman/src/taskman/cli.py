@@ -10,6 +10,7 @@ from taskman import __version__
 from taskman.commands.help_cmd import help_cmd as _help
 from taskman.commands.hook_cmd import hook_app, hooks_app
 from taskman.commands.install import install
+from taskman.commands.serve import migrate_command as _migrate
 from taskman.commands.serve import serve as _serve
 from taskman.commands.work import (
     activity,
@@ -63,6 +64,7 @@ app.command("validate")(validate)
 app.command("ui")(ui)
 app.command("config")(config_cmd)
 app.command("install")(install)
+app.command("migrate")(_migrate)
 app.command("serve")(_serve)
 app.command("help")(_help)
 app.add_typer(report_app, name="report")
