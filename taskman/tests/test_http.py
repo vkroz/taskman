@@ -303,6 +303,34 @@ def test_out_of_range_and_non_ascii_ids_are_rejected_without_a_500(database):
     assert code == 400
 
 
+def test_flight_control_panes_resize_without_relaxing_csp(database):
+    code, headers, body = _call_headers("GET", "/", token=None)
+    assert code == 200
+    page = body.decode("utf-8")
+    assert page.lower().count("<script") == 1
+    assert page.lower().count("<style") == 1
+    assert "onclick=" not in page.lower()
+    assert page.count('role="separator"') == 2
+    assert page.count('aria-orientation="vertical"') == 2
+    assert "col-resize" in page
+    assert "taskman.pane-widths" in page
+    assert "localStorage" in page
+    assert "dblclick" in page
+    assert "ArrowLeft" in page and "ArrowRight" in page
+    assert "resize-shield" in page
+    assert "pointer-events: none" in page
+    assert "user-select: none" in page
+    assert page.count("(max-width: 899px)") == 2
+    csp = headers["Content-Security-Policy"]
+    assert "unsafe-inline" not in csp
+    script = page.split("<script>", 1)[1].split("</script>", 1)[0]
+    style = page.split("<style>", 1)[1].split("</style>", 1)[0]
+    assert f"script-src {_sha256_source(script)};" in csp
+    assert f"style-src {_sha256_source(style)};" in csp
+    assert "default-src 'none'" in csp
+    assert "connect-src 'self'" in csp
+
+
 def test_ready_logs_why_it_failed(monkeypatch, capsys):
     def fail():
         raise RuntimeError("postgres is down")

@@ -26,7 +26,7 @@ The stack is two services:
 | `db` | Postgres 16. Named volume `taskman-db` mounted at `/var/lib/postgresql/data`. |
 | `taskman` | Image `taskman:local`. Command `taskman serve`. gunicorn on `0.0.0.0:$PORT` inside the container. Compose publishes that port on `127.0.0.1` only. |
 
-`http://127.0.0.1:8080/` is the flight-control page. Paste the token into the page; it stays in the browser tab and is sent as `Authorization: Bearer`. `GET /health` is liveness: it does not open a database connection and returns `{"status":"ok"}` when the process is up. `GET /ready` is readiness: it runs `SELECT 1` and returns `{"status":"unavailable"}` with status 503 when Postgres does not answer. Neither check requires the token. The image and Compose healthchecks call `/ready`.
+`http://127.0.0.1:8080/` is the flight-control page. Drag the border between the sidebar and the activity list, and the border between the list and the task details panel, to change their widths. The list keeps the space that remains. Widths are saved in the browser and a double-click on a border restores the default. Paste the token into the page; it stays in the browser tab and is sent as `Authorization: Bearer`. `GET /health` is liveness: it does not open a database connection and returns `{"status":"ok"}` when the process is up. `GET /ready` is readiness: it runs `SELECT 1` and returns `{"status":"unavailable"}` with status 503 when Postgres does not answer. Neither check requires the token. The image and Compose healthchecks call `/ready`.
 
 ```sh
 docker compose ps

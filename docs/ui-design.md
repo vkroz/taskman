@@ -1,6 +1,6 @@
 # Taskman workspace design
 
-The server UI is the flight-control dashboard in the README. This document describes the earlier file-backed workspace and is not the current page.
+The server UI is the flight-control dashboard in the README: a sidebar of work views, the activity list, and an optional details panel. Drag either vertical border to resize those panes. A focused border also moves with the arrow keys, and a double-click restores its default width. Widths are kept in local storage. Narrow windows stack the panes. This document otherwise describes the earlier file-backed workspace and is not the current page.
 
 Make the work collection the primary surface. Use a quiet light canvas, dark ink, restrained indigo accents, consistent 8px spacing, 14px body type, rounded controls and visible keyboard focus. The left navigation offers All work, Current, Backlog, Done and Consolidated history. The central hierarchical list uses aligned status, type and priority columns; clicking a title opens an optional details panel. Narrow screens stack panels without horizontal page overflow.
 
