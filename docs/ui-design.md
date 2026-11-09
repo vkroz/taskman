@@ -1,7 +1,5 @@
 # Taskman workspace design
 
-The server UI is the flight-control dashboard in the README. This document describes the earlier file-backed workspace and is not the current page.
-
 Make the work collection the primary surface. Use a quiet light canvas, dark ink, restrained indigo accents, consistent 8px spacing, 14px body type, rounded controls and visible keyboard focus. The left navigation offers All work, Current, Backlog, Done and Consolidated history. The central hierarchical list uses aligned status, type and priority columns; clicking a title opens an optional details panel. Narrow screens stack panels without horizontal page overflow.
 
 Rows have distinct expand buttons and selection checkboxes. Checking an item selects it and all descendants, including collapsed or filtered descendants in the ordinary collection. Unchecking an item deselects only that item; other selections remain unchanged. Collapse state survives refresh. Search and filters retain matching descendants with dimmed contextual ancestors; a contextual ancestor is explicitly labeled and is not counted as a match. Sorting applies within siblings with ID as a deterministic tie breaker. Filters combine with AND; comma-separated exact values within a field use OR. Contains searches nested values as text; exists detects field presence. Every discovered frontmatter key, including nested journal content and extension fields, is offered, with parent_id added as a derived attribute. Epic scope includes its descendants. Empty results offer Clear filters.

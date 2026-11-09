@@ -1,146 +1,109 @@
 # Taskman
 
-Taskman is the shared record of work for coding agents. The records live in Postgres. A small web server is the only writer. The `taskman` CLI is an HTTP client, and the flight-control page shows which agent last reported activity on each task.
+Taskman keeps requirements, plans, dependencies, decisions and verification in a shared task tree. Codex and Claude Code use the same CLI and records, so one agent can implement a task and another can review it without a conversation handoff.
 
-The server does not read or write a git checkout. An agent copies a task into the checkout with `taskman pull`. Hooks report commits, pull requests, and completion back to the server.
+The browser UI creates tasks and displays their hierarchy, status and evidence. Agents plan and execute through the CLI. Completion means the agreed acceptance criteria work locally; deployment is outside this workflow.
 
-## Run
+## Install
 
-Requires Docker.
-
-```sh
-cp .env.example .env
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-Put that value in `.env` as `TASKMAN_ACCESS_TOKEN`. Then, from the repository root:
-
-```sh
-docker compose up -d --build
-```
-
-The stack is two services:
-
-| Service | Role |
-| --- | --- |
-| `db` | Postgres 16. Named volume `taskman-db` mounted at `/var/lib/postgresql/data`. |
-| `taskman` | Image `taskman:local`. Command `taskman serve`. gunicorn on `0.0.0.0:$PORT` inside the container. Compose publishes that port on `127.0.0.1` only. |
-
-`http://127.0.0.1:8080/` is the flight-control page. Paste the token into the page; it stays in the browser tab and is sent as `Authorization: Bearer`. `GET /health` is liveness: it does not open a database connection and returns `{"status":"ok"}` when the process is up. `GET /ready` is readiness: it runs `SELECT 1` and returns `{"status":"unavailable"}` with status 503 when Postgres does not answer. Neither check requires the token. The image and Compose healthchecks call `/ready`.
-
-```sh
-docker compose ps
-docker compose logs -f taskman
-docker compose restart
-docker compose down
-```
-
-`docker compose down` keeps the database volume. `docker compose down -v` deletes it.
-
-The app waits for Postgres, then creates tables if they are missing. Nothing in this repository is specific to a cloud vendor. The same Compose file is the application. A later deploy swaps only the outer hosting config.
-
-### Environment
-
-| Variable | Required | Default | Purpose |
-| --- | --- | --- | --- |
-| `TASKMAN_ACCESS_TOKEN` | yes for the server | | Shared bearer token. Not committed. |
-| `PORT` | no | `8080` | Published host port and the port inside the app container. |
-| `TASKMAN_DATABASE_URL` | set by Compose | `postgresql://taskman:taskman@db:5432/taskman` | Postgres URL the app uses. |
-| `POSTGRES_USER` | no | `taskman` | Database user. Use a URL-safe password. |
-| `POSTGRES_PASSWORD` | no | `taskman` | Database password for local Compose. |
-| `POSTGRES_DB` | no | `taskman` | Database name. |
-| `TASKMAN_WEB_WORKERS` | no | `2` | gunicorn workers. |
-| `TASKMAN_URL` | CLI | `http://127.0.0.1:8080` | Server the CLI calls. |
-| `TASKMAN_SESSION` | no | | Session id stored on events. |
-
-`taskman config --server http://127.0.0.1:8080` saves the URL in `~/.config/taskman/config.json` (mode `0600`). The CLI reads the server URL and token only from that user file and from the environment. A `.taskman/config.json` inside a repository is ignored, so a checkout cannot point the token at another host.
-
-The Compose database password defaults to `taskman`. Change `POSTGRES_PASSWORD` in `.env` before anyone else can reach the machine. Keep the value URL-safe; Compose embeds it in `TASKMAN_DATABASE_URL`.
-
-`taskman install` exits 0 when a requested host CLI is missing, including when every host is skipped, and prints a warning with the command to finish. That keeps `install.sh` from failing after the CLI itself is installed. It exits 2 when a platform name or source is invalid, or when a host CLI is present and its plugin command fails.
-
-### CLI
-
-```sh
-export TASKMAN_URL=http://127.0.0.1:8080
-export TASKMAN_ACCESS_TOKEN='the-token-from-env'
-taskman new --title "Add export" --type task --body-file requirements.md --json
-taskman list --json
-taskman show ID
-taskman update ID --body-file requirements.md
-taskman move ID active
-taskman depend ID --on OTHER
-taskman ready --json
-taskman context ID
-taskman pull ID --agent codex --session local
-taskman record ID --message "Use the existing parser." --agent codex
-taskman complete ID --message "Export writes the file." --agent codex
-taskman activity --json
-taskman validate
-```
-
-`--agent` (alias `--author`) names the **author** of the changes an event records: a person, `claude-code`, `codex`, and so on. Taskman does not control agents. Every command that records an event requires it: `pull`, `record`, `complete`, `close`, `report commit|pr|completion`, and `hook claude|git`. The value comes only from the command line; no environment variable or default fills it in. A missing or blank value fails with `--agent <author> is required: name who authored these changes`. Surrounding whitespace is trimmed. The server also rejects a blank author.
-
-`close` is an alias of `complete`. `taskman pull` writes `.taskman/tasks/<id>.md` and `.taskman/active` at the git repository root, adds `.taskman/` to that repository's `.gitignore` when it is missing, and marks a backlog task active. That file is the working copy agents read. The server does not create it. `taskman complete` removes `.taskman/active` when it names the completed task.
-
-`taskman ui` prints the server URL. It does not start a second server.
-
-### Hooks
-
-Claude Code loads `plugins/tm/hooks/hooks.json` with the plugin. After a Bash `git commit` or `gh pr create`, and when a session stops with the line `Taskman completion: ID` in the last assistant message, the hook runs `taskman hook claude --agent claude-code`, so every event it reports records `claude-code` as the author. The active task id comes from `.taskman/active`. The Stop hook skips a task that is already done, so `taskman complete` plus the marker line records one completion. The hook script limits the client to 4 seconds with `timeout`, or `gtimeout` on macOS with Homebrew coreutils. With neither, it runs the client unwrapped, and the client's 3-second network timeout applies.
-
-Codex does not get a plugin hook from this repository. In a git checkout, run:
-
-```sh
-taskman hooks install
-```
-
-That writes `.git/hooks/post-commit`, which runs `taskman hook git commit --agent "$author"`. The author is the commit author from `git log -1 --format=%an`, then `git config user.name`, then the literal `git`. A post-commit hook from an older Taskman runs without `--agent`, so it reports nothing and prints how to update it. `taskman hooks install` replaces an unmodified older Taskman hook and keeps a backup; a hook you edited needs `--force`. Report a pull request with:
-
-```sh
-taskman report pr --url https://github.com/org/repo/pull/12 --agent codex
-```
-
-Hooks exit 0 when the server is unreachable so a commit is not rejected. Set `TASKMAN_URL` and `TASKMAN_ACCESS_TOKEN` where the hook runs.
-
-### Install the CLI and plugins
+Requires Python 3.11+, [uv](https://docs.astral.sh/uv/) and the coding tools you want to use.
 
 ```sh
 uv tool install 'git+https://github.com/vkroz/taskman.git#subdirectory=taskman'
-taskman install --platform codex --platform claude-code --server http://127.0.0.1:8080
+taskman install --platform codex --platform claude-code
 ```
 
-From a working tree:
+Choose either platform or repeat `--platform` for both. `taskman` and `tm` are equivalent commands. Start a fresh coding session after installing the plugin.
+
+For a local checkout under development:
 
 ```sh
 uv tool install --force --editable ./taskman
-taskman install --platform claude-code --source "$PWD" --server http://127.0.0.1:8080
+taskman install --platform codex --platform claude-code --source "$PWD"
 ```
 
-`taskman install` registers each requested platform whose host CLI (`codex` or `claude`) is on `PATH`. A missing host CLI is skipped, with the exact command to run after you install it, and the process still exits 0. The command exits 2 when a platform name or `--source` is invalid, or when a host CLI is present but its plugin command fails.
+The CLI installs one shared plugin through host adapters. `taskman install --list-platforms` lists supported hosts. If an existing marketplace points to another source, the installer reports the conflict rather than replacing it.
 
-### Existing task files
+## Work on a project
 
-Text files under `tasks/` in a repository are not imported. Copy the title and body into `taskman new` yourself. The server never scans a repo for them.
+Run Taskman inside the project. It finds the nearest ancestor `tasks/` directory, stopping at the repository root. Set `TASKMAN_TASKS_DIR` explicitly when multiple agents must share a particular tree across working directories.
 
-### Limits of this version
+```sh
+taskman new --type epic --title "Add conversation history" --body-file requirements.md --json
+taskman new --type feat --title "Persist conversations" --parent EPIC_ID --body-file story.md --json
+taskman new --title "Save messages" --parent STORY_ID --body-file task.md --json
+```
 
-- One shared token. No accounts, no session table, no rate limit. The comparison is constant-time. The service speaks plain HTTP, so the token is visible to anything that can read the traffic.
-- The page shell at `/` contains no task data. Task data requires the bearer token.
-- The dashboard shows the latest event on each task. It updates because the browser polls. The server does not call out to agents.
-- There is no delete, no draft/finalize step, and no rule that a parent stays open until every child is done. Completion is `taskman complete` or the Stop hook line above.
-- A pull event is recorded when an agent runs `taskman pull`, so the board can show who claimed the task before the first commit. The three hook events are commit, pull request, and completion.
-- Posting an event that is already stored returns 200 and that event. This covers a commit whose sha is already recorded for the task, and a completion that repeats the task's latest event when that event is a completion for the same agent and session. A post that inserts a row returns 201. The duplicate answer is 200 rather than 409 so a retry stays successful for the CLI and the hooks.
-- Several gunicorn workers on one machine share Postgres. Run one app service against the database.
+Replace the uppercase placeholders with the IDs returned by `new`. New items are drafts. Finalize items once their scope is agreed; finalize their ancestors too before execution.
 
-## Develop
+```sh
+taskman finalize TASK_ID
+taskman depend REVIEW_ID --on TASK_ID
+taskman ready --json
+taskman context TASK_ID
+taskman move TASK_ID active
+```
+
+A story uses type `feat`. Taskman permits other nesting shapes; `task` is always a leaf. Independent tasks can run in parallel. Each agent reads `context` and records its contribution through the CLI. Taskman does not launch coding agents itself.
+
+## Record work and verify
+
+```sh
+taskman record TASK_ID --kind decision --actor Codex --body-file decision.md
+taskman update TASK_ID --body-file refined-requirements.md
+taskman record TASK_ID --kind summary --actor Codex --body-file summary.md
+taskman record TASK_ID --kind verification --result pass --actor "Claude Code" --body-file verification.md
+taskman close TASK_ID
+```
+
+Use `--body-file -` to read stdin. Journal significant choices, their reasons and changes to scope. The completion summary should explain what changed, why, and any limits. Verification records should name the checks, commands, results and source revision or relevant working-tree changes. Distinguish executed tests from source inspection and another agent's report.
+
+Open requirements may be refined to achieve the agreed outcome. Changes to the body, dependencies, type, implementation journal or children invalidate earlier completion evidence. Close requires a current summary, a current passing verification, and completed dependencies and descendants. A recorded pass is the agent's assertion: Taskman does not run tests or prove that assertion.
+
+Closed tasks are immutable. Further changes belong in a new task that references the original ID. Summaries supplement the journal; original entries remain available. `discard` removes only an unreferenced draft leaf.
+
+## View and check
+
+```sh
+taskman ui
+taskman list --recursive --json
+taskman context TASK_ID
+taskman validate
+```
+
+The UI refreshes as agents change tasks. `taskman validate` checks task-data integrity; acceptance testing is separate. Use `taskman help` for storage rules and `taskman COMMAND --help` for syntax.
+
+The plugin supplies define, design, plan, implement and validate skills, plus optional review, commenting, commit and documentation skills. Skills use the same task records on either platform.
+
+## Develop Taskman
 
 ```sh
 cd taskman
-uv sync --extra dev --extra serve
+uv sync --extra dev
 uv run pytest
 ```
 
-Pytest uses `TASKMAN_TEST_DATABASE_URL` when it is set. Otherwise it starts a Postgres 16 container named `taskman-pytest-pg-test` on port 54329. The tests TRUNCATE every Taskman table, so they refuse a database whose name does not end in `_test`. See [CONTRIBUTING.md](CONTRIBUTING.md). Plugin sources live under `plugins/tm/`. Edit those files, not the `.claude/` symlinks.
+Python code is under `taskman/src/taskman/`; plugin sources are under `plugins/tm/`. Add a platform adapter to the installer to support another coding tool without changing task storage. The shell script under `plugins/tm/scripts/` is retained for legacy data; current workflows use the Python CLI.
 
-Branch names are `feat/*` or `chore/*`. Do not push to `main`. The path into `main` is described in [CONTRIBUTING.md](CONTRIBUTING.md).
+### Workspace UI and history
+
+Run `taskman ui` for the local workspace. The left navigation selects current, backlog, done or consolidated history. Search combines with epic scope and metadata filters; matching descendants retain labeled parent context. Sort orders siblings. Expand or collapse branches, and select a title to open details; Close returns the space to the list.
+
+Create work with **New task**. Open task details offer title/description editing with a recorded reason. **Delete draft** is limited to draft leaves with no incoming dependencies; finalized and completed work cannot be deleted through this command.
+
+Select completed rows and choose **Consolidate completed work** to create a Markdown documentation summary. Selecting a parent includes its descendants. Originals remain immutable and retrievable in Consolidated history, while individual rows leave ordinary lists. The summary contains bounded excerpts and links to full requirements and evidence.
+
+The same operations are available from the CLI:
+
+```sh
+taskman browse --where status=active,backlog --sort title
+taskman browse --where status=done --epic EPIC_ID --keyword migration
+taskman browse --contains journal=verification --exists depends_on
+taskman edit TASK_ID --title "Updated title" --body-file requirements.md --reason "Clarify table coverage"
+taskman discard DRAFT_ID
+taskman consolidate DONE_ID --title "Delivered database changes"
+taskman history
+taskman browse --include-archived
+```
+
+`browse` emits hierarchy-preserving JSON; contextual ancestors have `context: true` and do not match the query themselves. Use `show` or `context` with any retained ID for complete history. See [workspace design](docs/ui-design.md) for filtering and retention semantics.

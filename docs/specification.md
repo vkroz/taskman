@@ -1,7 +1,5 @@
 # Taskman specification
 
-The running product is the Postgres-backed server described in [architecture](architecture.md) and the README. The sections below that describe a file tree, drafts, or an immutable on-disk journal are the previous edition. They are not what `taskman serve` enforces.
-
 Taskman owns the shared work records; coding agents own execution. A workflow succeeds when the requested local behavior meets its acceptance criteria and the evidence is retained for the next agent or engineer.
 
 ## Work records

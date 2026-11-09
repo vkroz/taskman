@@ -5,6 +5,5 @@
   "author": {
     "name": "Vladimir Kroz"
   },
-  "repository": "https://github.com/vkroz/taskman",
-  "hooks": "./hooks/hooks.json"
+  "repository": "https://github.com/vkroz/taskman"
 }

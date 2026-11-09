@@ -3,7 +3,3 @@
 _taskman.lock
 
 .cache/
-
-.env
-
-.taskman/

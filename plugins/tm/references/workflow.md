@@ -1,63 +1,54 @@
 # Shared Taskman workflow
 
-Taskman is the source of truth for work shared by Codex, Claude Code, and other agents. The records live in Postgres behind the Taskman server. Use `taskman` (alias `tm`) for every mutation. The server does not read or write the git checkout.
+Taskman is the source of truth for work shared by Codex, Claude Code and other agents. Use `taskman` (alias `tm`) for all task mutations. Read `taskman --help` and command help when syntax is uncertain. Do not call the legacy shell script or edit task files directly.
 
-Before editing the repository for an existing item, run `taskman pull ID --agent <author>` and read `.taskman/tasks/ID.md`. That file is a working copy. Do not create or edit files under `tasks/` for live work. Older text files there are not imported; copy their text into `taskman new` by hand.
+## Context and scope
 
-Set `TASKMAN_URL` and `TASKMAN_ACCESS_TOKEN`. `taskman config` shows the resolved URL and whether a token is present.
+Run inside the target project, or set `TASKMAN_TASKS_DIR` to its shared tree. Read `taskman context ID` before work: it includes requirements, ancestors, descendants, dependencies and journals. Resolve a missing ID with `taskman list --recursive --json`; ask only if the target remains ambiguous. IDs are stable; generated paths may change.
 
-Every command that records an event (`pull`, `record`, `complete`, `close`, `report ...`) requires `--agent <author>`. The author is who wrote the changes: `claude-code` when Claude Code made them, `codex` for Codex, or a person's name. Taskman does not control agents, and nothing fills `--agent` in from the environment. Without it the command fails with `--agent <author> is required: name who authored these changes`.
+Use `epic`, `feat` (story/feature), and `task`; a task is a leaf. Product-level requirements and architecture live in the project's existing documents. Follow that project's document conventions and link documents from tasks rather than duplicating requirements.
+
+The UI creates tasks and displays agent-written context. All lifecycle operations are available through the CLI. Taskman does not launch agents itself.
 
 ## Create and plan
 
 ```sh
 taskman new --type epic --title "Outcome" --body-file requirements.md --json
 taskman new --type feat --title "Story" --parent PARENT_ID --body-file story.md --json
-taskman new --title "Work" --parent STORY_ID --body-file task.md --json
+taskman new --title "Work" --parent PARENT_ID --body-file task.md --json
 taskman depend TASK_ID --on DEPENDENCY_ID
+taskman finalize TASK_ID
 ```
 
-A `task` is a leaf. `feat` and `epic` can have children. `depend` replaces the dependency list. Repeat `--on` for several dependencies. `--clear` removes them.
+Replace placeholders with returned IDs. `depend` replaces the dependency list; repeat `--on` to retain multiple dependencies. `--clear` removes it. Use parent relationships for decomposition and dependencies for execution order. Independent tasks may run in parallel if the host supports it and shared files remain coordinated.
 
-New items start in `backlog`. `taskman pull ID --agent <author>` moves a backlog item to `active` and writes the working copy.
+Items begin as drafts. Finalize when the scope is agreed, including through existing user authorization. Leave unresolved drafts open; `discard` removes only an unreferenced draft leaf. Finalize ancestors before executing children.
 
-## Execute
+## Execute and journal
 
 ```sh
 taskman ready --json
-taskman context ID
-taskman pull ID --agent AUTHOR --session SESSION
-taskman update ID --body-file refined.md
-taskman record ID --message "Why this approach." --agent AUTHOR
-taskman move ID active
+taskman move TASK_ID active
+taskman update TASK_ID --body-file refined-requirements.md
+taskman record TASK_ID --kind decision --actor ACTOR --body-file decision.md
 ```
 
-Read `context` for the parent, children, dependencies, and events. Journal a short note with `record` when the reason matters.
+Open requirements may be refined to reach the agreed outcome. Record significant choices, reasons, scope refinements and implementation progress. Use `handoff` for the next agent's entry point and remaining work. These are concise engineering rationales, not a transcript of internal deliberation. Do not relax acceptance criteria merely to make a failing result pass. Ask about material changes to the user's intended outcome; routine implementation choices remain within authorized work.
 
-## Commits, pull requests, and completion
+## Verify and complete
 
-Claude Code plugin hooks report these when `.taskman/active` names the task, with `claude-code` as the author:
-
-- a Bash `git commit` reports the new HEAD
-- a Bash `gh pr create` reports the pull request URL printed by the command
-- a session stop reports completion when the transcript contains `Taskman completion: ID`
-
-Run `taskman hooks install` once per git checkout. That installs a post-commit hook for hosts without a plugin hook, including Codex. It records the commit author (`git log -1 --format=%an`, then `git config user.name`, then `git`). After creating a pull request without the Claude hook, run `taskman report pr --url URL --agent AUTHOR`.
-
-When the work is done, run:
+Run the specified local quality gates and compare the actual result against acceptance criteria. Parent completion also needs checks of integrated behavior; passing child tests alone does not establish it.
 
 ```sh
-taskman complete ID --message "What changed and how it was checked." --agent AUTHOR
+taskman record TASK_ID --kind summary --actor ACTOR --body-file summary.md
+taskman record TASK_ID --kind verification --result pass --actor ACTOR --body-file evidence.md
+taskman close TASK_ID
 ```
 
-`complete` removes `.taskman/active` for that task, and the Stop hook skips a task that is already done, so the two steps record one completion. Include this line in the final message so the Stop hook records it if the command did not run:
+`--body-file -` reads stdin. Summarize what changed, why, and any limits without copying the full journal. Keep original decision records available. Evidence should identify commands, exit codes, observed results, relevant source revision or working-tree state, and acceptance coverage. Distinguish tests you ran, source inspection, and another agent's report.
 
-```
-Taskman completion: ID
-```
+Use `--result fail` or `blocked` when appropriate and leave the item open. A passing record is an agent assertion, not a test runner. `taskman validate` checks storage integrity, not product correctness.
 
-`close` is an alias of `complete`. Completion marks the task `done`. This version does not freeze the row, and it does not require every child to be done first.
+Close requires a current summary, a current passing verification, completed dependencies (including inherited ones), and completed descendants. Body, type, dependency, implementation-journal and child changes invalidate earlier completion evidence. Existing authorization to implement and verify includes closing work that meets the criteria; respect any explicit human sign-off requirement.
 
-## Flight control
-
-`taskman activity --json` and the web page show the latest reported event on each task: agent, session, kind, and detail. The page polls the server. The server does not call agents.
+Closed tasks and their journals are immutable. New changes require a new task referencing the original ID. Do not reopen or rewrite completed work. Deployment, commits and pushes require the user's applicable authorization; local completion does not imply them.
