@@ -13,14 +13,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from pathlib import Path
 
 import typer
 
-from taskman.commands.new import get_tasks_dir
-from taskman.model.layout import iter_work_items
-from taskman.model.names import NameParseError, parse_name, special_file_name
-from taskman.model.yaml_io import FrontmatterError, read_file
+from taskman.storage import open_store
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,42 +54,29 @@ def search(
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON."),
 ) -> None:
     """Search the work-item tree for a query string."""
-    tasks_dir = get_tasks_dir()
     matches: list[_Match] = []
-    for path in iter_work_items(tasks_dir):
-        try:
-            wi = parse_name(path.name)
-        except NameParseError:
+    for item in open_store().items():
+        if item.error:
             continue
-        body_file = (
-            path / special_file_name(wi.item_id) if path.is_dir() else path
-        )
-        if not body_file.exists():
-            continue
-        try:
-            data, body = read_file(body_file)
-        except FrontmatterError:
-            continue
-        title = str(data.get("title", ""))
         rank = _classify_match(
             query,
-            item_id=wi.item_id,
-            slug=wi.slug,
-            title=title,
-            body=body,
+            item_id=item.id,
+            slug=item.slug,
+            title=item.title,
+            body=item.body,
         )
         if rank is None:
             continue
         matches.append(
             _Match(
                 rank=rank,
-                item_id=wi.item_id,
-                item_type=wi.item_type,
-                status=wi.status,
-                priority=wi.priority,
-                slug=wi.slug,
-                title=title,
-                path=str(path),
+                item_id=item.id,
+                item_type=item.type,
+                status=item.status,
+                priority=item.priority,
+                slug=item.slug,
+                title=item.title,
+                path=item.location,
             )
         )
 

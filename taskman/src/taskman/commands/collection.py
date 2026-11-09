@@ -13,6 +13,7 @@ from taskman.model.collection import (
 from taskman.model.yaml_io import write_file
 from taskman.model.revisions import invalidate_ancestors
 from taskman.model.ordering import reorder_item
+from taskman.storage import open_store
 
 
 def edit_item(tasks_dir, item_id, title, body, reason):
@@ -88,7 +89,7 @@ def browse(
     typer.echo(
         json.dumps(
             query(
-                collection(get_tasks_dir(), include_archived),
+                collection(open_store(), include_archived),
                 filters,
                 keyword,
                 epic,
@@ -112,7 +113,7 @@ def consolidate(ids: list[str] = typer.Argument(...), title: str = typer.Option(
 
 def history():
     """Retrieve consolidation summaries and original task IDs."""
-    typer.echo(json.dumps(histories(get_tasks_dir()), indent=2))
+    typer.echo(json.dumps(histories(open_store()), indent=2))
 
 
 def reorder(

@@ -10,7 +10,7 @@ import time
 import webbrowser
 from taskman.model.locking import mutation_lock
 from taskman.commands.new import _make_item, NewCommandError
-from taskman.commands.show import _to_plain
+from taskman.storage.file import to_plain as _to_plain
 from taskman.commands.queries import _load_graph, is_ready
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer

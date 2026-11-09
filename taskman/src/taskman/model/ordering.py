@@ -12,7 +12,7 @@ _ORDER_FILE = ".taskman-order.json"
 _ROOT = "root"
 
 
-def _read(tasks_dir: Path) -> dict[str, list[str]]:
+def read_order(tasks_dir: Path) -> dict[str, list[str]]:
     path = tasks_dir / _ORDER_FILE
     if not path.exists():
         return {}
@@ -46,9 +46,8 @@ def _write(tasks_dir: Path, parents: dict[str, list[str]]) -> None:
         Path(temporary).unlink(missing_ok=True)
 
 
-def apply_order(rows: list[dict], tasks_dir: Path) -> list[dict]:
+def apply_order(rows: list[dict], parents: dict[str, list[str]]) -> list[dict]:
     """Add numeric sibling order without changing work-item metadata."""
-    parents = _read(tasks_dir)
     groups: dict[str, list[dict]] = {}
     for row in rows:
         groups.setdefault(row["parent_id"] or _ROOT, []).append(row)
@@ -95,7 +94,7 @@ def reorder_item(tasks_dir: Path, item_id: str, position: int) -> list[str]:
     moved = siblings.pop(current)
     siblings.insert(target, moved)
     order = [row["id"] for row in siblings]
-    parents = _read(tasks_dir)
+    parents = read_order(tasks_dir)
     parents[moved["parent_id"] or _ROOT] = order
     _write(tasks_dir, parents)
     return order

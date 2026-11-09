@@ -9,9 +9,7 @@ from pathlib import Path
 
 import typer
 
-from taskman.model.layout import iter_work_items
-from taskman.model.names import NameParseError, parse_name, special_file_name
-from taskman.model.yaml_io import FrontmatterError, read_file
+from taskman.storage.file import FileStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,30 +92,16 @@ def _active_items(tasks_dir: Path) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     if not tasks_dir.exists():
         return out
-    for path in iter_work_items(tasks_dir):
-        try:
-            wi = parse_name(path.name)
-        except NameParseError:
+    for item in FileStore(tasks_dir).items():
+        if item.status != "active":
             continue
-        if wi.status != "active":
-            continue
-        body_file = (
-            path / special_file_name(wi.item_id) if path.is_dir() else path
-        )
-        title = ""
-        if body_file.exists():
-            try:
-                data, _ = read_file(body_file)
-                title = str(data.get("title", ""))
-            except FrontmatterError:
-                pass
         out.append(
             {
-                "id": wi.item_id,
-                "type": wi.item_type,
-                "slug": wi.slug,
-                "title": title,
-                "path": str(path),
+                "id": item.id,
+                "type": item.type,
+                "slug": item.slug,
+                "title": item.title,
+                "path": item.location,
             }
         )
     out.sort(key=lambda i: i["id"])
