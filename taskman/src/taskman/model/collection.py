@@ -8,64 +8,36 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from taskman.model.layout import iter_work_items, parent_item_path
-from taskman.model.names import parse_name, special_file_name
-from taskman.model.yaml_io import read_file
-from taskman.commands.show import _to_plain
+from taskman.model.names import special_file_name
+from taskman.model.ordering import apply_order
+from taskman.storage import Store, as_store
+from taskman.storage.file import history_dir
 
 
-def history_dir(tasks_dir: Path) -> Path:
-    return tasks_dir.parent / "docs" / "taskman-history"
+def histories(source: Store | Path) -> list[dict]:
+    return as_store(source).histories()
 
 
-def histories(tasks_dir: Path) -> list[dict]:
-    records = []
-    for path in sorted(history_dir(tasks_dir).glob("*.json")):
-        try:
-            value = json.loads(path.read_text())
-            if (
-                not isinstance(value, dict)
-                or not isinstance(value.get("ids"), list)
-                or not all(isinstance(i, str) for i in value["ids"])
-            ):
-                continue
-            if not all(
-                isinstance(value.get(k), str)
-                for k in ("key", "title", "summary", "path")
-            ):
-                continue
-            # Never hide records if the published documentation has disappeared.
-            if not (history_dir(tasks_dir) / (value["key"] + ".md")).is_file():
-                continue
-            records.append(value)
-        except (OSError, ValueError, TypeError):
-            continue
-    return records
-
-
-def collection(tasks_dir: Path, include_archived=False) -> list[dict]:
-    archived = {i for h in histories(tasks_dir) for i in h["ids"]}
+def collection(source: Store | Path, include_archived=False) -> list[dict]:
+    store = as_store(source)
+    archived = {i for h in store.histories() for i in h["ids"]}
     rows = []
-    for path in iter_work_items(tasks_dir):
-        wi = parse_name(path.name)
-        if wi.item_id in archived and not include_archived:
+    for item in store.items():
+        if item.id in archived and not include_archived:
             continue
-        file = path / special_file_name(wi.item_id) if path.is_dir() else path
-        data, body = read_file(file)
-        parent = parent_item_path(path, tasks_dir)
+        if item.error:
+            raise ValueError(item.error)
         rows.append(
             {
-                "id": wi.item_id,
-                "parent_id": parse_name(parent.name).item_id if parent else None,
-                "metadata": _to_plain(data),
-                "body": body,
-                "path": str(path),
-                "archived": wi.item_id in archived,
+                "id": item.id,
+                "parent_id": item.parent_id,
+                "metadata": item.metadata,
+                "body": item.body,
+                "path": item.location,
+                "archived": item.id in archived,
             }
         )
-    from taskman.model.ordering import apply_order
-
-    return apply_order(rows, tasks_dir)
+    return apply_order(rows, store.sibling_order())
 
 
 def field_value(row, key):

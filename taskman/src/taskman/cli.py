@@ -27,6 +27,7 @@ from taskman.commands.validate import validate as _validate
 from taskman.commands.worktree_status import worktree_status as _worktree_status
 from taskman.commands.context import context, update, record, depend, discard
 from taskman.model.locking import mutating
+from taskman.storage import StorageConfigError, backend_name
 from taskman.commands.install import install
 from taskman.commands.collection import browse, edit, consolidate, history, reorder
 
@@ -40,8 +41,14 @@ app = typer.Typer(
 @app.callback()
 def _root() -> None:
     """Root callback. Forces typer multi-command mode so subcommands are
-    dispatched, not collapsed into a single root command.
+    dispatched, not collapsed into a single root command. Rejects an unknown
+    storage backend before any command runs.
     """
+    try:
+        backend_name()
+    except StorageConfigError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(2) from None
 
 
 

@@ -9,12 +9,12 @@ from pathlib import Path
 import typer
 
 from taskman.commands.new import get_tasks_dir
-from taskman.commands.show import _to_plain
 from taskman.model.graph import find_cycles, unknown_references
-from taskman.model.layout import find_item_by_id, iter_work_items, parent_item_path
+from taskman.model.layout import find_item_by_id, iter_work_items
 from taskman.model.names import parse_name, special_file_name
 from taskman.model.yaml_io import read_file, write_file
 from taskman.model.revisions import invalidate_ancestors
+from taskman.storage import open_store
 
 
 def load_item(tasks_dir: Path, item_id: str):
@@ -137,22 +137,22 @@ def discard_item(tasks_dir: Path, item_id: str):
 
 def context(item_id: str = typer.Argument(...)) -> None:
     """Emit task, ancestors, descendants, and dependencies as JSON for a fresh agent."""
-    tasks_dir = get_tasks_dir()
-    path, _, _, _ = load_item(tasks_dir, item_id)
+    items = {item.id: item for item in open_store().items()}
+    if item_id not in items:
+        raise typer.BadParameter(f"item not found: {item_id}")
 
-    def payload(item_path):
-        wi = parse_name(item_path.name)
-        _, _, data, body = load_item(tasks_dir, wi.item_id)
-        parent = parent_item_path(item_path, tasks_dir)
-        return {"id": wi.item_id, "parent_id": parse_name(parent.name).item_id if parent else None, "path": str(item_path), "frontmatter": _to_plain(data), "body": body}
+    def payload(item):
+        return {"id": item.id, "parent_id": item.parent_id, "path": item.location, "frontmatter": item.metadata, "body": item.body}
 
-    ancestors = []
-    parent = parent_item_path(path, tasks_dir)
-    while parent:
-        ancestors.append(payload(parent))
-        parent = parent_item_path(parent, tasks_dir)
-    item = payload(path)
-    descendants = [payload(p) for p in iter_work_items(tasks_dir) if p != path and p.is_relative_to(path)]
+    def ancestor_ids(item):
+        parent = item.parent_id
+        while parent in items:
+            yield parent
+            parent = items[parent].parent_id
+
+    ancestors = [payload(items[parent]) for parent in ancestor_ids(items[item_id])]
+    item = payload(items[item_id])
+    descendants = [payload(other) for other in items.values() if item_id in ancestor_ids(other)]
     dependencies = []
     seen = set()
     pending = [d for p in [item, *ancestors, *descendants] for d in p["frontmatter"].get("depends_on", [])]
@@ -161,9 +161,8 @@ def context(item_id: str = typer.Argument(...)) -> None:
         if dep in seen:
             continue
         seen.add(dep)
-        target = find_item_by_id(tasks_dir, dep)
-        if target:
-            value = payload(target)
+        if dep in items:
+            value = payload(items[dep])
             dependencies.append(value)
             pending.extend(value["frontmatter"].get("depends_on", []))
         else:

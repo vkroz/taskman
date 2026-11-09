@@ -9,7 +9,6 @@ holding a special ``_<id>.md`` body file plus the new child.
 """
 from __future__ import annotations
 
-import os
 import re
 import json
 import sys
@@ -18,6 +17,7 @@ from pathlib import Path
 import typer
 
 from taskman.model.ids import allocate_id, today_prefix
+from taskman.storage.file import get_tasks_dir
 from taskman.model.layout import find_item_by_id, iter_work_items
 from taskman.model.names import (
     NameParseError,
@@ -55,23 +55,6 @@ def slugify(title: str) -> str:
     if not _VALID_SLUG.match(slug):
         raise NewCommandError(f"derived slug invalid: {slug!r}")
     return slug
-
-
-def get_tasks_dir() -> Path:
-    """Resolve the active tasks directory.
-
-    Reads ``TASKMAN_TASKS_DIR`` from the environment if set; otherwise
-    falls back to ``$PWD/tasks``.
-    """
-    env = os.environ.get("TASKMAN_TASKS_DIR")
-    if env:
-        return Path(env).expanduser().resolve()
-    for directory in (Path.cwd(), *Path.cwd().parents):
-        if (directory / "tasks").is_dir():
-            return directory / "tasks"
-        if (directory / ".git").exists():
-            return directory / "tasks"
-    return Path.cwd() / "tasks"
 
 
 def _ensure_unique_slug(tasks_dir: Path, slug: str, today: str) -> str:

@@ -2,26 +2,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import typer
 
-from taskman.commands.new import get_tasks_dir
-from taskman.model.layout import iter_work_items, find_item_by_id, parent_item_path
-from taskman.model.names import NameParseError, parse_name, special_file_name
-from taskman.model.yaml_io import read_file
-
-
-def _read_title(path: Path, item_id: str) -> str:
-    """Return the title from a work item's body file, or empty on failure."""
-    body_file = path / special_file_name(item_id) if path.is_dir() else path
-    if not body_file.exists():
-        return ""
-    try:
-        data, _ = read_file(body_file)
-        return str(data.get("title", ""))
-    except Exception:
-        return ""
+from taskman.storage import open_store
 
 
 def list_items(
@@ -32,36 +16,43 @@ def list_items(
     recursive: bool = typer.Option(False, "--recursive", help="Include all descendants with --parent."),
 ) -> None:
     """List work items in the tree, optionally filtered, optionally as JSON."""
-    from taskman.model.collection import histories
-    tasks_dir = get_tasks_dir()
-    archived = {id for h in histories(tasks_dir) for id in h["ids"]}
-    parent_path = find_item_by_id(tasks_dir, parent) if parent else None
-    if parent and parent_path is None:
+    store = open_store()
+    archived = {id for h in store.histories() for id in h["ids"]}
+    items = store.items()
+    parents = {item.id: item.parent_id for item in items}
+    if parent and parent not in parents:
         raise typer.BadParameter(f"parent not found: {parent}")
+
+    def under_parent(item_id: str) -> bool:
+        current = parents[item_id]
+        while current:
+            if current == parent:
+                return True
+            if not recursive:
+                return False
+            current = parents.get(current)
+        return False
+
     rows: list[dict[str, str]] = []
-    for path in iter_work_items(tasks_dir):
-        if parent_path and not (path != parent_path and (path.is_relative_to(parent_path) if recursive else path.parent == parent_path)):
+    for item in items:
+        if parent and not under_parent(item.id):
             continue
-        try:
-            wi = parse_name(path.name)
-        except NameParseError:
+        if item.id in archived:
             continue
-        if wi.item_id in archived:
+        if status is not None and item.status != status:
             continue
-        if status is not None and wi.status != status:
-            continue
-        if item_type is not None and wi.item_type != item_type:
+        if item_type is not None and item.type != item_type:
             continue
         rows.append(
             {
-                "priority": wi.priority,
-                "type": wi.item_type,
-                "id": wi.item_id,
-                "status": wi.status,
-                "slug": wi.slug,
-                "title": _read_title(path, wi.item_id),
-                "path": str(path),
-                "parent_id": parse_name(parent_item_path(path, tasks_dir).name).item_id if parent_item_path(path, tasks_dir) else None,
+                "priority": item.priority,
+                "type": item.type,
+                "id": item.id,
+                "status": item.status,
+                "slug": item.slug,
+                "title": item.title,
+                "path": item.location,
+                "parent_id": item.parent_id,
             }
         )
     rows.sort(key=lambda r: (r["status"], r["priority"], r["id"]))
