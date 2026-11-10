@@ -255,7 +255,7 @@ class SqlStore:
                 self._activity(row_id, "labels", old["labels"], labels, now)
                 changed = True
 
-            deps = list(dict.fromkeys(new["depends_on"] or []))
+            deps = sorted(set(new["depends_on"] or []), key=self._key_order)
             if deps != old["depends_on"]:
                 targets = [self._require(dep) for dep in deps]
                 self._q("DELETE FROM dependencies WHERE item_id = ?", (row_id,))
@@ -338,6 +338,12 @@ class SqlStore:
         ).fetchone()
         return row[0] if row else None
 
+    @staticmethod
+    def _key_order(key: str) -> tuple[str, int]:
+        """The order in which the store returns keys: project, then number. Unknown keys sort first."""
+        match = _KEY.match(key) if isinstance(key, str) else None
+        return (match[1], int(match[2])) if match else ("", 0)
+
     def _require(self, key: str) -> int:
         row_id = self._row_id(key)
         if row_id is None:
@@ -378,8 +384,11 @@ class SqlStore:
         ).fetchall():
             deps.setdefault(item, []).append(f"{project}-{number}")
         labels: dict[int, list[str]] = {}
-        for item, name in self._q(f"SELECT c.item_id, c.label FROM labels c {child_filter} ORDER BY c.label", params):
+        for item, name in self._q(f"SELECT c.item_id, c.label FROM labels c {child_filter}", params):
             labels.setdefault(item, []).append(name)
+        # Sort here: the database collation (en_US on Postgres) orders "-" and "_" differently.
+        for names in labels.values():
+            names.sort()
         journal: dict[int, list[dict[str, Any]]] = {}
         for item, kind, result, author, text, revision, at in self._q(
             f"SELECT c.item_id, c.kind, c.result, c.author, c.text, c.revision, c.created_at FROM comments c "

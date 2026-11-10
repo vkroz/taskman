@@ -131,7 +131,7 @@ def database_version(conn: Any, dialect: Dialect) -> int:
 def upgrade(conn: Any, dialect: Dialect, migrations: tuple[Migration, ...] = MIGRATIONS) -> list[int]:
     """Apply missing migrations in order. Returns the versions applied (empty when current)."""
     latest = migrations[-1].version
-    with transaction(conn, dialect, upgrade_lock=True):
+    with transaction(conn, dialect):
         current = database_version(conn, dialect)
         if current > latest:
             raise StorageConfigError(
