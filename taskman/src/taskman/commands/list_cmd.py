@@ -5,7 +5,7 @@ import json
 
 import typer
 
-from taskman.storage.store import open_store
+from taskman.storage.store import open_store, key_order
 
 
 def list_items(
@@ -14,6 +14,9 @@ def list_items(
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON."),
     parent: str | None = typer.Option(None, "--parent", help="List children of this ID."),
     recursive: bool = typer.Option(False, "--recursive", help="Include all descendants with --parent."),
+    project: str | None = typer.Option(None, "--project", help="Only items of this project key."),
+    assignee: str | None = typer.Option(None, "--assignee", help="Only items with this assignee."),
+    label: str | None = typer.Option(None, "--label", help="Only items with this label."),
 ) -> None:
     """List work items in the tree, optionally filtered, optionally as JSON."""
     store = open_store()
@@ -43,6 +46,12 @@ def list_items(
             continue
         if item_type is not None and item.type != item_type:
             continue
+        if project is not None and item.metadata.get("project") != project:
+            continue
+        if assignee is not None and item.metadata.get("assignee") != assignee:
+            continue
+        if label is not None and label not in (item.metadata.get("labels") or []):
+            continue
         rows.append(
             {
                 "priority": item.priority,
@@ -55,7 +64,7 @@ def list_items(
                 "parent_id": item.parent_id,
             }
         )
-    rows.sort(key=lambda r: (r["status"], r["priority"], r["id"]))
+    rows.sort(key=lambda r: (r["status"], r["priority"], key_order(r["id"])))
 
     if as_json:
         typer.echo(json.dumps(rows, indent=2))

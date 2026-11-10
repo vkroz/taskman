@@ -49,6 +49,7 @@ def browse(
     sort: str = typer.Option("priority"),
     descending: bool = typer.Option(False),
     include_archived: bool = typer.Option(False),
+    project: str | None = typer.Option(None, "--project", help="Only items of this project key."),
 ):
     """Query all metadata and emit hierarchy-preserving JSON with context markers."""
     filters = []
@@ -62,6 +63,8 @@ def browse(
     filters += [
         {"field": key, "op": "exists", "value": "false"} for key in missing or []
     ]
+    if project is not None:
+        filters.append({"field": "project", "op": "eq", "value": project})
     typer.echo(
         json.dumps(
             query(
@@ -89,7 +92,12 @@ def consolidate(ids: list[str] = typer.Argument(...), title: str = typer.Option(
 
 def history():
     """Retrieve consolidation summaries and original task IDs."""
-    typer.echo(json.dumps(histories(open_store()), indent=2))
+    store = open_store()
+    if not store.consolidation:
+        from taskman.storage.sql_store import NO_CONSOLIDATION
+
+        raise typer.BadParameter(NO_CONSOLIDATION)
+    typer.echo(json.dumps(histories(store), indent=2))
 
 
 def reorder(

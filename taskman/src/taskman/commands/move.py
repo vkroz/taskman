@@ -11,7 +11,7 @@ _TARGETS = ("backlog", "active", "done")
 
 
 def move(
-    item_id: str = typer.Argument(..., help="Item ID (9 digits)."),
+    item_id: str = typer.Argument(..., help="Item ID or key, for example TM-42."),
     target_status: str = typer.Argument(..., help="One of: backlog, active, done."),
 ) -> None:
     """Change an item's status; nested items stay inside their parent."""

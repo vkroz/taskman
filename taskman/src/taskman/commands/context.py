@@ -9,6 +9,7 @@ import typer
 
 from taskman import lifecycle
 from taskman.commands.outcome import reported
+from taskman.storage.sql_store import default_actor
 from taskman.storage.store import open_store
 
 
@@ -30,20 +31,75 @@ def update(
     typer.echo(item.location)
 
 
-def record(
+def comment(
     item_id: str = typer.Argument(...),
     kind: str = typer.Option(..., "--kind", help="decision, progress, handoff, summary, or verification."),
-    actor: str = typer.Option(..., "--actor", help="Agent or human responsible for this entry."),
     body_file: str = typer.Option(..., "--body-file", help="Evidence or context; - reads stdin."),
     result: str | None = typer.Option(None, "--result", help="Verification only: pass, fail, or blocked."),
+    actor: str | None = typer.Option(None, "--actor", help="Author of the comment. Default: git user.name."),
 ) -> None:
-    """Append an attributed journal entry without replacing another agent's context."""
+    """Add an attributed comment without replacing another agent's context. `record` is an alias."""
+    store = open_store()
+    author = actor or getattr(store, "actor", None) or default_actor()
     with reported():
-        lifecycle.check_entry(kind, actor, result)
+        lifecycle.check_entry(kind, author, result)
     text = read_body(body_file)
     with reported():
-        lifecycle.record(open_store(), item_id, kind, actor, text, result)
+        lifecycle.record(store, item_id, kind, author, text, result)
     typer.echo(f"Recorded {kind}: {item_id}")
+
+
+def assign(
+    item_id: str = typer.Argument(...),
+    name: str = typer.Argument(..., help="Person or agent name, for example claude-code."),
+) -> None:
+    """Set the assignee of an open item."""
+    with reported():
+        item = lifecycle.assign(open_store(), item_id, name)
+    typer.echo(f"Assigned {item_id} to {item.metadata['assignee']}")
+
+
+def unassign(item_id: str = typer.Argument(...)) -> None:
+    """Remove the assignee of an open item."""
+    with reported():
+        lifecycle.assign(open_store(), item_id, None)
+    typer.echo(f"Unassigned: {item_id}")
+
+
+def label(
+    item_id: str = typer.Argument(...),
+    add: list[str] | None = typer.Option(None, "--add", help="Label to add; repeat for more."),
+    remove: list[str] | None = typer.Option(None, "--remove", help="Label to remove; repeat for more."),
+) -> None:
+    """Add or remove labels of an open item."""
+    if not add and not remove:
+        raise typer.BadParameter("supply --add or --remove labels")
+    with reported():
+        item = lifecycle.label(open_store(), item_id, add or [], remove or [])
+    typer.echo(f"Labels of {item_id}: {', '.join(item.metadata['labels']) or 'none'}")
+
+
+def activity(
+    item_id: str = typer.Argument(...),
+    as_json: bool = typer.Option(False, "--json", help="Emit structured JSON."),
+) -> None:
+    """Show the field changes of an item, oldest first."""
+    store = open_store()
+    if not hasattr(store, "activity"):
+        typer.echo("Error: activity history needs the sqlite or postgres backend.", err=True)
+        raise typer.Exit(1)
+    if store.get(item_id) is None:
+        typer.echo(f"Error: item not found: {item_id}", err=True)
+        raise typer.Exit(1)
+    entries = store.activity(item_id)
+    if as_json:
+        typer.echo(json.dumps(entries, indent=2))
+        return
+    for entry in entries:
+        change = entry["new"] if entry["field"] == "created" else f"{entry['old'] or '-'} -> {entry['new'] or '-'}"
+        if entry["field"] == "description":
+            change = "changed"
+        typer.echo(f"{entry['at']}  {entry['author']}  {entry['field']}: {change}")
 
 
 def depend(
@@ -67,8 +123,12 @@ def discard(item_id: str = typer.Argument(...)) -> None:
 
 
 def context(item_id: str = typer.Argument(...)) -> None:
-    """Emit task, ancestors, descendants, and dependencies as JSON for a fresh agent."""
-    items = {item.id: item for item in open_store().items()}
+    """Emit task, ancestors, descendants, and dependencies as JSON for a fresh agent.
+
+    On a SQL backend the output also has the item's ``activity``.
+    """
+    store = open_store()
+    items = {item.id: item for item in store.items()}
     if item_id not in items:
         raise typer.BadParameter(f"item not found: {item_id}")
 
@@ -98,4 +158,7 @@ def context(item_id: str = typer.Argument(...)) -> None:
             pending.extend(value["frontmatter"].get("depends_on", []))
         else:
             dependencies.append({"id": dep, "missing": True})
-    typer.echo(json.dumps({"item": item, "ancestors": ancestors, "descendants": descendants, "dependencies": dependencies}, indent=2, default=str))
+    result = {"item": item, "ancestors": ancestors, "descendants": descendants, "dependencies": dependencies}
+    if hasattr(store, "activity"):
+        result["activity"] = store.activity(item_id)
+    typer.echo(json.dumps(result, indent=2, default=str))

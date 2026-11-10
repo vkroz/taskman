@@ -675,7 +675,14 @@
             >Parent<select name="parent">
               <option value="">No parent</option>
             </select></label
-          >
+          ><label
+            >Project key<input
+              name="project"
+              maxlength="10"
+              pattern="[A-Z][A-Z0-9]{1,9}"
+              placeholder="TM"
+              title="2-10 uppercase letters or digits. Needed for a top-level item; a child uses its parent's project."
+          /></label>
         </div>
         <label
           >Description and acceptance criteria<textarea
@@ -709,6 +716,57 @@
         </footer>
       </form>
     </dialog>
+    <dialog id="comment-dialog">
+      <form id="comment-form">
+        <h2>Add comment</h2>
+        <div class="toolbar">
+          <label
+            >Kind<select name="kind">
+              <option value="decision">Decision</option>
+              <option value="progress">Progress</option>
+              <option value="handoff">Handoff</option>
+              <option value="summary">Summary</option>
+              <option value="verification">Verification</option>
+            </select></label
+          ><label id="result-label" hidden
+            >Result<select name="result">
+              <option value="pass">Pass</option>
+              <option value="fail">Fail</option>
+              <option value="blocked">Blocked</option>
+            </select></label
+          >
+        </div>
+        <label>Text<textarea name="text" required></textarea></label>
+        <p class="hint">Comments cannot change after you add them.</p>
+        <div id="comment-error" class="message error" role="alert"></div>
+        <footer>
+          <button type="button" data-close="comment-dialog">Cancel</button
+          ><button type="submit" class="primary">Add comment</button>
+        </footer>
+      </form>
+    </dialog>
+    <dialog id="fields-dialog">
+      <form id="fields-form">
+        <h2>Assignee and labels</h2>
+        <label
+          >Assignee<input
+            name="assignee"
+            maxlength="100"
+            placeholder="Person or agent, for example claude-code"
+        /></label>
+        <label
+          >Labels<input
+            name="labels"
+            placeholder="Comma-separated, for example backend, db"
+        /></label>
+        <p class="hint">Labels use lowercase letters, digits, - and _.</p>
+        <div id="fields-error" class="message error" role="alert"></div>
+        <footer>
+          <button type="button" data-close="fields-dialog">Cancel</button
+          ><button type="submit" class="primary">Save</button>
+        </footer>
+      </form>
+    </dialog>
     <script>
       const $ = (s) => document.querySelector(s),
         esc = (s) =>
@@ -738,7 +796,11 @@
         draggedId = null,
         editing = null,
         operation = null,
+        target = null,
+        caps = { consolidation: true, reorder_done: true },
         serial = 0;
+      // Polling pauses while any dialog is open, so typed text is kept.
+      const dialogOpen = () => !!document.querySelector("dialog[open]");
       async function api(path, data) {
         const r = await fetch(
           path,
@@ -794,6 +856,10 @@
           all = result.all;
           fields = result.fields;
           histories = result.history;
+          caps = result.capabilities || caps;
+          // Decision D8: SQL backends do not offer consolidation.
+          $('[data-view="history"]').hidden = !caps.consolidation;
+          $("#consolidate").hidden = !caps.consolidation;
           let epic = $("#epic").value;
           $("#epic").innerHTML =
             '<option value="">All epics</option>' +
@@ -827,7 +893,7 @@
           render();
           $("#connection").textContent = "Up to date";
           $("#tree").setAttribute("aria-busy", "false");
-          if (selectedId && !$("#editor").open) await detail(selectedId, false);
+          if (selectedId && !dialogOpen()) await detail(selectedId, false);
         } catch (e) {
           $("#connection").textContent = "Connection interrupted";
           $("#tree").setAttribute("aria-busy", "false");
@@ -858,7 +924,7 @@
           if (hidden(r)) continue;
           let m = r.metadata,
             hasChildren = rows.some((x) => x.parent_id === r.id);
-          html += `<div class="row ${r.context ? "context" : ""} ${r.id === selectedId ? "selected" : ""}" data-id="${r.id}"><div class="row-title" style="--depth:${r.depth}"><span class="drag-handle" draggable="${$("#sort").value === "priority"}" data-drag="${r.id}" role="button" aria-label="Drag ${esc(m.title)} to change priority">⋮⋮</span><button class="toggle" data-toggle="${r.id}" aria-label="${collapsed.has(r.id) ? "Expand" : "Collapse"} ${esc(m.title)}" ${hasChildren ? 'aria-expanded="' + !collapsed.has(r.id) + '"' : "disabled"}>${hasChildren ? (collapsed.has(r.id) ? "▸" : "▾") : "·"}</button><input type="checkbox" aria-label="Select ${esc(m.title)}" data-select="${r.id}" ${selected.has(r.id) ? "checked" : ""}><div><button class="title-button" data-open="${r.id}">${esc(m.title || r.id)}</button>${m.draft ? '<span class="draft">Draft</span>' : ""}${r.context ? '<div class="context-label">Parent context</div>' : ""}</div></div><span class="badge ${esc(m.status)}">${esc(m.status)}</span><span class="type type-col">${esc(m.type)}</span><span class="muted priority-col">${r.order + 1}</span></div>`;
+          html += `<div class="row ${r.context ? "context" : ""} ${r.id === selectedId ? "selected" : ""}" data-id="${r.id}"><div class="row-title" style="--depth:${r.depth}"><span class="drag-handle" draggable="${$("#sort").value === "priority" && (caps.reorder_done || m.status !== "done")}" data-drag="${r.id}" role="button" aria-label="Drag ${esc(m.title)} to change priority">⋮⋮</span><button class="toggle" data-toggle="${r.id}" aria-label="${collapsed.has(r.id) ? "Expand" : "Collapse"} ${esc(m.title)}" ${hasChildren ? 'aria-expanded="' + !collapsed.has(r.id) + '"' : "disabled"}>${hasChildren ? (collapsed.has(r.id) ? "▸" : "▾") : "·"}</button><input type="checkbox" aria-label="Select ${esc(m.title)}" data-select="${r.id}" ${selected.has(r.id) ? "checked" : ""}><div><button class="title-button" data-open="${r.id}">${esc(m.title || r.id)}</button>${m.draft ? '<span class="draft">Draft</span>' : ""}${r.context ? '<div class="context-label">Parent context</div>' : ""}</div></div><span class="badge ${esc(m.status)}">${esc(m.status)}</span><span class="type type-col">${esc(m.type)}</span><span class="muted priority-col">${r.order + 1}</span></div>`;
         }
         if (!rows.length)
           html =
@@ -892,7 +958,7 @@
           if (selectedId !== id) return;
           let m = r.frontmatter;
           $("#preview").innerHTML =
-            `<div class="detail-top"><span>${esc(m.type)} · ${esc(id)}</span><button aria-label="Close task details" id="close-details">✕</button></div><h2>${esc(m.title)}</h2><span class="badge ${esc(m.status)}">${esc(m.status)}</span><div class="actions"><button id="edit-task" ${m.status === "done" ? 'disabled title="Completed work is immutable"' : ""}>Edit task</button><button id="delete-task" class="danger" ${!m.draft || m.status === "done" ? 'disabled title="Only unreferenced draft leaves can be deleted"' : ""}>Delete draft</button></div><h3>Description</h3><div class="body-text">${esc(r.body)}</div><h3>Metadata</h3><dl class="metadata">${Object.entries(
+            `<div class="detail-top"><span>${esc(m.type)} · ${esc(id)}</span><button aria-label="Close task details" id="close-details">✕</button></div><h2>${esc(m.title)}</h2><span class="badge ${esc(m.status)}">${esc(m.status)}</span><div class="actions"><button id="edit-task" ${m.status === "done" ? 'disabled title="Completed work is immutable"' : ""}>Edit task</button><button id="delete-task" class="danger" ${!m.draft || m.status === "done" ? 'disabled title="Only unreferenced draft leaves can be deleted"' : ""}>Delete draft</button><button id="comment-task" ${m.status === "done" ? 'disabled title="Completed work is immutable"' : ""}>Add comment</button><button id="fields-task" ${m.status === "done" ? 'disabled title="Completed work is immutable"' : ""}>Assignee and labels</button></div><h3>Description</h3><div class="body-text">${esc(r.body)}</div><h3>Metadata</h3><dl class="metadata">${Object.entries(
               m,
             )
               .filter(([k]) => k !== "journal")
@@ -902,10 +968,12 @@
               )
               .join(
                 "",
-              )}</dl><h3>Activity & evidence</h3>${(m.journal || []).map((e) => `<div class="entry"><div class="entry-head">${esc(e.kind)} · ${esc(e.actor)} ${esc(e.result || "")}</div><div class="journal-text">${esc(e.text)}</div></div>`).join("") || '<p class="muted">No journal entries yet.</p>'}`;
+              )}</dl><h3>Comments and evidence</h3>${(m.journal || []).map((e) => `<div class="entry"><div class="entry-head">${esc(e.kind)} · ${esc(e.actor)} ${esc(e.result || "")}</div><div class="journal-text">${esc(e.text)}</div></div>`).join("") || '<p class="muted">No comments yet.</p>'}${r.activity ? `<h3>Activity</h3>${r.activity.map((a) => `<div class="entry activity"><div class="entry-head">${esc(a.at)} · ${esc(a.author)}</div><div class="journal-text">${esc(a.field)}${a.field === "created" ? "" : a.field === "description" ? " changed" : `: ${esc(a.old || "–")} → ${esc(a.new || "–")}`}</div></div>`).join("")}` : ""}`;
           $("#close-details").onclick = closeDetails;
           $("#edit-task").onclick = () => openEditor({ id, ...r });
           $("#delete-task").onclick = () => confirmDelete(id);
+          $("#comment-task").onclick = () => openComment(id);
+          $("#fields-task").onclick = () => openFields(id, m);
         } catch (e) {
           message(e.message, true);
         }
@@ -955,6 +1023,67 @@
           await detail(editing ? editing.id : result.id);
         } catch (err) {
           $("#form-error").textContent = err.message;
+        }
+      };
+      function openComment(id) {
+        target = { id };
+        $("#comment-form").reset();
+        $("#result-label").hidden = true;
+        $("#comment-error").textContent = "";
+        $("#comment-dialog").showModal();
+      }
+      $("#comment-form").elements.kind.onchange = (e) => {
+        $("#result-label").hidden = e.target.value !== "verification";
+      };
+      $("#comment-form").onsubmit = async (e) => {
+        e.preventDefault();
+        let data = Object.fromEntries(new FormData(e.target));
+        if (data.kind !== "verification") delete data.result;
+        try {
+          await api("/api/comment", { ...data, id: target.id });
+          $("#comment-dialog").close();
+          message("Comment added.");
+          await refresh();
+          await detail(target.id, false);
+        } catch (err) {
+          $("#comment-error").textContent = err.message;
+        }
+      };
+      function openFields(id, m) {
+        target = { id, labels: m.labels || [] };
+        const form = $("#fields-form");
+        form.elements.assignee.value = m.assignee || "";
+        form.elements.labels.value = (m.labels || []).join(", ");
+        $("#fields-error").textContent = "";
+        $("#fields-dialog").showModal();
+      }
+      $("#fields-form").onsubmit = async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const labels = [
+          ...new Set(
+            form.elements.labels.value
+              .split(",")
+              .map((x) => x.trim())
+              .filter(Boolean),
+          ),
+        ];
+        try {
+          await api("/api/assign", {
+            id: target.id,
+            assignee: form.elements.assignee.value.trim() || null,
+          });
+          await api("/api/label", {
+            id: target.id,
+            add: labels.filter((x) => !target.labels.includes(x)),
+            remove: target.labels.filter((x) => !labels.includes(x)),
+          });
+          $("#fields-dialog").close();
+          message("Assignee and labels saved.");
+          await refresh();
+          await detail(target.id, false);
+        } catch (err) {
+          $("#fields-error").textContent = err.message;
         }
       };
       function confirmDelete(id) {
@@ -1204,12 +1333,11 @@
         true,
       );
       document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && !$("#editor").open && !$("#confirm").open)
-          closeDetails();
+        if (e.key === "Escape" && !dialogOpen()) closeDetails();
       });
       refresh();
       setInterval(() => {
-        if (!$("#editor").open && !$("#confirm").open) refresh();
+        if (!dialogOpen()) refresh();
       }, 5000);
     </script>
   </body>

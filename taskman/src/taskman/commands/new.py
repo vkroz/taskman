@@ -26,7 +26,10 @@ def new(
     parent: str | None = typer.Option(
         None,
         "--parent",
-        help="Parent item ID (9 digits). Omit for a top-level item.",
+        help="Parent item ID or key. Omit for a top-level item.",
+    ),
+    project: str | None = typer.Option(
+        None, "--project", help="Project key of a new top-level item, for example TM (SQL backends)."
     ),
     body_file: str | None = typer.Option(None, "--body-file", help="Markdown body file; - reads stdin."),
     as_json: bool = typer.Option(False, "--json", help="Emit ID and path as JSON."),
@@ -44,7 +47,7 @@ def new(
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(1) from exc
     with reported():
-        item = lifecycle.create(open_store(), title, item_type, parent, body)
+        item = lifecycle.create(open_store(), title, item_type, parent, body, project=project)
     typer.echo(json.dumps({"id": item.id, "path": item.location}) if as_json else item.location)
 
 

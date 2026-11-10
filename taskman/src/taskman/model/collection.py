@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 from taskman.model.ordering import apply_order
-from taskman.storage.store import Store, as_store
+from taskman.storage.store import Store, StorageError, as_store, key_order
 
 
 def histories(source: Store | Path) -> list[dict]:
@@ -120,14 +120,14 @@ def query(
 
     def order(row):
         if sort == "priority":
-            return (0, row.get("order", 0), row["id"])
+            return (0, row.get("order", 0), key_order(row["id"]))
         value = field_value(row, sort)
         # Numeric priorities and revisions should not sort lexicographically.
         if isinstance(value, (int, float)) or (
             isinstance(value, str) and value.isdigit()
         ):
-            return (0, float(value), row["id"])
-        return (1, text_value(value).casefold(), row["id"])
+            return (0, float(value), key_order(row["id"]))
+        return (1, text_value(value).casefold(), key_order(row["id"]))
 
     result = []
 
@@ -150,6 +150,10 @@ def compact_text(text: str, limit: int = 420) -> str:
 
 def consolidate(source: Store | Path, ids: list[str], title: str) -> dict:
     store = as_store(source)
+    if not store.consolidation:
+        from taskman.storage.sql_store import NO_CONSOLIDATION
+
+        raise StorageError(NO_CONSOLIDATION)
     if not isinstance(title, str) or not title.strip() or len(title) > 200:
         raise ValueError("Enter a summary title of 1–200 characters")
     rows = collection(store, True)

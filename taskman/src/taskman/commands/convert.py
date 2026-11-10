@@ -16,7 +16,7 @@ _TYPES = ("epic", "feat", "task")
 
 
 def convert(
-    item_id: str = typer.Argument(..., help="Item ID (9 digits)."),
+    item_id: str = typer.Argument(..., help="Item ID or key, for example TM-42."),
     target_type: str = typer.Argument(..., help="One of: epic, feat, task."),
 ) -> None:
     """Relabel a work item's type. ``task`` requires no children (leaf invariant)."""

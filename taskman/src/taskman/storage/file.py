@@ -96,6 +96,9 @@ def _parent_id(parent: Path | None) -> str | None:
 
 
 class FileStore:
+    consolidation = True
+    reorder_done = True
+
     def __init__(self, tasks_dir: Path) -> None:
         self.tasks_dir = tasks_dir
 

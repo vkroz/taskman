@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from taskman.model.yaml_io import emit_frontmatter
-from taskman.storage.schema import CURRENT_VERSION, database_version
+from taskman.storage.schema import CURRENT_VERSION
 from taskman.storage.settings import StorageSettings
 from taskman.storage.sql import SQLITE, Dialect, connect, transaction
 from taskman.storage.store import Item, StorageConfigError, StorageError
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from taskman.integrity import Finding
 
 _KEY = re.compile(r"^([A-Z][A-Z0-9]{1,9})-([1-9][0-9]*)$")
-_NO_CONSOLIDATION = "Consolidation is not available with a SQL backend (decision D8)."
+NO_CONSOLIDATION = "Consolidation is not available with a SQL backend (decision D8)."
 # Item data that only dedicated operations or the database itself change.
 _READ_ONLY = ("id", "project", "type", "status", "created_at", "created_by", "changed_at")
 _ITEM_COLUMNS = (
@@ -74,14 +74,17 @@ def _text(field: str, value: Any) -> str | None:
 
 
 class SqlStore:
+    consolidation = False  # decision D8
+    reorder_done = False  # decision M2
+
     def __init__(self, conn: Any, dialect: Dialect, actor: str | None = None) -> None:
         self.conn = conn
         self.dialect = dialect
         self.actor = actor or default_actor()
         self._mutex = threading.RLock()
         self._depth = 0
-        with self.lock():
-            version = database_version(conn, dialect)
+        with self._read():
+            version = self._schema_version()
         if version < CURRENT_VERSION:
             raise StorageConfigError(
                 f"The database schema is at version {version}; Taskman needs version {CURRENT_VERSION}. "
@@ -92,6 +95,19 @@ class SqlStore:
                 f"The database schema is at version {version}; this Taskman knows version {CURRENT_VERSION}. "
                 "Upgrade Taskman."
             )
+
+    def close(self) -> None:
+        self.conn.close()
+
+    def _schema_version(self) -> int:
+        """The applied schema version, or 0 without a schema. Reads only: no lock, no DDL."""
+        if self.dialect is SQLITE:
+            exists = self._q("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_versions'").fetchone()
+        else:
+            exists = self._q("SELECT to_regclass('schema_versions')").fetchone()[0]
+        if not exists:
+            return 0
+        return self._q("SELECT MAX(version) FROM schema_versions").fetchone()[0] or 0
 
     # ---- transactions --------------------------------------------------
 
@@ -322,10 +338,10 @@ class SqlStore:
             self._activity(row_id, "rank", old_rank, new_rank, now)
 
     def history_link(self, item_id: str) -> str:
-        raise StorageError(_NO_CONSOLIDATION)
+        raise StorageError(NO_CONSOLIDATION)
 
     def save_history(self, record: dict[str, Any]) -> dict[str, Any]:
-        raise StorageError(_NO_CONSOLIDATION)
+        raise StorageError(NO_CONSOLIDATION)
 
     # ---- helpers -------------------------------------------------------
 

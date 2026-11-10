@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 import typer
 
-from taskman.storage.store import open_store
+from taskman.storage.store import key_order, open_store
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,11 +52,12 @@ def _classify_match(
 def search(
     query: str = typer.Argument(..., help="Substring to search for."),
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON."),
+    project: str | None = typer.Option(None, "--project", help="Only items of this project key."),
 ) -> None:
     """Search the work-item tree for a query string."""
     matches: list[_Match] = []
     for item in open_store().items():
-        if item.error:
+        if item.error or (project is not None and item.metadata.get("project") != project):
             continue
         rank = _classify_match(
             query,
@@ -80,7 +81,7 @@ def search(
             )
         )
 
-    matches.sort(key=lambda m: (m.rank, m.item_id))
+    matches.sort(key=lambda m: (m.rank, key_order(m.item_id)))
 
     if as_json:
         typer.echo(

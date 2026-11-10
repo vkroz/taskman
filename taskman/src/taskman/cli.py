@@ -25,10 +25,10 @@ from taskman.commands.show import show as _show
 from taskman.commands.ui import ui as _ui
 from taskman.commands.validate import validate as _validate
 from taskman.commands.worktree_status import worktree_status as _worktree_status
-from taskman.commands.context import context, update, record, depend, discard
+from taskman.commands.context import activity, assign, comment, context, update, depend, discard, label, unassign
 from taskman.model.locking import mutating
 from taskman.storage.settings import load_env_file
-from taskman.storage.store import StorageConfigError, open_store
+from taskman.storage.store import StorageConfigError, current_store, open_store
 from taskman.commands.install import install
 from taskman.commands.db import db_app
 from taskman.commands.collection import browse, edit, consolidate, history, reorder
@@ -54,10 +54,20 @@ def _root(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand in _NO_STORAGE:
         return
     try:
-        open_store()
+        store = open_store()
     except StorageConfigError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(2) from None
+    # The command and `mutating` reuse this store: one connection per command.
+    token = current_store.set(store)
+
+    def _release() -> None:
+        current_store.reset(token)
+        close = getattr(store, "close", None)
+        if close is not None:
+            close()
+
+    ctx.call_on_close(_release)
 
 
 # Register subcommands from the commands package.
@@ -70,7 +80,12 @@ app.command("move")(mutating(_move))
 app.command("close")(mutating(_close))
 app.command("context")(context)
 app.command("update")(mutating(update))
-app.command("record")(mutating(record))
+app.command("comment")(mutating(comment))
+app.command("record", help="Alias of `comment`.")(mutating(comment))
+app.command("assign")(mutating(assign))
+app.command("unassign")(mutating(unassign))
+app.command("label")(mutating(label))
+app.command("activity")(activity)
 app.command("depend")(mutating(depend))
 app.command("discard")(mutating(discard))
 app.command("install")(install)
