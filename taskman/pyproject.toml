@@ -15,6 +15,9 @@ dependencies = [
 dev = [
     "pytest>=8",
 ]
+postgres = [
+    "psycopg[binary]>=3.2",
+]
 
 [project.scripts]
 taskman = "taskman.cli:main"

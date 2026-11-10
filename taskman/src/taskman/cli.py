@@ -27,8 +27,10 @@ from taskman.commands.validate import validate as _validate
 from taskman.commands.worktree_status import worktree_status as _worktree_status
 from taskman.commands.context import context, update, record, depend, discard
 from taskman.model.locking import mutating
-from taskman.storage.store import StorageConfigError, backend_name
+from taskman.storage.settings import load_env_file
+from taskman.storage.store import StorageConfigError, open_store
 from taskman.commands.install import install
+from taskman.commands.db import db_app
 from taskman.commands.collection import browse, edit, consolidate, history, reorder
 
 app = typer.Typer(
@@ -38,18 +40,24 @@ app = typer.Typer(
 )
 
 
+# Commands that work without storage settings, so a wrong setting can be fixed.
+_NO_STORAGE = {"help", "version", "install", "db"}
+
+
 @app.callback()
-def _root() -> None:
+def _root(ctx: typer.Context) -> None:
     """Root callback. Forces typer multi-command mode so subcommands are
-    dispatched, not collapsed into a single root command. Rejects an unknown
-    storage backend before any command runs.
+    dispatched, not collapsed into a single root command. Loads ``.env`` and
+    rejects wrong storage settings before a command runs.
     """
+    load_env_file()
+    if ctx.invoked_subcommand in _NO_STORAGE:
+        return
     try:
-        backend_name()
+        open_store()
     except StorageConfigError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(2) from None
-
 
 
 # Register subcommands from the commands package.
@@ -81,6 +89,7 @@ app.command("help")(_help)
 # --- auxiliary or temporary commands ---
 app.command("convert")(mutating(_convert))
 app.command("migrate")(_migrate)
+app.add_typer(db_app, name="db")
 
 @app.command()
 def version() -> None:

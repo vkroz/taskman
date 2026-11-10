@@ -5,7 +5,6 @@ how items persist; lifecycle rules do not belong to a backend.
 """
 from __future__ import annotations
 
-import os
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,9 +12,6 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from taskman.integrity import Finding
-
-BACKENDS = ("file",)
-
 
 class StorageConfigError(ValueError):
     """The configured storage backend is not supported."""
@@ -141,19 +137,15 @@ class Store(Protocol):
         ...
 
 
-def backend_name() -> str:
-    """The backend named by ``TASKMAN_BACKEND``. Defaults to ``file``."""
-    name = os.environ.get("TASKMAN_BACKEND", "").strip() or "file"
-    if name not in BACKENDS:
-        raise StorageConfigError(
-            f"Unknown storage backend {name!r} in TASKMAN_BACKEND. Supported: {', '.join(BACKENDS)}."
-        )
-    return name
-
-
 def open_store() -> Store:
-    """Open the configured backend."""
-    backend_name()
+    """Open the backend that the storage settings select."""
+    from taskman.storage.settings import storage_settings
+
+    settings = storage_settings()
+    if settings.backend != "file":
+        raise StorageConfigError(
+            f"The {settings.backend} backend is not available yet. Unset TASKMAN_BACKEND or set it to file."
+        )
     from taskman.storage.file import FileStore, get_tasks_dir
 
     return FileStore(get_tasks_dir())
