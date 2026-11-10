@@ -111,8 +111,8 @@ def default_sqlite_path() -> Path:
 
 
 def backend_name(environ: Mapping[str, str] = os.environ) -> str:
-    """The backend named by ``TASKMAN_BACKEND``. Defaults to ``file``."""
-    name = environ.get("TASKMAN_BACKEND", "").strip() or "file"
+    """The backend named by ``TASKMAN_BACKEND``. Defaults to ``sqlite`` (decision D7)."""
+    name = environ.get("TASKMAN_BACKEND", "").strip() or "sqlite"
     if name not in BACKENDS:
         raise StorageConfigError(
             f"Unknown storage backend {name!r} in TASKMAN_BACKEND. Supported: {', '.join(BACKENDS)}."

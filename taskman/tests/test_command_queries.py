@@ -7,6 +7,8 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from taskman.cli import app
+from taskman.storage.sql_store import open_sql_store
+from tests import sql_helpers as sql
 from tests.workflow_helpers import prepare
 from taskman.model.layout import find_item_by_id
 from taskman.model.names import parse_name, special_file_name
@@ -15,8 +17,143 @@ from taskman.model.yaml_io import read_file, write_file
 runner = CliRunner()
 
 
+def _item(title: str) -> str:
+    """Create a finalized item that can close; return its key."""
+    key = sql.new(title)
+    sql.prepare(key)
+    return key
+
+
+def _depend(key: str, *deps: str) -> None:
+    sql.run("depend", key, *[arg for dep in deps for arg in ("--on", dep)])
+
+
+def _done(key: str) -> None:
+    sql.prepare(key)
+    sql.run("close", key)
+
+
+def _ids(*args: str) -> list[str]:
+    return [row["id"] for row in json.loads(sql.run(*args, "--json"))]
+
+
+# ---- ready ----
+
+
+def test_ready_empty_tree(sqlite_env) -> None:
+    assert "(none)" in sql.run("ready")
+
+
+def test_ready_includes_items_with_no_deps(sqlite_env) -> None:
+    a = _item("A")
+    assert f" {a} " in sql.run("ready")
+
+
+def test_ready_excludes_done_items(sqlite_env) -> None:
+    a = _item("A")
+    _done(a)
+    assert "(none)" in sql.run("ready")
+
+
+def test_ready_excludes_items_with_open_deps(sqlite_env) -> None:
+    a = _item("A")
+    b = _item("B")
+    _depend(b, a)
+    # A is ready (no deps), B is not (depends on open A).
+    ids = _ids("ready")
+    assert a in ids
+    assert b not in ids
+
+
+def test_ready_includes_items_after_deps_done(sqlite_env) -> None:
+    a = _item("A")
+    b = _item("B")
+    _depend(b, a)
+    _done(a)
+    assert b in _ids("ready")
+
+
+def test_ready_transitive_chain(sqlite_env) -> None:
+    a = _item("A")
+    b = _item("B")
+    c = _item("C")
+    _depend(b, a)
+    _depend(c, b)
+    # Only A is ready initially.
+    assert _ids("ready") == [a]
+
+
+def test_ready_no_infinite_loop_on_cycle(sqlite_env) -> None:
+    """Cycle in deps should not infinite-loop the query."""
+    a = _item("A")
+    b = _item("B")
+    _depend(a, b)
+    # `depend` rejects cycles; the store does not, so write the second edge directly.
+    store = open_sql_store(sqlite_env, actor="pytest")
+    try:
+        store.save(b, {"depends_on": [a]}, store.get(b).body)
+    finally:
+        store.close()
+    # Both have open deps; neither is ready. Should complete.
+    assert _ids("ready") == []
+
+
+# ---- dependents ----
+
+
+def test_dependents_returns_items_referencing_target(sqlite_env) -> None:
+    a = _item("A")
+    b = _item("B")
+    c = _item("C")
+    _depend(b, a)
+    _depend(c, a)
+    assert set(_ids("dependents", a)) == {b, c}
+
+
+def test_dependents_excludes_done_items(sqlite_env) -> None:
+    a = _item("A")
+    b = _item("B")
+    _depend(b, a)
+    _done(a)
+    _done(b)
+    assert _ids("dependents", a) == []
+
+
+def test_dependents_missing_target(sqlite_env) -> None:
+    assert "not found" in sql.run("dependents", "TM-99", code=1)
+
+
+# ---- waiting-on ----
+
+
+def test_waiting_on_returns_open_deps_of_target(sqlite_env) -> None:
+    a = _item("A")
+    b = _item("B")
+    c = _item("C")
+    _depend(c, a, b)
+    assert set(_ids("waiting-on", c)) == {a, b}
+
+
+def test_waiting_on_excludes_done_deps(sqlite_env) -> None:
+    a = _item("A")
+    b = _item("B")
+    c = _item("C")
+    _depend(c, a, b)
+    _done(a)
+    assert set(_ids("waiting-on", c)) == {b}
+
+
+def test_waiting_on_missing_target(sqlite_env) -> None:
+    assert "not found" in sql.run("waiting-on", "TM-99", code=1)
+
+
+# ---- file backend: layout only; removed with 261110001 ----
+# A SQL store rejects dependencies on unknown keys, so only hand-edited
+# files can hold them.
+
+
 def _env(tasks_dir: Path) -> dict[str, str]:
-    return {"TASKMAN_TASKS_DIR": str(tasks_dir)}
+    return {"TASKMAN_BACKEND": "file", "TASKMAN_TASKS_DIR": str(tasks_dir)}
 
 
 def _new(tmp_path: Path, title: str) -> str:
@@ -37,59 +174,6 @@ def _set_depends(tmp_path: Path, item_id: str, deps: list[str]) -> None:
     write_file(body_file, data, body)
 
 
-def _close(tmp_path: Path, item_id: str) -> None:
-    prepare(tmp_path, item_id)
-    r = runner.invoke(app, ["close", item_id], env=_env(tmp_path))
-    assert r.exit_code == 0, r.output
-
-
-# ---- ready ----
-
-
-def test_ready_empty_tree(tmp_path: Path) -> None:
-    r = runner.invoke(app, ["ready"], env=_env(tmp_path))
-    assert r.exit_code == 0
-    assert "(none)" in r.output
-
-
-def test_ready_includes_items_with_no_deps(tmp_path: Path) -> None:
-    _new(tmp_path, "A")
-    r = runner.invoke(app, ["ready"], env=_env(tmp_path))
-    assert r.exit_code == 0
-    assert "a " in r.output  # slug "a" appears
-
-
-def test_ready_excludes_done_items(tmp_path: Path) -> None:
-    a = _new(tmp_path, "A")
-    _close(tmp_path, a)
-    r = runner.invoke(app, ["ready"], env=_env(tmp_path))
-    assert r.exit_code == 0
-    assert "(none)" in r.output
-
-
-def test_ready_excludes_items_with_open_deps(tmp_path: Path) -> None:
-    a = _new(tmp_path, "A")
-    b = _new(tmp_path, "B")
-    _set_depends(tmp_path, b, [a])
-    r = runner.invoke(app, ["ready"], env=_env(tmp_path))
-    assert r.exit_code == 0
-    # A is ready (no deps), B is not (depends on open A).
-    data = json.loads(runner.invoke(app, ["ready", "--json"], env=_env(tmp_path)).output)
-    ids = [d["id"] for d in data]
-    assert a in ids
-    assert b not in ids
-
-
-def test_ready_includes_items_after_deps_done(tmp_path: Path) -> None:
-    a = _new(tmp_path, "A")
-    b = _new(tmp_path, "B")
-    _set_depends(tmp_path, b, [a])
-    _close(tmp_path, a)
-    data = json.loads(runner.invoke(app, ["ready", "--json"], env=_env(tmp_path)).output)
-    ids = [d["id"] for d in data]
-    assert b in ids
-
-
 def test_ready_excludes_items_with_unknown_deps(tmp_path: Path) -> None:
     """Unknown dep treated as blocking — the item is waiting on something that doesn't exist."""
     a = _new(tmp_path, "A")
@@ -97,92 +181,6 @@ def test_ready_excludes_items_with_unknown_deps(tmp_path: Path) -> None:
     data = json.loads(runner.invoke(app, ["ready", "--json"], env=_env(tmp_path)).output)
     ids = [d["id"] for d in data]
     assert a not in ids
-
-
-def test_ready_transitive_chain(tmp_path: Path) -> None:
-    a = _new(tmp_path, "A")
-    b = _new(tmp_path, "B")
-    c = _new(tmp_path, "C")
-    _set_depends(tmp_path, b, [a])
-    _set_depends(tmp_path, c, [b])
-    # Only A is ready initially.
-    data = json.loads(runner.invoke(app, ["ready", "--json"], env=_env(tmp_path)).output)
-    ids = [d["id"] for d in data]
-    assert ids == [a]
-
-
-def test_ready_no_infinite_loop_on_cycle(tmp_path: Path) -> None:
-    """Cycle in deps should not infinite-loop the query."""
-    a = _new(tmp_path, "A")
-    b = _new(tmp_path, "B")
-    _set_depends(tmp_path, a, [b])
-    _set_depends(tmp_path, b, [a])
-    # Both have open deps; neither is ready. Should complete.
-    r = runner.invoke(app, ["ready", "--json"], env=_env(tmp_path))
-    assert r.exit_code == 0
-    data = json.loads(r.output)
-    assert data == []
-
-
-# ---- dependents ----
-
-
-def test_dependents_returns_items_referencing_target(tmp_path: Path) -> None:
-    a = _new(tmp_path, "A")
-    b = _new(tmp_path, "B")
-    c = _new(tmp_path, "C")
-    _set_depends(tmp_path, b, [a])
-    _set_depends(tmp_path, c, [a])
-    r = runner.invoke(app, ["dependents", a, "--json"], env=_env(tmp_path))
-    assert r.exit_code == 0
-    ids = {d["id"] for d in json.loads(r.output)}
-    assert ids == {b, c}
-
-
-def test_dependents_excludes_done_items(tmp_path: Path) -> None:
-    a = _new(tmp_path, "A")
-    b = _new(tmp_path, "B")
-    _set_depends(tmp_path, b, [a])
-    _close(tmp_path, a)
-    _close(tmp_path, b)
-    data = json.loads(runner.invoke(app, ["dependents", a, "--json"], env=_env(tmp_path)).output)
-    assert data == []
-
-
-def test_dependents_missing_target(tmp_path: Path) -> None:
-    r = runner.invoke(app, ["dependents", "999999999"], env=_env(tmp_path))
-    assert r.exit_code != 0
-    assert "not found" in r.output
-
-
-# ---- waiting-on ----
-
-
-def test_waiting_on_returns_open_deps_of_target(tmp_path: Path) -> None:
-    a = _new(tmp_path, "A")
-    b = _new(tmp_path, "B")
-    c = _new(tmp_path, "C")
-    _set_depends(tmp_path, c, [a, b])
-    r = runner.invoke(app, ["waiting-on", c, "--json"], env=_env(tmp_path))
-    assert r.exit_code == 0
-    ids = {d["id"] for d in json.loads(r.output)}
-    assert ids == {a, b}
-
-
-def test_waiting_on_excludes_done_deps(tmp_path: Path) -> None:
-    a = _new(tmp_path, "A")
-    b = _new(tmp_path, "B")
-    c = _new(tmp_path, "C")
-    _set_depends(tmp_path, c, [a, b])
-    _close(tmp_path, a)
-    ids = {d["id"] for d in json.loads(runner.invoke(app, ["waiting-on", c, "--json"], env=_env(tmp_path)).output)}
-    assert ids == {b}
-
-
-def test_waiting_on_missing_target(tmp_path: Path) -> None:
-    r = runner.invoke(app, ["waiting-on", "999999999"], env=_env(tmp_path))
-    assert r.exit_code != 0
-    assert "not found" in r.output
 
 
 def test_waiting_on_reports_unknown_dep_refs(tmp_path: Path) -> None:

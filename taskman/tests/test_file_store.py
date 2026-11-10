@@ -30,8 +30,9 @@ runner = CliRunner()
 
 
 def _empty_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TASKMAN_BACKEND", "file")
     monkeypatch.setenv("TASKMAN_TASKS_DIR", str(tmp_path / "tasks"))
-    monkeypatch.delenv("TASKMAN_BACKEND", raising=False)
+    monkeypatch.setenv("TASKMAN_BACKEND", "file")
 
 
 BACKENDS = {"file": _empty_file}
@@ -376,6 +377,7 @@ def test_concurrent_writers_lose_no_items(store, monkeypatch):
 def test_unreadable_record_is_reported_not_raised(tmp_path, monkeypatch):
     """File backend only: other backends cannot hold a malformed record."""
     tasks_dir = tmp_path / "tasks"
+    monkeypatch.setenv("TASKMAN_BACKEND", "file")
     monkeypatch.setenv("TASKMAN_TASKS_DIR", str(tasks_dir))
     (tasks_dir / "backlog").mkdir(parents=True)
     (tasks_dir / "backlog" / "00.task-261101002.backlog.badyaml.md").write_text("---\ntitle: [unclosed\n---\n\nbody\n")
@@ -392,6 +394,7 @@ def test_unreadable_record_is_reported_not_raised(tmp_path, monkeypatch):
 
 
 def test_unknown_backend_is_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("TASKMAN_BACKEND", "file")
     monkeypatch.setenv("TASKMAN_TASKS_DIR", str(tmp_path / "tasks"))
     monkeypatch.setenv("TASKMAN_BACKEND", "nosuch")
     result = runner.invoke(app, ["list"])

@@ -50,7 +50,7 @@ def default_actor() -> str:
 
 
 def open_sql_store(settings: StorageSettings, actor: str | None = None) -> SqlStore:
-    conn, dialect = connect(settings)
+    conn, dialect = connect(settings, create=False)
     try:
         return SqlStore(conn, dialect, actor)
     except BaseException:
