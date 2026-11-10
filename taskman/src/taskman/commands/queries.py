@@ -12,7 +12,7 @@ from pathlib import Path
 import typer
 
 from taskman.lifecycle import is_ready
-from taskman.storage.store import Item, Store, as_store, open_store
+from taskman.storage.store import Item, Store, as_store, key_order, open_store
 
 
 def _load_graph(source: Store | Path) -> dict[str, Item]:
@@ -51,14 +51,15 @@ def _emit(results: list[Item], as_json: bool) -> None:
 
 def ready(
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON."),
+    project: str | None = typer.Option(None, "--project", help="Only items of this project key."),
 ) -> None:
     """List items whose every dependency is in done (or who have no deps)."""
     items = _load_graph(open_store())
     out: list[Item] = []
     for item in items.values():
-        if is_ready(item, items):
+        if is_ready(item, items) and (project is None or item.metadata.get("project") == project):
             out.append(item)
-    out.sort(key=lambda i: (i.priority, i.id))
+    out.sort(key=lambda i: (i.priority, key_order(i.id)))
     _emit(out, as_json)
 
 
@@ -75,7 +76,7 @@ def dependents(
         i for i in items.values()
         if i.status != "done" and item_id in i.depends_on
     ]
-    out.sort(key=lambda i: (i.priority, i.id))
+    out.sort(key=lambda i: (i.priority, key_order(i.id)))
     _emit(out, as_json)
 
 
@@ -97,5 +98,5 @@ def waiting_on(
     if missing:
         raise typer.BadParameter("missing dependencies: " + ", ".join(sorted(missing)))
     out = [items[dep] for dep in dependencies if items[dep].status != "done"]
-    out.sort(key=lambda i: (i.priority, i.id))
+    out.sort(key=lambda i: (i.priority, key_order(i.id)))
     _emit(out, as_json)

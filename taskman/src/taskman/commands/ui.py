@@ -16,7 +16,8 @@ from pathlib import Path
 
 import typer
 
-from taskman.storage.store import Store, StorageError, as_store, open_store
+from taskman.storage.sql_store import default_actor
+from taskman.storage.store import Store, StorageError, as_store, open_store, key_order
 
 
 # ---- data preparation ----
@@ -69,7 +70,7 @@ def collect_page(source: Store | Path) -> _Page:
     store = as_store(source)
     items = _load_items(store)
     graph = _load_graph(store)
-    page = _Page(items=sorted(items, key=lambda i: (i.priority, i.item_id)))
+    page = _Page(items=sorted(items, key=lambda i: (i.priority, key_order(i.item_id))))
 
     # Ready / blocked: applies only to non-done items.
     for i in items:
@@ -80,8 +81,8 @@ def collect_page(source: Store | Path) -> _Page:
             page.ready.append(i)
         else:
             page.blocked.append(i)
-    page.ready.sort(key=lambda i: (i.priority, i.item_id))
-    page.blocked.sort(key=lambda i: (i.priority, i.item_id))
+    page.ready.sort(key=lambda i: (i.priority, key_order(i.item_id)))
+    page.blocked.sort(key=lambda i: (i.priority, key_order(i.item_id)))
 
     # Recently done: status=done, mtime within last 7 days.
     cutoff = time.time() - 7 * 24 * 60 * 60
@@ -283,6 +284,15 @@ def _pid_file() -> Path:
     return Path(tempfile.gettempdir()) / "taskman_ui.pid"
 
 
+def _unchanged_ok(change) -> dict:
+    """Run a change; a request for the current state is not an error."""
+    try:
+        change()
+    except lifecycle.NoChange as exc:
+        return {'ok': True, 'message': exc.message}
+    return {'ok': True}
+
+
 def _make_handler(source: Store | Path):
     store = as_store(source)
 
@@ -308,7 +318,8 @@ def _make_handler(source: Store | Path):
             if not self._local_request() or self.headers.get('X-Taskman') != '1':
                 self._json(403, {'error': 'Only local Taskman UI requests are accepted.'})
                 return
-            if self.path not in ('/api/items', '/api/query', '/api/edit', '/api/discard', '/api/consolidate', '/api/reorder'):
+            if self.path not in ('/api/items', '/api/query', '/api/edit', '/api/discard', '/api/consolidate', '/api/reorder',
+                                 '/api/comment', '/api/assign', '/api/label'):
                 self._json(404, {'error': 'Unknown endpoint'})
                 return
             try:
@@ -328,10 +339,30 @@ def _make_handler(source: Store | Path):
                             rows = collection(store)
                             all_rows = collection(store, True)
                             fields = sorted({k for r in all_rows for k in r['metadata']} | {'parent_id'})
-                            result = {'rows': query(rows, data.get('filters', []), data.get('keyword', ''), data.get('epic', ''), data.get('sort', 'priority'), data.get('descending', False)), 'all': all_rows, 'fields': fields, 'history': histories(store)}
+                            result = {'rows': query(rows, data.get('filters', []), data.get('keyword', ''), data.get('epic', ''), data.get('sort', 'priority'), data.get('descending', False)), 'all': all_rows, 'fields': fields, 'history': histories(store),
+                                      'capabilities': {'consolidation': store.consolidation, 'reorder_done': store.reorder_done}}
                         elif self.path == '/api/edit':
                             lifecycle.edit(store, str(data.get('id', '')), data.get('title'), data.get('body'), data.get('reason'))
                             result = {'ok': True}
+                        elif self.path == '/api/comment':
+                            kind, result_value = data.get('kind'), data.get('result') or None
+                            author = getattr(store, 'actor', None) or default_actor()
+                            lifecycle.check_entry(kind, author, result_value)
+                            text = data.get('text')
+                            if not isinstance(text, str) or not text.strip():
+                                raise ValueError('Enter the comment text')
+                            lifecycle.record(store, str(data.get('id', '')), kind, author, text, result_value)
+                            result = {'ok': True}
+                        elif self.path == '/api/assign':
+                            assignee = data.get('assignee') or None
+                            if assignee is not None and not isinstance(assignee, str):
+                                raise ValueError('Enter an assignee name')
+                            result = _unchanged_ok(lambda: lifecycle.assign(store, str(data.get('id', '')), assignee))
+                        elif self.path == '/api/label':
+                            add, remove = data.get('add') or [], data.get('remove') or []
+                            if not all(isinstance(v, list) and all(isinstance(x, str) for x in v) for v in (add, remove)):
+                                raise ValueError('Labels must be lists of text')
+                            result = _unchanged_ok(lambda: lifecycle.label(store, str(data.get('id', '')), add, remove))
                         elif self.path == '/api/discard':
                             lifecycle.discard(store, str(data.get('id', '')))
                             result = {'ok': True}
@@ -354,10 +385,14 @@ def _make_handler(source: Store | Path):
                     raise ValueError('Enter a title of 1–200 characters')
                 if kind not in ('task', 'feat', 'epic') or not isinstance(body, str):
                     raise ValueError('Invalid task type or description')
-                if parent is not None and (not isinstance(parent, str) or not parent.isdigit() or len(parent) != 9):
+                project = data.get('project') or None
+                if parent is not None and not isinstance(parent, str):
                     raise ValueError('Invalid parent ID')
+                if project is not None and not isinstance(project, str):
+                    raise ValueError('Invalid project key')
                 with store.lock():
-                    item = lifecycle.create(store, title.strip(), kind, parent, body or None)
+                    item = lifecycle.create(store, title.strip(), kind, parent, body or None,
+                                            project=project.strip() if project else None)
                 self._json(201, {'id': item.id, 'path': item.location})
             except (ValueError, StorageError, OSError, TypeError, KeyError) as exc:
                 self._json(400, {'error': str(exc)})
@@ -413,14 +448,10 @@ def _make_handler(source: Store | Path):
             if item.error:
                 self.send_error(500, item.error)
                 return
-            payload = json.dumps(
-                {
-                    "frontmatter": item.metadata,
-                    "body": item.body,
-                    "path": item.location,
-                },
-                default=str,
-            ).encode("utf-8")
+            data = {"frontmatter": item.metadata, "body": item.body, "path": item.location}
+            if hasattr(store, "activity"):
+                data["activity"] = store.activity(item_id)
+            payload = json.dumps(data, default=str).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))

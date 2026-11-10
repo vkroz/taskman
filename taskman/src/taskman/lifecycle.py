@@ -64,6 +64,11 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _name(item: Item) -> str:
+    """How messages name an item: its key on a SQL backend (``sqlite:TM-2``), its file name otherwise."""
+    return item.id if item.location.endswith(f":{item.id}") else Path(item.location).name
+
+
 def _revision(item: Item) -> int:
     return int(item.metadata.get("revision", 0))
 
@@ -309,7 +314,7 @@ def convert(store: Store, item_id: str, target_type: str) -> Item:
     if target_type == "task":
         children = [other for other in store.items() if other.parent_id == item_id]
         if children:
-            names = ", ".join(sorted(Path(child.location).name for child in children))
+            names = ", ".join(sorted(_name(child) for child in children))
             raise LifecycleError(f"cannot convert {item_id} to task — has children: {names}")
     store.set_type(item_id, target_type)
     item = store.get(item_id)
@@ -328,7 +333,7 @@ def close(store: Store, item_id: str) -> Item:
     unfinished = [other for other in _descendants(items, item_id) if other.status != "done"]
     if unfinished:
         lines = [f"cannot close {item_id} — descendants not in done:"]
-        lines += [f"  {Path(other.location).name}" for other in unfinished]
+        lines += [f"  {_name(other)}" for other in unfinished]
         raise LifecycleError("\n".join(lines))
     _readable(item, usage=False)
     if item.draft:

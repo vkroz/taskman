@@ -16,8 +16,11 @@ TASKMAN — Uniform recursive work-item management
 This help documents the persistence model. For per-command syntax, run
 `taskman <command> --help`. For the command list, run `taskman --help`.
 
+The STORAGE LAYOUT, NAME GRAMMAR and ID GENERATION sections describe the file
+backend. SQL KEYS describes the sqlite and postgres backends.
+
 ================================================================================
-STORAGE LAYOUT
+STORAGE LAYOUT (file backend)
 ================================================================================
 
   tasks/
@@ -36,7 +39,7 @@ STORAGE LAYOUT
   root's status; each nested item carries its own status in its name.
 
 ================================================================================
-NAME GRAMMAR
+NAME GRAMMAR (file backend)
 ================================================================================
 
   Directory item:  <priority>.<type>-<id>.<status>.<slug>
@@ -55,13 +58,29 @@ NAME GRAMMAR
   ID does not change. References between items (`depends_on:`) use the bare ID.
 
 ================================================================================
-ID GENERATION
+ID GENERATION (file backend)
 ================================================================================
 
   IDs are YYMMDDnnn — today's date (YYMMDD) + a 3-digit per-day sequence
   shared across all types. Gaps are allowed: deleting an item leaves a hole;
   allocation returns the max-used-today + 1. Once 999 is allocated for a
   given day, the day's counter is exhausted.
+
+================================================================================
+SQL KEYS (sqlite and postgres backends)
+================================================================================
+
+  An item key is <PROJECT>-<number>, for example TM-42. The project key has
+  2-10 uppercase letters or digits and starts with a letter. Numbers count up
+  per project and are never used again, even after a discard.
+
+  A new top-level item needs --project KEY; Taskman creates the project on
+  first use. A child gets the project of its parent. Dependencies stay inside
+  one project. A command finds the item and its project from the key.
+
+  Each change to a field writes an activity entry with its author and time.
+  The author is the --actor value, or the git user.name. Consolidation is not
+  available, and a done item keeps its position.
 
 ================================================================================
 LIFECYCLE
@@ -79,7 +98,11 @@ LIFECYCLE
   context   Read item, ancestors, descendants and dependencies as JSON.
   update    Replace an open item's body using --body-file.
   depend    Replace dependencies with repeated --on IDs, or --clear.
-  record    Append decision, progress, handoff, summary or verification.
+  comment   Add a decision, progress, handoff, summary or verification
+            comment. `record` is an alias.
+  assign    Set the assignee of an open item; `unassign` removes it.
+  label     Add or remove labels of an open item.
+  activity  Show the field changes of an item (sqlite and postgres).
   discard   Remove an unreferenced draft leaf.
   install   Install the shared plugin using repeated --platform targets.
   validate  Integrity check: name↔frontmatter drift, parent references,
@@ -117,8 +140,8 @@ ENVIRONMENT
   Taskman ignores a .env file that git tracks. Keep .env out of git.
 
   TASKMAN_BACKEND      Storage backend: file (default), sqlite or postgres.
-                       The sqlite and postgres backends are not available
-                       yet; the commands stop with a message.
+                       Run `taskman db upgrade` once before you use sqlite
+                       or postgres.
   TASKMAN_TASKS_DIR    file backend. Selects the shared tasks tree. If unset,
                        searches from the working directory up to the
                        repository root for tasks/. Multiple agents must use

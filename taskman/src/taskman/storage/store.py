@@ -5,7 +5,10 @@ how items persist; lifecycle rules do not belong to a backend.
 """
 from __future__ import annotations
 
+import re
+
 from contextlib import AbstractContextManager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -64,7 +67,14 @@ class Store(Protocol):
     Write operations persist what they are given. Lifecycle rules (drafts,
     close gates, immutability, revisions) are checked by ``taskman.lifecycle``
     before a write is requested.
+
+    ``consolidation`` tells whether the backend stores consolidation records
+    (decision D8). ``reorder_done`` tells whether a done item can still change
+    its sibling position (decision M2 says no).
     """
+
+    consolidation: bool
+    reorder_done: bool
 
     def lock(self) -> AbstractContextManager[None]:
         """Serialize mutations of this store across processes."""
@@ -145,18 +155,34 @@ class Store(Protocol):
         ...
 
 
+_TRAILING_NUMBER = re.compile(r"^(.*?)([0-9]+)$")
+
+
+def key_order(item_id: str) -> tuple[str, int, str]:
+    """Sort key for item IDs: ``TM-10`` after ``TM-9``. File IDs keep their numeric order."""
+    match = _TRAILING_NUMBER.match(item_id)
+    return (match[1], int(match[2]), "") if match else (item_id, 0, item_id)
+
+
+# The store of the running CLI command, so the command and its lock share one connection.
+current_store: ContextVar[Store | None] = ContextVar("taskman_store", default=None)
+
+
 def open_store() -> Store:
-    """Open the backend that the storage settings select."""
+    """The store of the running command, or a new one for the backend that the settings select."""
+    store = current_store.get()
+    if store is not None:
+        return store
     from taskman.storage.settings import storage_settings
 
     settings = storage_settings()
-    if settings.backend != "file":
-        raise StorageConfigError(
-            f"The {settings.backend} backend is not available yet. Unset TASKMAN_BACKEND or set it to file."
-        )
-    from taskman.storage.file import FileStore, get_tasks_dir
+    if settings.backend == "file":
+        from taskman.storage.file import FileStore, get_tasks_dir
 
-    return FileStore(get_tasks_dir())
+        return FileStore(get_tasks_dir())
+    from taskman.storage.sql_store import open_sql_store
+
+    return open_sql_store(settings)
 
 
 def as_store(source: Store | Path | str) -> Store:

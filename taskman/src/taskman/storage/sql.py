@@ -34,7 +34,8 @@ def connect(settings: StorageSettings) -> tuple[Any, Dialect]:
     if settings.backend == "sqlite":
         path = settings.sqlite_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(path, timeout=30, isolation_level=None)
+        # The UI server shares one store across threads; SqlStore serializes access.
+        conn = sqlite3.connect(path, timeout=30, isolation_level=None, check_same_thread=False)
         conn.execute("PRAGMA foreign_keys = ON")
         return conn, SQLITE
     if settings.backend == "postgres":

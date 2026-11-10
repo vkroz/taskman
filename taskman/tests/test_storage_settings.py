@@ -181,14 +181,6 @@ def test_no_error_or_repr_contains_a_secret_or_url(tmp_path):
 # ---- CLI -------------------------------------------------------------------
 
 
-def test_cli_reports_sql_backends_as_not_available_yet(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TASKMAN_BACKEND", "sqlite")
-    result = runner.invoke(app, ["list"])
-    assert result.exit_code == 2
-    assert "The sqlite backend is not available yet" in result.output
-
-
 def test_cli_reads_settings_from_env_file(tmp_path, monkeypatch):
     (tmp_path / ".git").mkdir()
     (tmp_path / ".env").write_text("TASKMAN_BACKEND=nosuch\n")

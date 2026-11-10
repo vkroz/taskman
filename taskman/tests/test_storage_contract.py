@@ -18,7 +18,7 @@ from taskman.model.collection import consolidate
 from taskman.model.ordering import reorder_item
 from taskman.storage.schema import upgrade
 from taskman.storage.settings import StorageSettings
-from taskman.storage.sql import connect
+from taskman.storage.sql import connect, transaction
 from taskman.storage.sql_store import SqlStore, open_sql_store
 from taskman.storage.store import StorageConfigError, StorageError
 from tests.conftest import postgres_test_settings, reset_postgres
@@ -522,6 +522,31 @@ def test_failed_operation_leaves_the_database_unchanged(store):
 def test_store_refuses_a_database_without_the_current_schema(empty_settings):
     with pytest.raises(StorageConfigError, match="taskman db upgrade"):
         open_sql_store(empty_settings, actor="pytest")
+    conn, dialect = connect(empty_settings)
+    try:
+        if dialect.name == "sqlite":
+            tables = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+        else:
+            tables = conn.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public'").fetchall()
+    finally:
+        conn.close()
+    assert tables == []  # opening a store only reads
+
+
+def test_opening_a_store_does_not_wait_for_a_writer(settings):
+    conn, dialect = connect(settings)
+    try:
+        with transaction(conn, dialect):
+            conn.execute("UPDATE projects SET name = name")
+            started = time.monotonic()
+            store = open_sql_store(settings, actor="pytest")
+            try:
+                assert store.items() == []
+            finally:
+                store.close()
+            assert time.monotonic() - started < 5  # a writer waits up to 30 s for the lock
+    finally:
+        conn.close()
 
 
 # Each worker connects first and then waits at the barrier, so the writes overlap.

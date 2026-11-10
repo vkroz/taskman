@@ -49,14 +49,14 @@ A story uses type `feat`. Taskman permits other nesting shapes; `task` is always
 ## Record work and verify
 
 ```sh
-taskman record TASK_ID --kind decision --actor Codex --body-file decision.md
+taskman comment TASK_ID --kind decision --actor Codex --body-file decision.md
 taskman update TASK_ID --body-file refined-requirements.md
-taskman record TASK_ID --kind summary --actor Codex --body-file summary.md
-taskman record TASK_ID --kind verification --result pass --actor "Claude Code" --body-file verification.md
+taskman comment TASK_ID --kind summary --actor Codex --body-file summary.md
+taskman comment TASK_ID --kind verification --result pass --actor "Claude Code" --body-file verification.md
 taskman close TASK_ID
 ```
 
-Use `--body-file -` to read stdin. Journal significant choices, their reasons and changes to scope. The completion summary should explain what changed, why, and any limits. Verification records should name the checks, commands, results and source revision or relevant working-tree changes. Distinguish executed tests from source inspection and another agent's report.
+`record` is an alias of `comment`. Every command that changes an item accepts `--actor NAME`; without it, the author is your git `user.name`. Use `--body-file -` to read stdin. Journal significant choices, their reasons and changes to scope. The completion summary should explain what changed, why, and any limits. Verification records should name the checks, commands, results and source revision or relevant working-tree changes. Distinguish executed tests from source inspection and another agent's report.
 
 Open requirements may be refined to achieve the agreed outcome. Changes to the body, dependencies, type, implementation journal or children invalidate earlier completion evidence. Close requires a current summary, a current passing verification, and completed dependencies and descendants. A recorded pass is the agent's assertion: Taskman does not run tests or prove that assertion.
 
@@ -81,7 +81,7 @@ Taskman reads its storage settings from environment variables and from a `.env` 
 
 | Variable | Backend | Meaning |
 | --- | --- | --- |
-| `TASKMAN_BACKEND` | all | `file` (default), `sqlite` or `postgres`. The `sqlite` and `postgres` backends are not available yet; commands stop with a message. |
+| `TASKMAN_BACKEND` | all | `file` (default), `sqlite` or `postgres`. Run `taskman db upgrade` once before you use `sqlite` or `postgres`. |
 | `TASKMAN_TASKS_DIR` | file | The shared `tasks/` tree. Default: the nearest `tasks/` directory up to the repository root. |
 | `TASKMAN_DATABASE_URL` | sqlite | `sqlite:///absolute/path.db` or `sqlite://~/path.db`. Default: `~/.local/share/taskman/taskman.db`, one file for all repositories. |
 | `TASKMAN_DATABASE_URL` | postgres | `postgresql://user@host:port/dbname`. |
@@ -90,6 +90,18 @@ Taskman reads its storage settings from environment variables and from a `.env` 
 | `TASKMAN_DB_PASSWORD_FILE` | postgres | A file that holds the password, for example a mounted secret. Surrounding whitespace is removed. Set this or `TASKMAN_DB_PASSWORD`, not both. |
 
 Error messages never show a password or a connection URL.
+
+With `sqlite` or `postgres`, items belong to projects and have keys such as `TM-42`. A new top-level item names its project, which Taskman creates on first use: `taskman new --title "Save messages" --project TM`. A child uses the project of its parent. `list`, `ready`, `search` and `browse` show all projects; `--project KEY` limits them to one. These backends add assignees, labels and an activity history of every field change:
+
+```sh
+taskman assign TM-42 claude-code
+taskman unassign TM-42
+taskman label TM-42 --add backend --remove ui
+taskman list --assignee claude-code --label backend
+taskman activity TM-42
+```
+
+`context` includes the activity of the item. Consolidation and `history` are not available with these backends, and a done item keeps its position.
 
 `taskman db upgrade` creates the schema in a new database and upgrades an older one. It does nothing when the schema is current. The postgres backend needs the `postgres` extra: `uv tool install 'taskman[postgres] @ git+https://github.com/vkroz/taskman.git#subdirectory=taskman'`.
 
