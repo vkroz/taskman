@@ -153,6 +153,7 @@ class FileStore:
         slug: str,
         status: str,
         draft: bool,
+        project: str | None = None,
     ) -> Item:
         item_id = allocate_id(self.tasks_dir)
         slug = self._unique_slug(slug, today_prefix())
@@ -214,7 +215,7 @@ class FileStore:
         else:
             path.unlink()
 
-    def save_order(self, parent_key: str, item_ids: list[str]) -> None:
+    def save_order(self, parent_key: str, item_ids: list[str], moved_id: str) -> None:
         parents = read_order(self.tasks_dir)
         parents[parent_key] = item_ids
         write_order(self.tasks_dir, parents)

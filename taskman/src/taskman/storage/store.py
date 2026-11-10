@@ -80,8 +80,13 @@ class Store(Protocol):
         slug: str,
         status: str,
         draft: bool,
+        project: str | None = None,
     ) -> Item:
-        """Store a new item and return it with its allocated ID."""
+        """Store a new item and return it with its allocated ID.
+
+        A child belongs to its parent's project. Backends without projects
+        ignore ``project``.
+        """
         ...
 
     def save(self, item_id: str, metadata: dict[str, Any], body: str) -> Item:
@@ -100,8 +105,11 @@ class Store(Protocol):
         """Remove an item that has no children."""
         ...
 
-    def save_order(self, parent_key: str, item_ids: list[str]) -> None:
-        """Save the sibling order under a parent ID, or ``root``."""
+    def save_order(self, parent_key: str, item_ids: list[str], moved_id: str) -> None:
+        """Save the sibling order under a parent ID, or ``root``, after ``moved_id`` moved.
+
+        Only the moved item changes position; the other siblings keep their order.
+        """
         ...
 
     def check_layout(self) -> list[Finding]:

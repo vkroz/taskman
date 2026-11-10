@@ -97,5 +97,5 @@ def reorder_item(source: Store | Path, item_id: str, position: int) -> list[str]
     moved = siblings.pop(current)
     siblings.insert(target, moved)
     order = [row["id"] for row in siblings]
-    store.save_order(moved["parent_id"] or _ROOT, order)
+    store.save_order(moved["parent_id"] or _ROOT, order, item_id)
     return order
