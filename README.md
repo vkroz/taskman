@@ -75,6 +75,48 @@ The UI refreshes as agents change tasks. `taskman validate` checks task-data int
 
 The plugin supplies define, design, plan, implement and validate skills, plus optional review, commenting, commit and documentation skills. Skills use the same task records on either platform.
 
+## Storage settings
+
+Taskman reads its storage settings from environment variables and from a `.env` file at the repository root. A variable already set in the environment wins over `.env`. Docker Compose (`env_file`) and Cloud Run (environment variables and mounted secrets) set the same variables. Taskman ignores a `.env` file that git tracks, because a committed file could send your database password to another host. Keep `.env` out of git.
+
+| Variable | Backend | Meaning |
+| --- | --- | --- |
+| `TASKMAN_BACKEND` | all | `file` (default), `sqlite` or `postgres`. The `sqlite` and `postgres` backends are not available yet; commands stop with a message. |
+| `TASKMAN_TASKS_DIR` | file | The shared `tasks/` tree. Default: the nearest `tasks/` directory up to the repository root. |
+| `TASKMAN_DATABASE_URL` | sqlite | `sqlite:///absolute/path.db` or `sqlite://~/path.db`. Default: `~/.local/share/taskman/taskman.db`, one file for all repositories. |
+| `TASKMAN_DATABASE_URL` | postgres | `postgresql://user@host:port/dbname`. |
+| `TASKMAN_DB_SOCKET`, `TASKMAN_DB_NAME`, `TASKMAN_DB_USER` | postgres | Use these instead of a URL to connect through a unix socket, for example Cloud SQL. All three are required. |
+| `TASKMAN_DB_PASSWORD` | postgres | The database password. Optional. |
+| `TASKMAN_DB_PASSWORD_FILE` | postgres | A file that holds the password, for example a mounted secret. Surrounding whitespace is removed. Set this or `TASKMAN_DB_PASSWORD`, not both. |
+
+Error messages never show a password or a connection URL.
+
+`taskman db upgrade` creates the schema in a new database and upgrades an older one. It does nothing when the schema is current. The postgres backend needs the `postgres` extra: `uv tool install 'taskman[postgres] @ git+https://github.com/vkroz/taskman.git#subdirectory=taskman'`.
+
+SQLite:
+
+```sh
+TASKMAN_BACKEND=sqlite
+```
+
+Local Postgres:
+
+```sh
+TASKMAN_BACKEND=postgres
+TASKMAN_DATABASE_URL=postgresql://taskman@localhost:5432/taskman
+TASKMAN_DB_PASSWORD=change-me
+```
+
+Cloud SQL through its unix socket, for example on Cloud Run:
+
+```sh
+TASKMAN_BACKEND=postgres
+TASKMAN_DB_SOCKET=/cloudsql/project:region:instance
+TASKMAN_DB_NAME=taskman
+TASKMAN_DB_USER=taskman_app
+TASKMAN_DB_PASSWORD_FILE=/secrets/taskman-db-password
+```
+
 ## Develop Taskman
 
 ```sh

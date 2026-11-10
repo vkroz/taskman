@@ -19,8 +19,9 @@ This repository ships the `taskman` marketplace for Codex and Claude Code and it
 Run Python commands from `taskman/`:
 
 ```bash
-uv sync --extra dev             # create/update the development environment
-uv run pytest                   # run the full test suite
+uv sync --extra dev --extra postgres   # create/update the development environment
+uv run pytest                   # run the full test suite; Postgres tests skip without a test database
+TASKMAN_TEST_DATABASE_URL=postgresql://user:pass@host:5432/taskman_test uv run pytest   # include Postgres; the name must end in _test
 uv run pytest tests/test_model_names.py -q
 uv run taskman --help           # exercise the local CLI entry point
 ```
