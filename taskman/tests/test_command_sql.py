@@ -192,3 +192,17 @@ def test_consolidation_is_not_offered(cli):
     cli("new", "--title", "Item", "--project", "TM")
     assert "D8" in cli("consolidate", "TM-1", "--title", "Summary", code=2)
     assert "D8" in cli("history", code=2)
+
+
+def test_command_help_needs_no_database(tmp_path, monkeypatch):
+    _env(monkeypatch, tmp_path)
+    for command in ("depend", "label", "list", "new", "ui"):
+        assert "Usage" in run(command, "--help")
+    assert not (tmp_path / "taskman.db").exists()
+
+
+def test_a_missing_database_is_reported_and_not_created(tmp_path, monkeypatch):
+    _env(monkeypatch, tmp_path)
+    output = run("show", "TM-1", code=2)
+    assert "There is no Taskman database" in output and "taskman db upgrade" in output
+    assert not (tmp_path / "taskman.db").exists()

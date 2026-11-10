@@ -6,6 +6,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from taskman.cli import app
+from tests import sql_helpers as sql
 from tests.workflow_helpers import prepare
 from taskman.model.names import parse_name
 from taskman.model.yaml_io import read_file
@@ -14,7 +15,7 @@ runner = CliRunner()
 
 
 def _env(tasks_dir: Path) -> dict[str, str]:
-    return {"TASKMAN_TASKS_DIR": str(tasks_dir)}
+    return {"TASKMAN_BACKEND": "file", "TASKMAN_TASKS_DIR": str(tasks_dir)}
 
 
 def _new_top_level(tmp_path: Path, title: str, item_type: str = "task") -> str:
@@ -28,68 +29,56 @@ def _new_top_level(tmp_path: Path, title: str, item_type: str = "task") -> str:
     return item_id
 
 
-def test_move_backlog_to_active(tmp_path: Path) -> None:
-    item_id = _new_top_level(tmp_path, "Foo")
-    r = runner.invoke(app, ["move", item_id, "active"], env=_env(tmp_path))
-    assert r.exit_code == 0, r.output
-    new_path = Path(r.output.strip())
-    assert new_path.parent.name == "active"
-    wi = parse_name(new_path.name)
-    assert wi.status == "active"
-    data, _ = read_file(new_path)
-    assert data["status"] == "active"
-    # Backlog folder should have no item with this id.
-    assert not any(item_id in p.name for p in (tmp_path / "backlog").iterdir())
+def test_move_backlog_to_active(sqlite_env) -> None:
+    key = sql.new("Foo")
+    sql.prepare(key)
+    assert sql.run("move", key, "active").strip() == f"sqlite:{key}"
+    assert sql.show(key)["frontmatter"]["status"] == "active"
 
 
-def test_move_active_to_done(tmp_path: Path) -> None:
-    item_id = _new_top_level(tmp_path, "Foo")
-    runner.invoke(app, ["move", item_id, "active"], env=_env(tmp_path))
-    r = runner.invoke(app, ["move", item_id, "done"], env=_env(tmp_path))
-    assert r.exit_code == 0, r.output
-    new_path = Path(r.output.strip())
-    assert new_path.parent.name == "done"
-    wi = parse_name(new_path.name)
-    assert wi.status == "done"
+def test_move_active_to_done(sqlite_env) -> None:
+    key = sql.new("Foo")
+    sql.prepare(key)
+    sql.run("move", key, "active")
+    sql.run("move", key, "done")
+    assert sql.show(key)["frontmatter"]["status"] == "done"
 
 
-def test_move_same_status_is_noop(tmp_path: Path) -> None:
-    item_id = _new_top_level(tmp_path, "Foo")
-    r = runner.invoke(app, ["move", item_id, "backlog"], env=_env(tmp_path))
-    assert r.exit_code == 0
-    assert "No change" in r.output
+def test_move_same_status_is_noop(sqlite_env) -> None:
+    key = sql.new("Foo")
+    sql.prepare(key)
+    assert "No change" in sql.run("move", key, "backlog")
 
 
-def test_move_missing_id(tmp_path: Path) -> None:
-    r = runner.invoke(app, ["move", "999999999", "active"], env=_env(tmp_path))
-    assert r.exit_code != 0
-    assert "not found" in r.output
+def test_move_missing_id(sqlite_env) -> None:
+    assert "not found" in sql.run("move", "TM-99", "active", code=None)
 
 
-def test_move_bad_target_status(tmp_path: Path) -> None:
-    item_id = _new_top_level(tmp_path, "Foo")
-    r = runner.invoke(app, ["move", item_id, "pending"], env=_env(tmp_path))
-    assert r.exit_code != 0
-    assert "must be one of" in r.output
+def test_move_bad_target_status(sqlite_env) -> None:
+    key = sql.new("Foo")
+    assert "must be one of" in sql.run("move", key, "pending", code=2)
 
 
-def test_move_activates_nested_item(tmp_path: Path) -> None:
-    epic_id = _new_top_level(tmp_path, "Epic", item_type="epic")
-    # Create a child under the epic. Triggers file→dir auto-conversion.
-    r = runner.invoke(
-        app,
-        ["new", "--title", "Child", "--type", "task", "--parent", epic_id],
-        env=_env(tmp_path),
-    )
-    assert r.exit_code == 0
-    child_id = parse_name(Path(r.output.strip()).name).item_id
+def test_move_activates_nested_item(sqlite_env) -> None:
+    epic = sql.new("Epic", "epic")
+    child = sql.new("Child", parent=epic)
+    sql.prepare(epic)
+    sql.prepare(child)
+    sql.run("move", child, "active")
+    assert sql.show(child)["frontmatter"]["status"] == "active"
+    assert sql.show(epic)["frontmatter"]["status"] == "backlog"
 
-    prepare(tmp_path, child_id)
-    # Nested items change status inside their parent.
-    r2 = runner.invoke(app, ["move", child_id, "active"], env=_env(tmp_path))
-    assert r2.exit_code == 0, r2.output
-    assert parse_name(Path(r2.output.strip()).name).status == "active"
-    assert Path(r2.output.strip()).parent.name.endswith(".backlog.epic")
+
+def test_moving_a_parent_keeps_child_status(sqlite_env) -> None:
+    epic = sql.new("Epic", "epic")
+    child = sql.new("Child", parent=epic)
+    sql.prepare(epic)
+    sql.run("move", epic, "active")
+    assert sql.show(epic)["frontmatter"]["status"] == "active"
+    assert sql.show(child)["frontmatter"]["status"] == "backlog"
+
+
+# ---- file backend: layout only; removed with 261110001 ----
 
 
 def test_move_preserves_subtree(tmp_path: Path) -> None:

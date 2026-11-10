@@ -29,10 +29,15 @@ SQLITE = Dialect("sqlite")
 POSTGRES = Dialect("postgres")
 
 
-def connect(settings: StorageSettings) -> tuple[Any, Dialect]:
-    """Open an autocommit connection; callers group statements with :func:`transaction`."""
+def connect(settings: StorageSettings, *, create: bool = True) -> tuple[Any, Dialect]:
+    """Open an autocommit connection; callers group statements with :func:`transaction`.
+
+    With ``create=False`` a missing SQLite file is an error, not a new empty database.
+    """
     if settings.backend == "sqlite":
         path = settings.sqlite_path
+        if not create and not path.is_file():
+            raise StorageConfigError(f"There is no Taskman database at {path}. Run: taskman db upgrade")
         path.parent.mkdir(parents=True, exist_ok=True)
         # The UI server shares one store across threads; SqlStore serializes access.
         conn = sqlite3.connect(path, timeout=30, isolation_level=None, check_same_thread=False)

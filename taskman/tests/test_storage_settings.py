@@ -88,8 +88,9 @@ def test_env_file_tracked_by_git_is_ignored(tmp_path, capsys):
 # ---- backend and SQLite ------------------------------------------------
 
 
-def test_backend_defaults_to_file():
-    assert storage_settings({}) == StorageSettings("file")
+def test_backend_defaults_to_sqlite(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert storage_settings({}) == StorageSettings("sqlite", sqlite_path=tmp_path / ".local/share/taskman/taskman.db")
 
 
 def test_unknown_backend_names_the_supported_ones():

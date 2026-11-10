@@ -5,7 +5,7 @@ from taskman.cli import app
 
 def prepare(tasks_dir, item_id):
     runner = CliRunner()
-    env = {"TASKMAN_TASKS_DIR": str(tasks_dir)}
+    env = {"TASKMAN_BACKEND": "file", "TASKMAN_TASKS_DIR": str(tasks_dir)}
     result = runner.invoke(app, ["finalize", item_id], env=env)
     assert result.exit_code == 0, result.output
     for kind in ("summary", "verification"):

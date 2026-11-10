@@ -7,13 +7,14 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from taskman.cli import app
+from tests import sql_helpers as sql
 from taskman.model.names import parse_name
 
 runner = CliRunner()
 
 
 def _env(tasks_dir: Path) -> dict[str, str]:
-    return {"TASKMAN_TASKS_DIR": str(tasks_dir)}
+    return {"TASKMAN_BACKEND": "file", "TASKMAN_TASKS_DIR": str(tasks_dir)}
 
 
 def _new_via_cli(tmp_path: Path, title: str, item_type: str = "task") -> str:
@@ -27,27 +28,25 @@ def _new_via_cli(tmp_path: Path, title: str, item_type: str = "task") -> str:
 # ---- happy path ----
 
 
-def test_validate_empty_tree(tmp_path: Path) -> None:
-    """Empty tree validates clean."""
-    (tmp_path / "backlog").mkdir()
-    r = runner.invoke(app, ["validate"], env=_env(tmp_path))
-    assert r.exit_code == 0
-    assert "OK" in r.output
+def test_validate_empty_database(sqlite_env) -> None:
+    """An empty database validates clean."""
+    assert "OK" in sql.run("validate")
 
 
-def test_validate_clean_tree(tmp_path: Path) -> None:
-    """A tree built only by `new` validates clean."""
-    epic_id = _new_via_cli(tmp_path, "Epic", "epic")
-    runner.invoke(
-        app,
-        ["new", "--title", "Child", "--type", "task", "--parent", epic_id],
-        env=_env(tmp_path),
-    )
-    r = runner.invoke(app, ["validate"], env=_env(tmp_path))
-    assert r.exit_code == 0, r.output
+def test_validate_clean_tree(sqlite_env) -> None:
+    """Items built only by `new` validate clean."""
+    epic = sql.new("Epic", "epic")
+    sql.new("Child", parent=epic)
+    assert "OK" in sql.run("validate")
 
 
-# ---- violations ----
+def test_validate_json_clean(sqlite_env) -> None:
+    data = json.loads(sql.run("validate", "--json"))
+    assert data["ok"] is True
+    assert data["findings"] == []
+
+
+# ---- file backend only; removed with 261110001 ----
 
 
 def test_validate_detects_bad_name_grammar(tmp_path: Path) -> None:
@@ -152,18 +151,6 @@ def test_validate_detects_special_file_id_mismatch(tmp_path: Path) -> None:
     r = runner.invoke(app, ["validate"], env=_env(tmp_path))
     assert r.exit_code != 0
     assert "special_file_id_mismatch" in r.output
-
-
-# ---- JSON ----
-
-
-def test_validate_json_clean(tmp_path: Path) -> None:
-    (tmp_path / "backlog").mkdir()
-    r = runner.invoke(app, ["validate", "--json"], env=_env(tmp_path))
-    assert r.exit_code == 0
-    data = json.loads(r.output)
-    assert data["ok"] is True
-    assert data["findings"] == []
 
 
 def test_validate_json_with_findings(tmp_path: Path) -> None:

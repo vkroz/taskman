@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from taskman.cli import app
@@ -12,6 +13,12 @@ from taskman.model.names import parse_name
 from taskman.model.yaml_io import read_file
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _file_backend(monkeypatch):
+    """`migrate` is a file-format tool; it runs with the file backend selected."""
+    monkeypatch.setenv("TASKMAN_BACKEND", "file")
 
 
 # ---- slug derivation ----
@@ -240,7 +247,7 @@ def test_migrate_output_validates_clean(tmp_path: Path) -> None:
     dest = tmp_path / "dest"
     _build_legacy_tree(src)
     runner.invoke(app, ["migrate", str(src), str(dest)])
-    r = runner.invoke(app, ["validate"], env={"TASKMAN_TASKS_DIR": str(dest)})
+    r = runner.invoke(app, ["validate"], env={"TASKMAN_BACKEND": "file", "TASKMAN_TASKS_DIR": str(dest)})
     assert r.exit_code == 0, r.output
 
 

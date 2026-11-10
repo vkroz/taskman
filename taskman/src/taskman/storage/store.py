@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -165,14 +166,41 @@ def key_order(item_id: str) -> tuple[str, int, str]:
 
 
 # The store of the running CLI command, so the command and its lock share one connection.
-current_store: ContextVar[Store | None] = ContextVar("taskman_store", default=None)
+# Holds the store once a command opens it; ``None`` outside a command.
+_command_store: ContextVar[list[Store] | None] = ContextVar("taskman_command_store", default=None)
+
+
+def begin_command() -> Callable[[], None]:
+    """Start a command: its first :func:`open_store` opens the store, later calls reuse it.
+
+    The store opens on first use, so ``--help`` needs no database. Returns the
+    function that ends the command and closes the store.
+    """
+    holder: list[Store] = []
+    token = _command_store.set(holder)
+
+    def end() -> None:
+        _command_store.reset(token)
+        for store in holder:
+            close = getattr(store, "close", None)
+            if close is not None:
+                close()
+
+    return end
 
 
 def open_store() -> Store:
     """The store of the running command, or a new one for the backend that the settings select."""
-    store = current_store.get()
-    if store is not None:
-        return store
+    holder = _command_store.get()
+    if holder:
+        return holder[0]
+    store = _new_store()
+    if holder is not None:
+        holder.append(store)
+    return store
+
+
+def _new_store() -> Store:
     from taskman.storage.settings import storage_settings
 
     settings = storage_settings()
