@@ -137,6 +137,14 @@ uv sync --extra dev
 uv run pytest
 ```
 
+Without a test database, the Postgres tests are reported as skipped. To run them, start Postgres 16 and point `TASKMAN_TEST_DATABASE_URL` at a database whose name ends in `_test`. The tests delete and recreate its `public` schema. Use a glibc image such as `postgres:16`: Alpine images sort text by bytes and hide collation errors.
+
+```sh
+docker run -d --name taskman-pg-test -e POSTGRES_USER=taskman -e POSTGRES_PASSWORD=taskman -e POSTGRES_DB=taskman_test -p 127.0.0.1:54329:5432 postgres:16
+uv sync --extra dev --extra postgres
+TASKMAN_TEST_DATABASE_URL=postgresql://taskman:taskman@127.0.0.1:54329/taskman_test uv run pytest
+```
+
 Python code is under `taskman/src/taskman/`; plugin sources are under `plugins/tm/`. Add a platform adapter to the installer to support another coding tool without changing task storage. The shell script under `plugins/tm/scripts/` is retained for legacy data; current workflows use the Python CLI.
 
 ### Workspace UI and history
