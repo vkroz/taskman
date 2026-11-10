@@ -18,6 +18,8 @@ from taskman.storage.store import Item, Store
 _SLUGIFY_NON_CHARSET = re.compile(r"[^a-z0-9_]+")
 _SLUGIFY_COLLAPSE = re.compile(r"_+")
 _VALID_SLUG = re.compile(r"^[a-z0-9_]+$")
+_PROJECT_KEY = re.compile(r"^[A-Z][A-Z0-9]{1,9}$")
+_LABEL = re.compile(r"^[a-z0-9_-]{1,50}$")
 
 IMMUTABLE = "closed items are immutable; create a linked follow-up task"
 JOURNAL_KINDS = ("decision", "progress", "handoff", "summary", "verification")
@@ -133,12 +135,26 @@ def invalidate_ancestors(store: Store, item_id: str) -> None:
         parent_id = ancestor.parent_id
 
 
-def create(store: Store, title: str, item_type: str, parent_id: str | None, body: str | None = None) -> Item:
+def create(
+    store: Store,
+    title: str,
+    item_type: str,
+    parent_id: str | None,
+    body: str | None = None,
+    project: str | None = None,
+) -> Item:
+    """Create a backlog draft. A child belongs to its parent's project."""
     slug = slugify(title)
+    if project is not None and not _PROJECT_KEY.match(project):
+        raise LifecycleError(
+            "a project key has 2-10 uppercase letters and digits and starts with a letter", usage=True
+        )
     if parent_id is not None:
         parent = store.get(parent_id)
         if parent is None:
             raise LifecycleError(f"parent not found: {parent_id}")
+        if project is not None and parent.metadata.get("project") not in (None, project):
+            raise LifecycleError("a child belongs to the project of its parent", usage=True)
         if parent.status == "done":
             raise LifecycleError("closed parents are immutable; create a follow-up task")
         if parent.type == "task":
@@ -154,6 +170,7 @@ def create(store: Store, title: str, item_type: str, parent_id: str | None, body
         slug=slug,
         status="backlog",
         draft=True,
+        project=project,
     )
     invalidate_ancestors(store, item.id)
     return item
@@ -233,6 +250,8 @@ def set_dependencies(store: Store, item_id: str, depends_on: list[str]) -> Item:
     graph[item_id] = deps + children.get(item_id, [])
     if unknown_references(graph):
         raise LifecycleError("dependency ID not found", usage=True)
+    if any(items[dep].metadata.get("project") != item.metadata.get("project") for dep in deps):
+        raise LifecycleError("dependencies stay inside one project", usage=True)
     if find_cycles(graph):
         raise LifecycleError("dependencies would create a cycle (including parent completion)", usage=True)
     metadata = copy.deepcopy(item.metadata)
@@ -354,3 +373,36 @@ def edit(store: Store, item_id: str, title: Any, body: Any, reason: Any) -> Item
     item = store.save(item_id, metadata, body)
     invalidate_ancestors(store, item_id)
     return item
+
+
+def assign(store: Store, item_id: str, assignee: str | None) -> Item:
+    """Set or clear the assignee. The revision does not change."""
+    item = _require(store, item_id, usage=True)
+    _open(item)
+    if assignee is not None:
+        assignee = assignee.strip()
+        if not 1 <= len(assignee) <= 100:
+            raise LifecycleError("an assignee has 1-100 characters", usage=True)
+    if item.metadata.get("assignee") == assignee:
+        raise NoChange(f"No change: {item_id} already has this assignee.")
+    metadata = copy.deepcopy(item.metadata)
+    metadata["assignee"] = assignee
+    return store.save(item_id, metadata, item.body)
+
+
+def label(store: Store, item_id: str, add: list[str], remove: list[str]) -> Item:
+    """Add and remove labels. The revision does not change."""
+    item = _require(store, item_id, usage=True)
+    _open(item)
+    bad = [name for name in [*add, *remove] if not _LABEL.match(name)]
+    if bad:
+        raise LifecycleError(
+            f"a label has 1-50 lowercase letters, digits, - or _: {', '.join(bad)}", usage=True
+        )
+    current = list(item.metadata.get("labels") or [])
+    labels = sorted((set(current) | set(add)) - set(remove))
+    if labels == sorted(current):
+        raise NoChange(f"No change: {item_id} labels are unchanged.")
+    metadata = copy.deepcopy(item.metadata)
+    metadata["labels"] = labels
+    return store.save(item_id, metadata, item.body)
