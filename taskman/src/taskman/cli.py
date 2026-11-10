@@ -27,7 +27,7 @@ from taskman.commands.validate import validate as _validate
 from taskman.commands.worktree_status import worktree_status as _worktree_status
 from taskman.commands.context import context, update, record, depend, discard
 from taskman.model.locking import mutating
-from taskman.storage import StorageConfigError, backend_name
+from taskman.storage.store import StorageConfigError, backend_name
 from taskman.commands.install import install
 from taskman.commands.collection import browse, edit, consolidate, history, reorder
 

@@ -8,9 +8,7 @@ import signal
 import tempfile
 import time
 import webbrowser
-from taskman.model.locking import mutation_lock
-from taskman.commands.new import _make_item, NewCommandError
-from taskman.storage.file import to_plain as _to_plain
+from taskman import lifecycle
 from taskman.commands.queries import _load_graph, is_ready
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,10 +16,7 @@ from pathlib import Path
 
 import typer
 
-from taskman.commands.new import get_tasks_dir
-from taskman.model.layout import iter_work_items
-from taskman.model.names import NameParseError, parse_name, special_file_name
-from taskman.model.yaml_io import FrontmatterError, read_file
+from taskman.storage.store import Store, StorageError, as_store, open_store
 
 
 # ---- data preparation ----
@@ -50,48 +45,30 @@ class _Page:
     graph_mermaid: str = ""
 
 
-def _load_items(tasks_dir: Path) -> list[_Item]:
-    from taskman.model.collection import histories
-    archived = {id for h in histories(tasks_dir) for id in h["ids"]}
-    items: list[_Item] = []
-    for path in iter_work_items(tasks_dir):
-        try:
-            wi = parse_name(path.name)
-        except NameParseError:
-            continue
-        if wi.item_id in archived:
-            continue
-        body_file = (
-            path / special_file_name(wi.item_id) if path.is_dir() else path
+def _load_items(store: Store) -> list[_Item]:
+    archived = {id for h in store.histories() for id in h["ids"]}
+    return [
+        _Item(
+            item_id=item.id,
+            item_type=item.type,
+            status=item.status,
+            priority=item.priority,
+            slug=item.slug,
+            title=item.title,
+            path=item.location,
+            depends_on=item.depends_on,
+            mtime=item.modified,
+            draft=item.draft,
         )
-        if not body_file.exists():
-            continue
-        try:
-            data, _ = read_file(body_file)
-        except FrontmatterError:
-            continue
-        deps_raw = data.get("depends_on") or []
-        deps = tuple(str(d) for d in deps_raw) if isinstance(deps_raw, list) else ()
-        items.append(
-            _Item(
-                item_id=wi.item_id,
-                item_type=wi.item_type,
-                status=wi.status,
-                priority=wi.priority,
-                slug=wi.slug,
-                title=str(data.get("title", "")),
-                path=str(path),
-                depends_on=deps,
-                mtime=body_file.stat().st_mtime,
-                draft=bool(data.get("draft")),
-            )
-        )
-    return items
+        for item in store.items()
+        if item.id not in archived and not item.error
+    ]
 
 
-def collect_page(tasks_dir: Path) -> _Page:
-    items = _load_items(tasks_dir)
-    graph = _load_graph(tasks_dir)
+def collect_page(source: Store | Path) -> _Page:
+    store = as_store(source)
+    items = _load_items(store)
+    graph = _load_graph(store)
     page = _Page(items=sorted(items, key=lambda i: (i.priority, i.item_id)))
 
     # Ready / blocked: applies only to non-done items.
@@ -306,7 +283,9 @@ def _pid_file() -> Path:
     return Path(tempfile.gettempdir()) / "taskman_ui.pid"
 
 
-def _make_handler(tasks_dir: Path):
+def _make_handler(source: Store | Path):
+    store = as_store(source)
+
     class _Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args) -> None:  # noqa: A002
             # Silence default access log; uncomment for debugging.
@@ -343,34 +322,30 @@ def _make_handler(tasks_dir: Path):
                     raise ValueError('Expected an object')
                 if self.path != '/api/items':
                     from taskman.model.collection import collection, query, histories, consolidate
-                    from taskman.commands.collection import edit_item
-                    from taskman.commands.context import load_item
-                    from taskman.model.revisions import invalidate_ancestors
                     from taskman.model.ordering import reorder_item
-                    with mutation_lock(tasks_dir):
+                    with store.lock():
                         if self.path == '/api/query':
-                            rows = collection(tasks_dir)
-                            all_rows = collection(tasks_dir, True)
+                            rows = collection(store)
+                            all_rows = collection(store, True)
                             fields = sorted({k for r in all_rows for k in r['metadata']} | {'parent_id'})
-                            result = {'rows': query(rows, data.get('filters', []), data.get('keyword', ''), data.get('epic', ''), data.get('sort', 'priority'), data.get('descending', False)), 'all': all_rows, 'fields': fields, 'history': histories(tasks_dir)}
+                            result = {'rows': query(rows, data.get('filters', []), data.get('keyword', ''), data.get('epic', ''), data.get('sort', 'priority'), data.get('descending', False)), 'all': all_rows, 'fields': fields, 'history': histories(store)}
                         elif self.path == '/api/edit':
-                            edit_item(tasks_dir, str(data.get('id', '')), data.get('title'), data.get('body'), data.get('reason'))
+                            lifecycle.edit(store, str(data.get('id', '')), data.get('title'), data.get('body'), data.get('reason'))
                             result = {'ok': True}
                         elif self.path == '/api/discard':
-                            from taskman.commands.context import discard_item
-                            discard_item(tasks_dir, str(data.get('id', '')))
+                            lifecycle.discard(store, str(data.get('id', '')))
                             result = {'ok': True}
                         elif self.path == '/api/reorder':
                             item_id = data.get('id')
                             position = data.get('position')
                             if not isinstance(item_id, str):
                                 raise ValueError('Select a valid task ID')
-                            result = {'order': reorder_item(tasks_dir, item_id, position)}
+                            result = {'order': reorder_item(store, item_id, position)}
                         else:
                             ids = data.get('ids', [])
                             if not isinstance(ids, list) or not all(isinstance(id, str) for id in ids):
                                 raise ValueError('Select valid task IDs')
-                            result = consolidate(tasks_dir, ids, data.get('title', ''))
+                            result = consolidate(store, ids, data.get('title', ''))
                     self._json(200, result)
                     return
                 title, kind = data.get('title', ''), data.get('type', 'task')
@@ -381,10 +356,10 @@ def _make_handler(tasks_dir: Path):
                     raise ValueError('Invalid task type or description')
                 if parent is not None and (not isinstance(parent, str) or not parent.isdigit() or len(parent) != 9):
                     raise ValueError('Invalid parent ID')
-                with mutation_lock(tasks_dir):
-                    path = _make_item(tasks_dir, title.strip(), kind, parent, body or None)
-                self._json(201, {'id': parse_name(path.name).item_id, 'path': str(path)})
-            except (ValueError, NewCommandError, typer.BadParameter, OSError, TypeError, KeyError) as exc:
+                with store.lock():
+                    item = lifecycle.create(store, title.strip(), kind, parent, body or None)
+                self._json(201, {'id': item.id, 'path': item.location})
+            except (ValueError, StorageError, OSError, TypeError, KeyError) as exc:
                 self._json(400, {'error': str(exc)})
 
         def do_GET(self) -> None:  # noqa: N802
@@ -392,16 +367,16 @@ def _make_handler(tasks_dir: Path):
                 self.send_error(403)
                 return
             # Readers share the mutation lock so a rename cannot split a snapshot.
-            with mutation_lock(tasks_dir):
+            with store.lock():
                 self._get()
 
         def _get(self):
             if self.path == "/":
-                self._send_html(render_page(collect_page(tasks_dir)))
+                self._send_html(render_page(collect_page(store)))
             elif self.path.startswith('/api/history/'):
                 from taskman.model.collection import histories
                 key = self.path.rsplit('/', 1)[-1]
-                record = next((h for h in histories(tasks_dir) if h['key'] == key), None)
+                record = next((h for h in histories(store) if h['key'] == key), None)
                 if record is None:
                     self.send_error(404)
                     return
@@ -412,7 +387,7 @@ def _make_handler(tasks_dir: Path):
                 self.end_headers()
                 self.wfile.write(body)
             elif self.path == '/api/page':
-                page = collect_page(tasks_dir)
+                page = collect_page(store)
                 self._json(200, {'sections': render_sections(page), 'parents': [
                     {'id': i.item_id, 'title': i.title} for i in page.items
                     if i.item_type != 'task' and i.status != 'done']})
@@ -431,26 +406,20 @@ def _make_handler(tasks_dir: Path):
             self.wfile.write(body)
 
         def _send_show(self, item_id: str) -> None:
-            from taskman.model.layout import find_item_by_id
-
-            path = find_item_by_id(tasks_dir, item_id)
-            if path is None:
+            item = store.get(item_id)
+            if item is None:
                 self.send_error(404, f"item not found: {item_id}")
                 return
-            body_file = (
-                path / special_file_name(item_id) if path.is_dir() else path
-            )
-            try:
-                data, body = read_file(body_file)
-            except Exception as exc:  # noqa: BLE001
-                self.send_error(500, str(exc))
+            if item.error:
+                self.send_error(500, item.error)
                 return
             payload = json.dumps(
                 {
-                    "frontmatter": _to_plain(data),
-                    "body": body,
-                    "path": str(path),
-                }
+                    "frontmatter": item.metadata,
+                    "body": item.body,
+                    "path": item.location,
+                },
+                default=str,
             ).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -461,8 +430,8 @@ def _make_handler(tasks_dir: Path):
     return _Handler
 
 
-def _start_server(host: str, port: int, tasks_dir: Path, open_browser: bool = True) -> ThreadingHTTPServer:
-    server = ThreadingHTTPServer((host, port), _make_handler(tasks_dir))
+def _start_server(host: str, port: int, source: Store | Path, open_browser: bool = True) -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer((host, port), _make_handler(source))
     _pid_file().write_text(str(os.getpid()), encoding="utf-8")
     if open_browser:
         webbrowser.open(f"http://{host}:{port}/")
@@ -496,10 +465,8 @@ def ui(
             typer.echo("No running UI server.")
         return
 
-    tasks_dir = get_tasks_dir()
-    tasks_dir.mkdir(parents=True, exist_ok=True)
     typer.echo(f"Serving taskman UI at http://localhost:{port}/  (Ctrl+C to stop)")
-    server = _start_server("127.0.0.1", port, tasks_dir, open_browser=not no_browser)
+    server = _start_server("127.0.0.1", port, open_store(), open_browser=not no_browser)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

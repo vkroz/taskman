@@ -7,6 +7,8 @@ import os
 import tempfile
 from pathlib import Path
 
+from taskman.storage.store import Store, as_store
+
 
 _ORDER_FILE = ".taskman-order.json"
 _ROOT = "root"
@@ -31,7 +33,7 @@ def read_order(tasks_dir: Path) -> dict[str, list[str]]:
     return parents
 
 
-def _write(tasks_dir: Path, parents: dict[str, list[str]]) -> None:
+def write_order(tasks_dir: Path, parents: dict[str, list[str]]) -> None:
     tasks_dir.mkdir(parents=True, exist_ok=True)
     path = tasks_dir / _ORDER_FILE
     handle, temporary = tempfile.mkstemp(prefix=".taskman-order-", dir=tasks_dir)
@@ -65,11 +67,11 @@ def apply_order(rows: list[dict], parents: dict[str, list[str]]) -> list[dict]:
     return rows
 
 
-def ordered_siblings(tasks_dir: Path, item_id: str) -> list[dict]:
+def ordered_siblings(source: Store | Path, item_id: str) -> list[dict]:
     """Return ordinary siblings in their persisted order."""
     from taskman.model.collection import collection
 
-    rows = collection(tasks_dir)
+    rows = collection(source)
     by_id = {row["id"]: row for row in rows}
     if item_id not in by_id:
         raise ValueError(f"item not found: {item_id}")
@@ -80,9 +82,10 @@ def ordered_siblings(tasks_dir: Path, item_id: str) -> list[dict]:
     )
 
 
-def reorder_item(tasks_dir: Path, item_id: str, position: int) -> list[str]:
+def reorder_item(source: Store | Path, item_id: str, position: int) -> list[str]:
     """Move an item to a one-based sibling position and atomically persist it."""
-    siblings = ordered_siblings(tasks_dir, item_id)
+    store = as_store(source)
+    siblings = ordered_siblings(store, item_id)
     if not isinstance(position, int) or isinstance(position, bool):
         raise ValueError("Position must be an integer")
     if position < 1 or position > len(siblings):
@@ -94,7 +97,5 @@ def reorder_item(tasks_dir: Path, item_id: str, position: int) -> list[str]:
     moved = siblings.pop(current)
     siblings.insert(target, moved)
     order = [row["id"] for row in siblings]
-    parents = read_order(tasks_dir)
-    parents[moved["parent_id"] or _ROOT] = order
-    _write(tasks_dir, parents)
+    store.save_order(moved["parent_id"] or _ROOT, order)
     return order

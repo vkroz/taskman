@@ -5,7 +5,7 @@ import json
 
 import typer
 
-from taskman.storage import open_store
+from taskman.storage.store import open_store
 
 
 def show(

@@ -12,7 +12,7 @@ The CLI supports every operation available in the UI and installs the shared plu
 
 This repository ships the `taskman` marketplace for Codex and Claude Code and its `tm` software-development lifecycle plugin. Marketplace metadata lives in `.claude-plugin/marketplace.json`; plugin manifests, skills, agents, rules, and the legacy task script live under `plugins/tm/`. Product documentation is in `docs/`. The repository's own work items are stored in `tasks/`.
 
-`taskman/` is the Python 3.11+ replacement for `plugins/tm/scripts/taskman.sh`. Its `src/taskman/model/` modules handle names, layout, graphs, identifiers, and YAML; `src/taskman/commands/` implements Typer commands; `tests/` mirrors those behaviors with pytest.
+`taskman/` is the Python 3.11+ replacement for `plugins/tm/scripts/taskman.sh`. `src/taskman/commands/` implements Typer commands. Commands use the storage interface in `src/taskman/storage/store.py` and check lifecycle rules through `src/taskman/lifecycle.py`. Two commands are file-format tools and call the file backend directly: `worktree-status` and `migrate`. `src/taskman/storage/file.py` is the file backend. It uses the `src/taskman/model/` modules for names, layout, identifiers, and YAML. `tests/` mirrors those behaviors with pytest; `tests/test_storage_contract.py` holds the cases every backend must pass.
 
 ## Build, Test, and Development Commands
 

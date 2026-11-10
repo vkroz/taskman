@@ -135,7 +135,7 @@ def test_consolidation_preserves_bytes_references_and_hierarchy(tmp_path):
 def test_failed_publication_and_malformed_manifest_never_hide_work(
     tmp_path, monkeypatch
 ):
-    import taskman.model.collection as module
+    import taskman.storage.file as module
 
     tree = tmp_path / "tasks"
     id = new(tree, "Closed")
