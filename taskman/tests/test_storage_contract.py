@@ -21,9 +21,19 @@ from taskman.storage.settings import StorageSettings
 from taskman.storage.sql import connect
 from taskman.storage.sql_store import SqlStore, open_sql_store
 from taskman.storage.store import StorageConfigError, StorageError
+from tests.conftest import postgres_test_settings, reset_postgres
+
+
+def _empty_postgres(tmp_path) -> StorageSettings:
+    """Skipped without TASKMAN_TEST_DATABASE_URL; see conftest.py."""
+    settings = postgres_test_settings()
+    reset_postgres(settings)
+    return settings
+
 
 BACKENDS = {
     "sqlite": lambda tmp_path: StorageSettings("sqlite", sqlite_path=tmp_path / "taskman.db"),
+    "postgres": _empty_postgres,
 }
 
 
@@ -37,8 +47,14 @@ def _upgraded(settings: StorageSettings) -> StorageSettings:
 
 
 @pytest.fixture(params=sorted(BACKENDS))
-def settings(request, tmp_path) -> StorageSettings:
-    return _upgraded(BACKENDS[request.param](tmp_path))
+def empty_settings(request, tmp_path) -> StorageSettings:
+    """Settings for an empty database without a schema."""
+    return BACKENDS[request.param](tmp_path)
+
+
+@pytest.fixture
+def settings(empty_settings) -> StorageSettings:
+    return _upgraded(empty_settings)
 
 
 @pytest.fixture
@@ -70,11 +86,11 @@ def _fields(store, item_id) -> list[str]:
 # ---- items, keys and projects -------------------------------------------
 
 
-def test_create_starts_as_a_backlog_draft_with_a_key(store):
+def test_create_starts_as_a_backlog_draft_with_a_key(store, settings):
     item = lifecycle.create(store, "Write docs", "task", None, project="TM")
     assert (item.id, item.status, item.draft, item.type, item.title) == ("TM-1", "backlog", True, "task", "Write docs")
     assert item.body == "# Write docs\n"
-    assert item.location == "sqlite:TM-1"
+    assert item.location == f"{settings.backend}:TM-1"
     assert item.parent_id is None
     assert (item.metadata["project"], item.metadata["revision"], item.metadata["created_by"]) == ("TM", 0, "pytest")
 
@@ -309,11 +325,12 @@ def test_revision_counts_requirement_changes_only(store):
         lambda: lifecycle.record(store, item, "verification", "pytest", "ok", "pass"),
         lambda: lifecycle.assign(store, item, "codex"),
         lambda: lifecycle.label(store, item, ["backend"], []),
-        lambda: reorder_item(store, item, 1),
+        lambda: reorder_item(store, item, 3),
         lambda: lifecycle.finalize(store, item),
     ):
         change()
         assert revision() == before
+    assert "rank" in _fields(store, item)
 
 
 def test_closed_items_are_immutable(store):
@@ -377,6 +394,19 @@ def test_assignee_and_labels(store):
         lifecycle.label(store, item, ["db"], [])
     with pytest.raises(LifecycleError, match="label"):
         lifecycle.label(store, item, ["Bad Label"], [])
+    # Labels keep code-point order whatever the database collation is.
+    expected = ["a-c", "a_b", "ab", "backend", "db"]
+    assert lifecycle.label(store, item, ["ab", "a_b", "a-c"], []).metadata["labels"] == expected
+    assert store.get(item).metadata["labels"] == expected
+    with pytest.raises(NoChange):
+        lifecycle.label(store, item, ["a_b"], [])
+
+
+def test_dependency_order_is_not_a_dependency_change(store):
+    item, first, second = (_new(store, title) for title in ("Item", "First", "Second"))
+    assert lifecycle.set_dependencies(store, item, [second, first]).depends_on == (first, second)
+    lifecycle.set_dependencies(store, item, [second, first])
+    assert _fields(store, item).count("dependencies") == 1
 
 
 def test_each_field_change_writes_activity_and_comments_do_not(store):
@@ -489,21 +519,25 @@ def test_failed_operation_leaves_the_database_unchanged(store):
     assert _new(store, "After") == "TM-2"
 
 
-def test_store_refuses_a_database_without_the_current_schema(tmp_path):
-    settings = StorageSettings("sqlite", sqlite_path=tmp_path / "empty.db")
+def test_store_refuses_a_database_without_the_current_schema(empty_settings):
     with pytest.raises(StorageConfigError, match="taskman db upgrade"):
-        open_sql_store(settings, actor="pytest")
+        open_sql_store(empty_settings, actor="pytest")
 
 
-def _create_many(settings: StorageSettings, prefix: str, count: int) -> None:
+# Each worker connects first and then waits at the barrier, so the writes overlap.
+
+
+def _create_many(settings: StorageSettings, prefix: str, count: int, barrier) -> None:
     store = open_sql_store(settings, actor=prefix)
+    barrier.wait(30)
     for n in range(count):
         with store.lock():
             lifecycle.create(store, f"{prefix} {n}", "task", None, project="TM")
 
 
-def _comment_many(settings: StorageSettings, item_id: str, prefix: str, count: int) -> None:
+def _comment_many(settings: StorageSettings, item_id: str, prefix: str, count: int, barrier) -> None:
     store = open_sql_store(settings, actor=prefix)
+    barrier.wait(30)
     for n in range(count):
         with store.lock():
             lifecycle.record(store, item_id, "decision", prefix, f"{prefix} {n}")
@@ -519,7 +553,8 @@ def _run(workers) -> None:
 
 def test_concurrent_writers_get_distinct_keys(store, settings):
     context = multiprocessing.get_context("spawn")
-    _run([context.Process(target=_create_many, args=(settings, name, 15)) for name in ("left", "right")])
+    barrier = context.Barrier(2)
+    _run([context.Process(target=_create_many, args=(settings, name, 15, barrier)) for name in ("left", "right")])
     keys = [item.id for item in store.items()]
     assert sorted(keys, key=lambda key: int(key.split("-")[1])) == [f"TM-{n}" for n in range(1, 31)]
 
@@ -527,7 +562,8 @@ def test_concurrent_writers_get_distinct_keys(store, settings):
 def test_concurrent_comments_lose_no_updates(store, settings):
     item = _new(store, "Shared")
     context = multiprocessing.get_context("spawn")
-    _run([context.Process(target=_comment_many, args=(settings, item, name, 15)) for name in ("left", "right")])
+    barrier = context.Barrier(2)
+    _run([context.Process(target=_comment_many, args=(settings, item, name, 15, barrier)) for name in ("left", "right")])
     stored = store.get(item)
     journal = stored.metadata["journal"]
     assert len(journal) == 30

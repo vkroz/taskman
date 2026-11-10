@@ -10,8 +10,8 @@ from typing import Any
 from taskman.storage.settings import StorageSettings
 from taskman.storage.store import StorageConfigError
 
-# Transaction-scoped advisory lock key that serializes schema upgrades on Postgres.
-_UPGRADE_LOCK = 0x746D7367  # "tmsg"
+# Transaction-scoped advisory lock key: the database write lock on Postgres.
+_WRITE_LOCK = 0x746D7367  # "tmsg"
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,16 +52,19 @@ def connect(settings: StorageSettings) -> tuple[Any, Dialect]:
 
 
 @contextmanager
-def transaction(conn: Any, dialect: Dialect, *, upgrade_lock: bool = False) -> Iterator[None]:
+def transaction(conn: Any, dialect: Dialect) -> Iterator[None]:
     """Run the block in one transaction that holds the database write lock.
 
-    SQLite takes its write lock at ``BEGIN IMMEDIATE``. On Postgres,
-    ``upgrade_lock`` also takes an advisory lock that serializes upgrades.
+    SQLite takes its write lock at ``BEGIN IMMEDIATE``. Postgres takes an
+    advisory lock as the first statement of a READ COMMITTED transaction, so
+    each later statement sees the rows of writers that committed before it.
+    Both wait at most 30 seconds for the lock.
     """
-    conn.execute("BEGIN IMMEDIATE" if dialect is SQLITE else "BEGIN")
+    conn.execute("BEGIN IMMEDIATE" if dialect is SQLITE else "BEGIN ISOLATION LEVEL READ COMMITTED")
     try:
-        if upgrade_lock and dialect is POSTGRES:
-            conn.execute("SELECT pg_advisory_xact_lock(%s)", (_UPGRADE_LOCK,))
+        if dialect is POSTGRES:
+            conn.execute("SET LOCAL lock_timeout = '30s'")
+            conn.execute("SELECT pg_advisory_xact_lock(%s)", (_WRITE_LOCK,))
         yield
     except BaseException:
         conn.execute("ROLLBACK")
