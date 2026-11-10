@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 import uuid
 from pathlib import Path
 
-from taskman.model.names import special_file_name
 from taskman.model.ordering import apply_order
-from taskman.storage import Store, as_store
-from taskman.storage.file import history_dir
+from taskman.storage.store import Store, as_store
 
 
 def histories(source: Store | Path) -> list[dict]:
@@ -144,20 +140,6 @@ def query(
     return result
 
 
-def atomic_text(path: Path, text: str):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".pending-")
-    try:
-        with os.fdopen(fd, "w") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-
-
 def compact_text(text: str, limit: int = 420) -> str:
     """Bound each evidence excerpt; the immutable original carries full detail."""
     text = " ".join(text.split())
@@ -166,10 +148,11 @@ def compact_text(text: str, limit: int = 420) -> str:
     return text[:limit].rsplit(" ", 1)[0] + " … (full detail in original record)"
 
 
-def consolidate(tasks_dir: Path, ids: list[str], title: str) -> dict:
+def consolidate(source: Store | Path, ids: list[str], title: str) -> dict:
+    store = as_store(source)
     if not isinstance(title, str) or not title.strip() or len(title) > 200:
         raise ValueError("Enter a summary title of 1–200 characters")
-    rows = collection(tasks_dir, True)
+    rows = collection(store, True)
     by_id = {r["id"]: r for r in rows}
     if not ids:
         raise ValueError("Select completed work to consolidate")
@@ -189,7 +172,6 @@ def consolidate(tasks_dir: Path, ids: list[str], title: str) -> dict:
             "Selection includes already consolidated work; select unconsolidated items"
         )
     key = uuid.uuid4().hex
-    directory = history_dir(tasks_dir)
     lines = [
         "# " + title.strip(),
         "",
@@ -227,19 +209,7 @@ def consolidate(tasks_dir: Path, ids: list[str], title: str) -> dict:
                 f"Original record contains {len(decisions)} decisions and {len(evidence)} verification entries; excerpts above show the latest.",
                 "",
             ]
-        original = Path(row["path"])
-        if original.is_dir():
-            original = original / special_file_name(row["id"])
-        relative = os.path.relpath(original, directory)
-        lines += [f"[Full requirements, decisions and evidence]({relative})", ""]
-    summary = "\n".join(lines)
-    result = {
-        "key": key,
-        "title": title.strip(),
-        "ids": sorted(selected),
-        "summary": summary,
-        "path": str(Path("docs") / "taskman-history" / f"{key}.md"),
-    }
-    atomic_text(directory / f"{key}.md", summary)
-    atomic_text(directory / f"{key}.json", json.dumps(result, indent=2))
-    return result
+        lines += [f"[Full requirements, decisions and evidence]({store.history_link(row['id'])})", ""]
+    return store.save_history(
+        {"key": key, "title": title.strip(), "ids": sorted(selected), "summary": "\n".join(lines)}
+    )

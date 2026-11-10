@@ -22,7 +22,7 @@ def mutation_lock(tasks_dir: Path):
 def mutating(command):
     @wraps(command)
     def wrapped(*args, **kwargs):
-        from taskman.commands.new import get_tasks_dir
-        with mutation_lock(get_tasks_dir()):
+        from taskman.storage.store import open_store
+        with open_store().lock():
             return command(*args, **kwargs)
     return wrapped

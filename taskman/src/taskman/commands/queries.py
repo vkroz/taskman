@@ -11,7 +11,8 @@ from pathlib import Path
 
 import typer
 
-from taskman.storage import Item, Store, as_store, open_store
+from taskman.lifecycle import is_ready
+from taskman.storage.store import Item, Store, as_store, open_store
 
 
 def _load_graph(source: Store | Path) -> dict[str, Item]:
@@ -46,19 +47,6 @@ def _emit(results: list[Item], as_json: bool) -> None:
             f"  {i.priority} {i.type:5} {i.id} {i.status:7} "
             f"{i.slug:30} {i.title}"
         )
-
-
-def is_ready(item: Item, items: dict[str, Item]) -> bool:
-    if item.status == "done":
-        return False
-    current = item
-    while current:
-        if current.draft or current.status == "done":
-            return False
-        if any(d not in items or items[d].status != "done" for d in current.depends_on):
-            return False
-        current = items.get(current.parent_id)
-    return True
 
 
 def ready(

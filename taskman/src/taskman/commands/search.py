@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 import typer
 
-from taskman.storage import open_store
+from taskman.storage.store import open_store
 
 
 @dataclass(frozen=True, slots=True)
