@@ -14,6 +14,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
+    "pytest-playwright>=0.7",
 ]
 postgres = [
     "psycopg[binary]>=3.2",
@@ -33,3 +34,4 @@ packages = ["src/taskman"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = ["ui: browser tests of the workspace page (skipped when no browser is installed)"]
