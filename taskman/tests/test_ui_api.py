@@ -150,6 +150,22 @@ def test_query_project_scope_facets_sort_and_filters(seeded):
     assert seeded.ids(project="TM", view="done", sort="updated", descending=True) == ["TM-2", "TM-5", "TM-4", "TM-3"]
 
 
+def test_responses_are_compact_json(seeded):
+    _, _, text = seeded.raw("/api/query", {"view": "backlog"})
+    assert '", "' not in text and '": ' not in text
+    assert json.loads(text)["counts"]["backlog"] == 15
+
+
+def test_show_etag_reports_unchanged_until_the_item_changes(seeded):
+    first = seeded("/api/show/RES-5")
+    assert seeded(f"/api/show/RES-5?etag={first['etag']}") == {"etag": first["etag"], "unchanged": True}
+    assert "frontmatter" in seeded(f"/api/show/RES-7?etag={first['etag']}")
+    seeded("/api/comment", {"id": "RES-5", "kind": "progress", "text": "Moved on"})
+    changed = seeded(f"/api/show/RES-5?etag={first['etag']}")
+    assert changed["etag"] != first["etag"] and "frontmatter" in changed
+    assert seeded("/api/show/RES-99?etag=x", status=404) == {"error": "item not found: RES-99"}
+
+
 def test_query_etag_reports_unchanged_until_data_changes(seeded):
     first = seeded.query(view="ready")
     assert seeded.query(view="ready", etag=first["etag"]) == {"etag": first["etag"], "unchanged": True}
@@ -230,7 +246,7 @@ def test_get_errors_are_json_and_item_paths_serve_the_page(seeded, monkeypatch):
     with pytest.raises(HTTPError) as error:
         urllib.request.urlopen(request)
     assert (error.value.code, json.load(error.value)["error"]) == (403, "Only local Taskman UI requests are accepted.")
-    monkeypatch.setattr(ui, "show", lambda store, item_id: 1 / 0)
+    monkeypatch.setattr(ui, "show", lambda store, item_id, etag: 1 / 0)
     assert "division by zero" in seeded("/api/show/TM-7", status=500)["error"]
 
 
@@ -411,6 +427,7 @@ def test_close_gate_details_name_the_failing_items(store):
     assert gates("Waiting")["dependencies"] == {"check": "dependencies", "ok": False,
                                                 "detail": f"Waiting on {keys[1]}", "refs": [keys[1]]}
     assert gates("Child of draft")["finalized"]["detail"] == f"Draft ancestor: {by_title['Draft parent'].id}"
+    assert gates("Draft")["finalized"]["detail"] == "Not finalized (draft)"
     stale = gates("Stale")["verification"]
     assert (stale["status"], stale["detail"]) == ("stale", "Verification for rev 1: stale at rev 0")
     assert gates("Open child")["children"]["refs"] == [by_title["Child of open"].id]

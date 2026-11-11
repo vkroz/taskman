@@ -214,11 +214,19 @@ def detail_key(page):
 def test_density_and_chrome(rw, desktop):
     for n in range(25):
         rw.api("/api/items", {"title": f"Density filler {n}", "type": "task", "project": "DIV"})
+    empty = rw.api("/api/items", {"title": "Empty epic", "type": "epic", "project": "DIV"})["id"]
+    # One project: no group headers, so the first row sits right under the 28px list header.
     visit(desktop, rw, "/?view=drafts&project=DIV")
     boxes = desktop.eval_on_selector_all("#rows .row", "rows => rows.map(r => r.getBoundingClientRect().toJSON())")
     assert boxes[0]["top"] <= 130
     assert sum(box["bottom"] < 900 for box in boxes) >= 20
     assert all(box["height"] <= 37 for box in boxes)
+    expect(row(desktop, empty).locator(".progress")).to_have_text("")
+    # All projects: the first project's group header takes that place, and rows keep their height.
+    visit(desktop, rw, "/?view=backlog")
+    assert desktop.eval_on_selector(".group-header", "g => g.getBoundingClientRect().top") <= 130
+    heights = desktop.eval_on_selector_all("#rows .row", "rows => rows.map(r => r.offsetHeight)")
+    assert max(heights) <= 37
     text = desktop.inner_text("body")
     assert "Apply filters" not in text and "Plan, follow through" not in text
     assert desktop.locator("#apply-filters").count() == 0
@@ -235,6 +243,9 @@ def test_density_and_chrome(rw, desktop):
     expect(detail_key(desktop)).to_have_text("TM-8")
     heights = desktop.eval_on_selector_all("#rows .row", "rows => rows.map(r => r.offsetHeight)")
     assert max(heights) <= 37
+    # Only owner avatars stay at this width; the header keeps a labelled icon.
+    expect(desktop.locator(".columns .h-owner .h-owner-icon")).to_be_visible()
+    expect(desktop.locator(".columns .h-owner")).to_have_attribute("title", "Owner")
 
 
 # ---- 2. row content (P0-5) ----
@@ -264,6 +275,15 @@ def test_rows_show_keys_and_signals(ro, desktop):
     tm8 = row(desktop, "TM-8")
     assert "Blocked · TM-7" in tm8.locator("[data-state]").text_content()
     assert "Codex" in tm8.text_content()
+    # Two blockers fit the State column at full width; the title wins space over the breadcrumb.
+    assert row(desktop, "TM-10").locator(".state").evaluate("s => s.scrollWidth <= s.clientWidth")
+    tm9 = row(desktop, "TM-9").locator(".title")
+    assert tm9.evaluate("t => t.scrollWidth <= t.clientWidth")
+    # Agents get a glyph, not the interaction colour.
+    avatar = tm8.locator(".avatar[data-agent]")
+    assert avatar.evaluate("a => getComputedStyle(a).backgroundColor") != desktop.evaluate(
+        """() => { const p = document.createElement('span'); p.style.background = 'var(--accent-soft)';
+        document.body.append(p); const c = getComputedStyle(p).backgroundColor; p.remove(); return c; }""")
 
     visit(desktop, ro, "/?view=drafts")
     chip = row(desktop, "TM-12").locator(".chip-draft")
@@ -296,10 +316,12 @@ def test_views_and_counts(ro, desktop):
     visit(desktop, ro, "/?view=drafts")
     assert set(row_ids(desktop, context=False)) == {"TM-12", "TM-13", "RES-6", "RES-8", "RES-10", "RES-12"}
 
+    expect(desktop.locator("#sort option[value=manual]")).to_have_text("Manual")
     visit(desktop, ro, "/?view=done")
     rows = [r for r in ro.api("/api/query", {"view": "done"})["rows"] if not r["context"]]
     newest_first = [r["id"] for r in sorted(rows, key=lambda r: r["changed_at"], reverse=True)]
     assert row_ids(desktop) == newest_first
+    expect(desktop.locator("#sort option[value=manual]")).to_have_text("Newest first")
 
 
 # ---- 4. projects (P0-6) ----
@@ -440,6 +462,11 @@ def test_detail_panel(ro, desktop):
     assert entries.count() > 2
     assert desktop.locator("#preview .timeline .entry time[datetime]").count() == entries.count()
 
+    visit(desktop, ro, "/?item=TM-12")
+    finalized = desktop.locator('#preview .gate[data-check="finalized"]')
+    expect(finalized).to_have_text("Not finalized (draft)")
+    assert finalized.locator("[data-ref]").count() == 0
+
     visit(desktop, ro, "/?item=TM-3")
     expect(desktop.locator("#preview .locked")).to_have_text("Closed with evidence")
     assert desktop.locator("#edit-item").count() == 0
@@ -472,6 +499,9 @@ def test_polling_keeps_focus_selection_and_nodes(ro, desktop):
     assert desktop.evaluate("getSelection().toString().length") == selected
     assert desktop.evaluate("window.__row.isConnected")
     assert desktop.evaluate("window.__mutations") == 0
+    # Detail polls send the rendered etag, so an unchanged item costs no payload.
+    shows = [url for url in seen[start:] if "/api/show/" in url]
+    assert shows and all("etag=" in url for url in shows)
 
     desktop.evaluate("""() => {
         Object.defineProperty(document, 'hidden', {configurable: true, get: () => true});
@@ -622,7 +652,9 @@ def test_keyboard(ro, desktop):
     expect(desktop.locator("dialog[open]")).to_have_count(0)
     row(desktop, "TM-6").focus()
     desktop.keyboard.press("?")
-    expect(desktop.get_by_role("dialog", name="Keyboard shortcuts")).to_be_visible()
+    sheet = desktop.get_by_role("dialog", name="Keyboard shortcuts")
+    expect(sheet).to_be_visible()
+    expect(sheet.get_by_role("button", name="Cancel")).to_be_hidden()
     desktop.keyboard.press("Escape")
 
     # Every dialog the detail panel opens has an accessible name.
@@ -697,6 +729,42 @@ def test_errors_and_recovery(rw, desktop):
     desktop.request.post(rw.base + "/api/discard", headers=HEADERS, data=json.dumps({"id": "TM-13"}))
     expect(desktop.locator("#preview [role=alert]")).to_have_text("TM-13 was deleted or discarded", timeout=7000)
     expect(desktop.locator("#edit-item")).to_be_disabled()
+    # Only the title and the disabled actions stay; gates and timeline no longer describe anything.
+    expect(desktop.locator("#detail-title")).to_be_visible()
+    for stale in (".readiness", 'section[aria-label="Timeline"]', 'section[aria-label="Description"]'):
+        assert desktop.locator(f"#preview {stale}").count() == 0, stale
+
+    # Deleting a draft from its menu moves focus to the next row.
+    visit(desktop, rw, "/?view=drafts&item=RES-10")
+    expect(detail_key(desktop)).to_have_text("RES-10")
+    ids = row_ids(desktop)
+    neighbour = ids[ids.index("RES-10") + 1]
+    open_menu_item(desktop, "Delete draft")
+    desktop.locator("dialog[open] button[type=submit]").click()
+    expect(row(desktop, "RES-10")).to_have_count(0)
+    expect(row(desktop, neighbour)).to_be_focused()
+
+
+def test_offline_indicator_keeps_its_place(ro, desktop):
+    desktop.clock.install()
+    visit(desktop, ro, "/?view=active")
+    nav = desktop.eval_on_selector(".sidebar nav", "n => n.getBoundingClientRect().top")
+    desktop.route("**/api/**", lambda route: route.abort())
+    for _ in range(12):
+        desktop.clock.run_for(10000)
+        desktop.wait_for_timeout(50)
+    conn = desktop.locator(".brand [data-conn]")
+    expect(conn).to_have_attribute("data-status", "offline")
+    expect(conn).to_have_attribute("title", re.compile(r"^Taskman server is not reachable\. Offline since .* showing last data$"))
+    assert conn.evaluate("c => c.getBoundingClientRect().height") <= 20
+    assert desktop.eval_on_selector(".sidebar nav", "n => n.getBoundingClientRect().top") == nav
+    # The banner names the cause once; Retry lives in the indicator.
+    expect(desktop.locator("#message")).to_have_text("Taskman server is not reachable")
+    assert desktop.locator("#message button").count() == 0
+    desktop.unroute("**/api/**")
+    conn.get_by_role("button", name="Retry").click()
+    expect(conn).to_have_attribute("data-status", "live")
+    expect(desktop.locator("#message")).to_be_hidden()
 
 
 # ---- 13. mobile (P0-10) ----
@@ -706,6 +774,8 @@ def test_mobile_layout(ro, mobile):
     visit(mobile, ro, "/?view=backlog")
     first = mobile.eval_on_selector("#rows .row", "r => r.getBoundingClientRect().top")
     assert first <= 200
+    assert set(mobile.eval_on_selector_all("#rows .row", "rs => rs.map(r => r.offsetHeight)")) == {52}
+    assert mobile.eval_on_selector("#new-m", "b => innerWidth - b.getBoundingClientRect().right") <= 16
     assert mobile.evaluate("document.documentElement.scrollWidth") == 390
     expect(mobile.locator(".topbar [data-conn]")).to_be_visible()
     assert mobile.eval_on_selector_all("[data-drag]", "hs => hs.filter(h => h.offsetParent && getComputedStyle(h).visibility !== 'hidden').length") == 0
