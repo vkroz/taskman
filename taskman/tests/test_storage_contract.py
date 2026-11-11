@@ -20,7 +20,8 @@ from taskman.storage.settings import StorageSettings
 from taskman.storage.sql import connect, transaction
 from taskman.storage.sql_store import SqlStore, open_sql_store
 from taskman.storage.store import StorageConfigError, StorageError
-from tests.conftest import postgres_test_settings, reset_postgres
+from taskman.storage.remote import RemoteStore
+from tests.conftest import RunningServer, postgres_test_settings, reset_postgres
 
 
 def _empty_postgres(tmp_path) -> StorageSettings:
@@ -33,6 +34,8 @@ def _empty_postgres(tmp_path) -> StorageSettings:
 BACKENDS = {
     "sqlite": lambda tmp_path: StorageSettings("sqlite", sqlite_path=tmp_path / "taskman.db"),
     "postgres": _empty_postgres,
+    # The CLI's remote store, in front of a server that keeps its items in SQLite.
+    "remote": lambda tmp_path: StorageSettings("sqlite", sqlite_path=tmp_path / "taskman.db"),
 }
 
 
@@ -46,9 +49,21 @@ def _upgraded(settings: StorageSettings) -> StorageSettings:
 
 
 @pytest.fixture(params=sorted(BACKENDS))
-def empty_settings(request, tmp_path) -> StorageSettings:
+def backend(request) -> str:
+    return request.param
+
+
+@pytest.fixture
+def sql_only(backend) -> None:
+    """For a case that reads the database directly: a remote store has no database of its own."""
+    if backend == "remote":
+        pytest.skip("this case checks the database directly")
+
+
+@pytest.fixture
+def empty_settings(backend, tmp_path) -> StorageSettings:
     """Settings for an empty database without a schema."""
-    return BACKENDS[request.param](tmp_path)
+    return BACKENDS[backend](tmp_path)
 
 
 @pytest.fixture
@@ -57,7 +72,12 @@ def settings(empty_settings) -> StorageSettings:
 
 
 @pytest.fixture
-def store(settings) -> SqlStore:
+def store(settings, backend):
+    if backend == "remote":
+        running = RunningServer(settings, person="pytest")
+        yield RemoteStore(running.url, running.token)
+        running.stop()
+        return
     store = open_sql_store(settings, actor="pytest")
     yield store
     store.conn.close()
@@ -85,11 +105,11 @@ def _fields(store, item_id) -> list[str]:
 # ---- items, keys and projects -------------------------------------------
 
 
-def test_create_starts_as_a_backlog_draft_with_a_key(store, settings):
+def test_create_starts_as_a_backlog_draft_with_a_key(store, settings, backend):
     item = lifecycle.create(store, "Write docs", "task", None, project="TM")
     assert (item.id, item.status, item.draft, item.type, item.title) == ("TM-1", "backlog", True, "task", "Write docs")
     assert item.body == "# Write docs\n"
-    assert item.location == f"{settings.backend}:TM-1"
+    assert item.location == ("server:TM-1" if backend == "remote" else f"{settings.backend}:TM-1")
     assert item.parent_id is None
     assert (item.metadata["project"], item.metadata["revision"], item.metadata["created_by"]) == ("TM", 0, "pytest")
 
@@ -141,7 +161,7 @@ def test_items_include_every_item_with_parent_links(store):
     assert {item.id: item.parent_id for item in store.items()} == {epic: None, feat: epic, task: feat, other: None}
 
 
-def test_metadata_keeps_the_journal_shape(store):
+def test_metadata_keeps_the_journal_shape(store, backend):
     dep = _new(store, "Dep")
     task = _new(store, "Task")
     lifecycle.set_dependencies(store, task, [dep])
@@ -153,7 +173,8 @@ def test_metadata_keeps_the_journal_shape(store):
     assert item.depends_on == (dep,)
     journal = item.metadata["journal"]
     assert [(e["kind"], e["actor"], e["text"], e["revision"]) for e in journal] == [
-        ("decision", "Codex", "Chose X.", 3),
+        # A server records the person of the token beside the agent name.
+        ("decision", "Codex for pytest" if backend == "remote" else "Codex", "Chose X.", 3),
         ("verification", "pytest", "ran checks", 3),
     ]
     assert "result" not in journal[0] and journal[1]["result"] == "fail"
@@ -364,7 +385,7 @@ def test_edit_comments_the_reason(store):
         lifecycle.edit(store, item, "Renamed", "New body", " ")
 
 
-def test_comments_cannot_change_or_be_removed(store):
+def test_comments_cannot_change_or_be_removed(store, sql_only):
     item = store.get(_new(store, "Item"))
     lifecycle.record(store, item.id, "decision", "pytest", "first")
     stored = store.get(item.id)
@@ -456,7 +477,7 @@ def test_last_change_time_follows_every_change(store):
 # ---- discard and order ---------------------------------------------------
 
 
-def test_discard_only_unreferenced_draft_leaves_and_keys_are_not_reused(store):
+def test_discard_only_unreferenced_draft_leaves_and_keys_are_not_reused(store, sql_only):
     feat = _new(store, "Feature", "feat")
     child = _new(store, "Child", "task", feat)
     other = _new(store, "Other")
@@ -476,7 +497,7 @@ def test_discard_only_unreferenced_draft_leaves_and_keys_are_not_reused(store):
     assert _new(store, "Next") == "TM-4"
 
 
-def test_reorder_moves_only_the_open_item(store):
+def test_reorder_moves_only_the_open_item(store, sql_only):
     ids = [_new(store, f"Item {n}") for n in range(4)]
     _closed(store, ids[1])
     ranks = {r[0]: r[1] for r in store.conn.execute("SELECT number, rank FROM items").fetchall()}
@@ -498,7 +519,7 @@ def test_new_items_rank_after_their_siblings(store):
 # ---- transactions, schema and concurrency ---------------------------------
 
 
-def test_failed_operation_leaves_the_database_unchanged(store):
+def test_failed_operation_leaves_the_database_unchanged(store, sql_only):
     feat = _new(store, "Feature", "feat")
     before = (store.items(), store.activity(feat))
     with pytest.raises(RuntimeError):
@@ -510,7 +531,7 @@ def test_failed_operation_leaves_the_database_unchanged(store):
     assert _new(store, "After") == "TM-2"
 
 
-def test_store_refuses_a_database_without_the_current_schema(empty_settings):
+def test_store_refuses_a_database_without_the_current_schema(empty_settings, sql_only):
     with pytest.raises(StorageConfigError, match="taskman db upgrade"):
         open_sql_store(empty_settings, actor="pytest")
     conn, dialect = connect(empty_settings)
@@ -524,7 +545,7 @@ def test_store_refuses_a_database_without_the_current_schema(empty_settings):
     assert tables == []  # opening a store only reads
 
 
-def test_opening_a_store_does_not_wait_for_a_writer(settings):
+def test_opening_a_store_does_not_wait_for_a_writer(settings, sql_only):
     conn, dialect = connect(settings)
     try:
         with transaction(conn, dialect):
@@ -567,7 +588,7 @@ def _run(workers) -> None:
         assert worker.exitcode == 0
 
 
-def test_concurrent_writers_get_distinct_keys(store, settings):
+def test_concurrent_writers_get_distinct_keys(store, settings, sql_only):
     context = multiprocessing.get_context("spawn")
     barrier = context.Barrier(2)
     _run([context.Process(target=_create_many, args=(settings, name, 15, barrier)) for name in ("left", "right")])
@@ -575,7 +596,7 @@ def test_concurrent_writers_get_distinct_keys(store, settings):
     assert sorted(keys, key=lambda key: int(key.split("-")[1])) == [f"TM-{n}" for n in range(1, 31)]
 
 
-def test_concurrent_comments_lose_no_updates(store, settings):
+def test_concurrent_comments_lose_no_updates(store, settings, sql_only):
     item = _new(store, "Shared")
     context = multiprocessing.get_context("spawn")
     barrier = context.Barrier(2)

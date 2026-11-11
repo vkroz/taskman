@@ -18,6 +18,8 @@ from pathlib import Path
 from taskman.storage.store import StorageConfigError
 
 ENV_FILE = ".env"
+# Read from the user's environment only, never from a repository ``.env``.
+_USER_ONLY = ("TASKMAN_SERVER_URL", "TASKMAN_TOKEN")
 BACKENDS = ("sqlite", "postgres")
 _SQL_SETTINGS = "Set TASKMAN_BACKEND=sqlite (the default) or postgres; see `taskman help`."
 _SOCKET_SETTINGS = ("TASKMAN_DB_SOCKET", "TASKMAN_DB_NAME", "TASKMAN_DB_USER")
@@ -103,6 +105,12 @@ def load_env_file(start: Path | None = None, environ: MutableMapping[str, str] =
         print(f"Taskman ignores {path}: git tracks it. Keep .env out of git.", file=sys.stderr)
         return None
     for key, value in parse_env_file(path.read_text(encoding="utf-8")).items():
+        if key in _USER_ONLY:
+            # A repository file must not send the user's token to a host that the repository names.
+            import sys
+
+            print(f"Taskman ignores {key} in {path}. Set it in your environment.", file=sys.stderr)
+            continue
         environ.setdefault(key, value)
     return path
 

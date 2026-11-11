@@ -72,3 +72,43 @@ def sql_settings(request, tmp_path) -> StorageSettings:
     settings = postgres_test_settings()
     reset_postgres(settings)
     return settings
+
+
+class RunningServer:
+    """A Taskman server on a free local port, for tests. ``token`` belongs to ``person``."""
+
+    def __init__(self, settings: StorageSettings, person: str = "Vlad") -> None:
+        import threading
+
+        from taskman.server import make_server
+        from taskman.storage.accounts import create_token
+        from taskman.storage.sql_store import open_sql_store
+
+        self.store = open_sql_store(settings, actor="server")
+        self.token_id, self.token = create_token(self.store, person)
+        self._server = make_server("127.0.0.1", 0, self.store, log=False)
+        self.url = f"http://127.0.0.1:{self._server.server_port}"
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(timeout=5)
+        self.store.close()
+
+
+@pytest.fixture
+def server(sqlite_env):
+    """A running server over the SQLite database of ``sqlite_env``."""
+    running = RunningServer(sqlite_env)
+    yield running
+    running.stop()
+
+
+@pytest.fixture
+def remote_env(server, monkeypatch):
+    """The CLI reaches work items through ``server``, with the token of the person Vlad."""
+    monkeypatch.setenv("TASKMAN_SERVER_URL", server.url)
+    monkeypatch.setenv("TASKMAN_TOKEN", server.token)
+    return server

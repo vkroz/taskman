@@ -205,7 +205,7 @@ def _command_names() -> list[str]:
     from typer.main import get_command
 
     group = get_command(app)
-    return sorted(name for name in group.commands if name not in ("help", "version", "install", "db"))
+    return sorted(name for name in group.commands if name not in ("help", "version", "install", "db", "token"))
 
 
 @pytest.mark.parametrize(
@@ -217,7 +217,7 @@ def test_every_command_refuses_the_file_backend_settings(tmp_path, monkeypatch, 
     monkeypatch.setenv(variable, value)
     names = _command_names()
     assert {"list", "new", "close", "ui", "comment"} <= set(names)
-    for args in [[name] for name in names] + [["db", "upgrade"]]:
+    for args in [[name] for name in names] + [["db", "upgrade"], ["token", "list"]]:
         result = runner.invoke(app, args)
         assert result.exit_code == 2, (args, result.output)
         assert expected in result.output and "TASKMAN_BACKEND=sqlite" in result.output, (args, result.output)

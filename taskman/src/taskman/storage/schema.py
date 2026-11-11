@@ -108,6 +108,31 @@ MIGRATIONS: tuple[Migration, ...] = (
             "CREATE INDEX activity_item ON activity (item_id)",
         ),
     ),
+    Migration(
+        2,
+        "persons and access tokens",
+        (
+            """
+            CREATE TABLE persons (
+                id {pk},
+                name TEXT NOT NULL UNIQUE CHECK (length(name) BETWEEN 1 AND 60),
+                created_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE tokens (
+                id {pk},
+                person_id {bigint} NOT NULL REFERENCES persons (id) ON DELETE CASCADE,
+                token_hash TEXT NOT NULL UNIQUE,
+                label TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                expires_at TEXT,
+                last_used_at TEXT,
+                revoked_at TEXT
+            )
+            """,
+        ),
+    ),
 )
 
 CURRENT_VERSION = MIGRATIONS[-1].version

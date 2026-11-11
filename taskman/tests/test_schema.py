@@ -12,7 +12,8 @@ from taskman.storage.sql import connect, transaction
 from taskman.storage.store import StorageConfigError
 
 runner = CliRunner()
-TABLES = {"projects", "items", "labels", "dependencies", "comments", "activity", "schema_versions"}
+TABLES = {"projects", "items", "labels", "dependencies", "comments", "activity", "persons", "tokens",
+          "schema_versions"}
 
 
 def _tables(conn, dialect) -> set[str]:
@@ -45,7 +46,7 @@ def db(sql_settings):
 
 def test_upgrade_creates_the_current_schema_in_an_empty_database(db):
     conn, dialect = db
-    assert upgrade(conn, dialect) == [CURRENT_VERSION]
+    assert upgrade(conn, dialect) == [migration.version for migration in MIGRATIONS]
     assert _tables(conn, dialect) == TABLES
     with transaction(conn, dialect):
         assert database_version(conn, dialect) == CURRENT_VERSION
@@ -145,7 +146,7 @@ def test_concurrent_upgrades_apply_each_version_once(sql_settings):
         worker.join(60)
         assert worker.exitcode == 0
     applied = sorted((results.get(timeout=5) for _ in workers), key=len)
-    assert applied == [[], [], [CURRENT_VERSION]]
+    assert applied == [[], [], [migration.version for migration in MIGRATIONS]]
     conn, _ = connect(sql_settings)
     try:
         assert conn.execute("SELECT COUNT(*) FROM schema_versions").fetchone()[0] == len(MIGRATIONS)
@@ -159,7 +160,8 @@ def test_db_upgrade_command(tmp_path, monkeypatch):
     monkeypatch.setenv("TASKMAN_DATABASE_URL", f"sqlite://{tmp_path / 'cli.db'}")
     first = runner.invoke(app, ["db", "upgrade"])
     assert first.exit_code == 0, first.output
-    assert f"Applied schema versions: {CURRENT_VERSION}." in first.output
+    versions = ", ".join(str(migration.version) for migration in MIGRATIONS)
+    assert f"Applied schema versions: {versions}." in first.output
     second = runner.invoke(app, ["db", "upgrade"])
     assert second.exit_code == 0
     assert "The database schema is current." in second.output

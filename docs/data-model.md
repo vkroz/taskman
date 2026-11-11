@@ -73,6 +73,17 @@ Taskman writes one activity entry for each change to a work item.
 
 A comment does not make an activity entry. The comment itself is the record.
 
+### Person and token
+
+A Taskman server keeps these two entities. A CLI that opens a database directly does not use them.
+
+| Entity | Fields |
+| --- | --- |
+| Person | A name of 1 to 60 characters, unique, and the time of creation. |
+| Token | The person, a SHA-256 fingerprint of the token, a label, and the times of creation, expiry, last use and revocation. The token text is not stored. |
+
+On a server, the author of a change is the person of the token. When the caller gives `--actor NAME`, the author is `NAME for <person>`.
+
 ## Lifecycle rules
 
 Each rule of epic requirement R1 applies to the SQL model as follows.
@@ -141,7 +152,7 @@ The location of an item is `<backend>:<key>`, for example `sqlite:TM-42`. Comman
 ## Out of scope
 
 - Custom workflow states, sprints, estimates and due dates.
-- User accounts and permissions. The author is a name, not an account.
+- Permissions. Each person with a valid token reads and changes every project.
 - Attachments.
 - Changing or deleting comments.
 - Import from `tasks/` files. SQL storage starts empty (decision D4, confirmed on Nov 9, 2026).
