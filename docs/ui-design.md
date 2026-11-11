@@ -61,7 +61,7 @@ Colours are tokens for a light and a dark theme. The theme follows the system. T
 
 ## Checks
 
-`tests/ui/test_workspace_ui.py` drives Chromium through Playwright against a seeded `taskman ui` server at 1440x900 and 390x844. It checks density, row content, views and counts, projects, URL state, the detail panel, polling safety, data integrity, filters, the keyboard, create and comment, errors, the mobile layout, contrast in both themes and escaping. The tests are marked `ui`: `uv run pytest -m ui` runs only them. They skip when no browser is installed. `tests/test_command_ui.py` checks without a browser that styles use only the tokens and the type, weight and radius scales.
+`tests/ui/test_workspace_ui.py` drives Chromium through Playwright against a seeded `taskman ui` server at 1440x900 and 390x844. It checks density, row content, views and counts, projects, URL state, the detail panel, polling safety, data integrity, filters, the keyboard, create and comment, errors, the mobile layout, contrast in both themes and escaping. Each test that changes data gets its own server on a copy of the seed. `tests/ui/test_workspace_css.py` checks without a browser that styles use only the tokens and the type, weight and radius scales. All these tests are marked `ui`: `uv run pytest -m ui` runs only them. The browser tests need the `ui` extra (`uv sync --extra ui`). They skip when Playwright is not installed or Chromium cannot start.
 
 ## Query service
 
