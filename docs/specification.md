@@ -18,7 +18,7 @@ The CLI rejects closure without a current summary and passing verification, or w
 
 Codex and Claude Code share the same work items and can take different roles within one lifecycle. A fresh agent reads the target, ancestors, descendants, dependencies, comments and activity through `taskman context`. Agent handoffs must not depend on private conversation history.
 
-The CLI supports every operation available through the UI. The UI creates and edits open work, discards unreferenced draft leaves, adds comments, sets assignees and labels, and displays hierarchy, dependencies, status, comments and activity, refreshing as agents work. Metadata filters and sibling sorting preserve hierarchy context. Execution is controlled through coding tools. Deployment is outside local completion.
+The CLI supports every operation available through the UI. The UI creates and edits open work, discards unreferenced draft leaves, adds comments, sets assignees and labels, and displays hierarchy, dependencies, derived state, close readiness, verification evidence, comments and activity across projects, refreshing as agents work. Its views show the work that needs attention, is active, ready, blocked, drafted, in the backlog or done. Metadata filters and sibling sorting preserve hierarchy context. Execution is controlled through coding tools. Deployment is outside local completion.
 
 One CLI installs the shared plugin through platform adapters. Codex and Claude Code are the initial supported hosts. Adding another host should change installation integration, not task storage or lifecycle semantics.
 

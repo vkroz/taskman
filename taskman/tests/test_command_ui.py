@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 import urllib.request
@@ -38,20 +39,31 @@ def _new(title: str, item_type: str = "task") -> str:
 
 def test_render_page_contains_required_sections(store) -> None:
     html = render_page()
-    assert 'id="tree"' in html
+    assert 'id="tree" role="treegrid"' in html
     assert 'aria-label="Work views"' in html
-    assert 'id="filters"' in html
-    assert 'id="filter-form"' in html
-    assert 'id="apply-filters"' in html
-    assert 'id="hide-done"' in html
-    assert 'aria-pressed="false"' in html
-    assert 'type="button" aria-label="Remove filter' in html
-    assert 'id="direction"' not in html
-    assert 'id="editor"' in html
+    assert 'id="search"' in html
+    assert 'id="toolbar"' in html
     assert 'id="preview"' in html
-    assert 'Consolidated history' not in html
+    assert 'role="status"' in html and 'role="alert"' in html
+    for removed in ('id="apply-filters"', 'id="hide-done"', "Apply filters", "Plan, follow through",
+                    "Shared context. Work that moves forward.", "Changes stay in your local Taskman project.", "Pri."):
+        assert removed not in html
     assert 'type="checkbox"' not in html and 'id="bulk"' not in html  # rows have no selection
-    assert 'cdn.jsdelivr' not in html
+    assert "cdn." not in html and "<link" not in html  # works offline
+    assert ".innerHTML" not in html  # components use DOM APIs and textContent
+
+
+def test_workspace_styles_use_tokens_and_scales() -> None:
+    """Colours come from the :root tokens; type, weight and radius stay on their scales."""
+    html = render_page()
+    css = re.search(r"<style>(.*?)</style>", html, re.S).group(1)
+    outside_tokens = re.sub(r":root[^{]*\{[^{}]*\}", "", html)
+    assert re.findall(r"#[0-9a-fA-F]{3,8}(?![\w-])", outside_tokens) == []
+    assert set(re.findall(r"font-size:\s*([^;]+);", css)) <= {"12px", "13px", "14px", "16px", "20px"}
+    assert set(re.findall(r"font-weight:\s*([^;]+);", css)) <= {"400", "500", "600"}
+    assert set(re.findall(r"border-radius:\s*([^;]+);", css)) <= {"var(--r1)", "var(--r2)", "var(--r3)", "999px"}
+    assert re.findall(r"--r(\d):\s*(\d+)px;", css) == [("1", "4"), ("2", "6"), ("3", "8")]
+    assert "color-scheme: light dark;" in css and "prefers-color-scheme: dark" in css
 
 
 def test_render_page_holds_no_item_data(store) -> None:
