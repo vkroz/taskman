@@ -62,7 +62,7 @@ Key numbers come from the project row in the same transaction, so two writers ne
 
 1. The CLI starts a listener on `127.0.0.1` and opens `/auth/cli` in the browser. It sends a random state and the hash of a secret of its own (PKCE, RFC 7636).
 2. The server records the login and sends the browser to Google.
-3. Google returns the browser to `/auth/callback` with a code. The server trades the code with Google for the person's ID token over HTTPS. It checks the issuer, the audience, the expiry, the nonce and a verified email address. The email address must be in `TASKMAN_ALLOWED_EMAILS` or `TASKMAN_ALLOWED_DOMAINS`.
+3. Google returns the browser to `/auth/callback` with a code. The server trades the code with Google for the person's ID token over HTTPS. It checks the issuer, the audience, the expiry, the nonce and a verified email address. The email address must be in `TASKMAN_ALLOWED_EMAILS`, or the account must belong to a Google Workspace organization in `TASKMAN_ALLOWED_DOMAINS`. Google reports that membership in the `hd` claim of the ID token.
 4. The server sends the browser to the CLI's listener with a one-time code. The CLI trades that code and its secret at `/auth/exchange` for a token.
 
 Each sign-in works one time and for 10 minutes. The one-time code works for 2 minutes. The person's email address is the person name. The server keeps the login steps in the `logins` table, so any server instance can serve any step.

@@ -176,7 +176,8 @@ Browser login needs a Google OAuth client of type "Web application". Create it i
 | `TASKMAN_GOOGLE_CLIENT_ID` | The client ID. Browser login is off without it. |
 | `TASKMAN_GOOGLE_CLIENT_SECRET` or `TASKMAN_GOOGLE_CLIENT_SECRET_FILE` | The client secret, or a file that holds it. |
 | `TASKMAN_PUBLIC_URL` | The address that people open, for example `https://taskman.example.com`. |
-| `TASKMAN_ALLOWED_EMAILS`, `TASKMAN_ALLOWED_DOMAINS` | Comma-separated email addresses and domains that may sign in. Set one or both. |
+| `TASKMAN_ALLOWED_EMAILS` | Comma-separated email addresses that may sign in. |
+| `TASKMAN_ALLOWED_DOMAINS` | Comma-separated Google Workspace domains. Every member of these organizations may sign in. Google must report the account as managed by the organization; an address in the domain alone is not enough. Set this, `TASKMAN_ALLOWED_EMAILS`, or both. |
 
 ## Develop Taskman
 
