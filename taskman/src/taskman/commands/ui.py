@@ -11,7 +11,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import typer
 
@@ -168,13 +168,18 @@ def workspace(store: Store, data: dict) -> dict[str, Any]:
         "facets": {facet: dict(sorted(values.items())) for facet, values in facets.items()},
         "rows": [_slim(row, derived[row["id"]]) for row in matched],
     }
-    etag = hashlib.sha1(json.dumps(result, sort_keys=True, default=str).encode()).hexdigest()
-    if data.get("etag") == etag:
-        return {"etag": etag, "unchanged": True}
-    return {"etag": etag, **result}
+    return _tagged(result, data.get("etag"))
 
 
-def show(store: Store, item_id: str) -> dict[str, Any] | None:
+def _tagged(result: dict[str, Any], etag: Any) -> dict[str, Any]:
+    """The result with its ``etag``, or only ``unchanged`` when the client already has it."""
+    current = hashlib.sha1(json.dumps(result, sort_keys=True, default=str).encode()).hexdigest()
+    if etag == current:
+        return {"etag": current, "unchanged": True}
+    return {"etag": current, **result}
+
+
+def show(store: Store, item_id: str, etag: str | None = None) -> dict[str, Any] | None:
     """The ``/api/show`` result, or ``None`` when the item does not exist."""
     items, rows, derived = _snapshot(store)
     item = items.get(item_id)
@@ -191,7 +196,7 @@ def show(store: Store, item_id: str) -> dict[str, Any] | None:
     children = sorted((other for other in items.values() if other.parent_id == item_id),
                       key=lambda other: (order[other.id], key_order(other.id)))
     blocker = lifecycle.discard_blocker(item, items)
-    return {
+    return _tagged({
         "frontmatter": item.metadata, "body": item.body, "path": item.location,
         "activity": store.activity(item_id),
         "row": _row(items, rows, derived, item_id),
@@ -204,7 +209,7 @@ def show(store: Store, item_id: str) -> dict[str, Any] | None:
         "close_gates": None if item.status == "done" else lifecycle.close_gates(item, items),
         "can_discard": blocker is None,
         "discard_blocked_reason": blocker,
-    }
+    }, etag)
 
 
 def edit_conflict(store: Store, data: dict) -> dict[str, Any] | None:
@@ -254,7 +259,7 @@ def _make_handler(store: Store):
             return authority in {f'localhost:{self.server.server_port}', f'127.0.0.1:{self.server.server_port}'}
 
         def _json(self, status, data):
-            body = json.dumps(data, default=str).encode('utf-8')
+            body = json.dumps(data, default=str, separators=(',', ':')).encode('utf-8')
             self.send_response(status)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(body)))
@@ -370,11 +375,13 @@ def _make_handler(store: Store):
                 self._json(500, {'error': str(exc)})
 
         def _get(self):
-            path = urlsplit(self.path).path
+            url = urlsplit(self.path)
+            path = url.path
             if path == "/" or _KEY_PATH.match(path):
                 self._send_html(render_page())
             elif path.startswith("/api/show/"):
-                self._send_show(path[len("/api/show/") :])
+                etag = parse_qs(url.query).get("etag", [None])[0]
+                self._send_show(path[len("/api/show/") :], etag)
             else:
                 self._json(404, {'error': f'Not found: {path}'})
 
@@ -386,7 +393,7 @@ def _make_handler(store: Store):
             self.end_headers()
             self.wfile.write(body)
 
-        def _send_show(self, item_id: str) -> None:
+        def _send_show(self, item_id: str, etag: str | None) -> None:
             item = store.get(item_id)
             if item is None:
                 self._json(404, {'error': f'item not found: {item_id}'})
@@ -394,7 +401,7 @@ def _make_handler(store: Store):
             if item.error:
                 self._json(500, {'error': item.error})
                 return
-            self._json(200, show(store, item_id))
+            self._json(200, show(store, item_id, etag))
 
     return _Handler
 

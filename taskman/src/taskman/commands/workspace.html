@@ -339,7 +339,7 @@
         align-items: center;
         gap: 0 var(--s2);
         align-content: center;
-        min-height: 48px;
+        height: 48px;
         padding: 0 var(--s2);
         font-weight: 600;
       }
@@ -348,14 +348,8 @@
         display: inline-flex;
       }
       .brand .conn {
-        margin-left: auto;
-        flex-wrap: wrap;
-        white-space: normal;
-      }
-      .brand .conn[data-status="retrying"],
-      .brand .conn[data-status="offline"] {
         flex-basis: 100%;
-        margin: 0;
+        min-width: 0;
       }
       .nav-title {
         font-size: 12px;
@@ -544,7 +538,13 @@
       .conn[data-status="offline"] .dot {
         background: var(--fail);
       }
+      .conn .c-text {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
       .conn .linklike {
+        flex: none;
         font-size: 12px;
       }
 
@@ -556,7 +556,7 @@
       .columns,
       .row {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 16px 56px 136px 120px 56px;
+        grid-template-columns: minmax(0, 1fr) 16px 56px 152px 120px 56px;
         column-gap: var(--s2);
         align-items: center;
         padding: 0 var(--s4) 0 var(--s1);
@@ -711,7 +711,7 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        flex: 0 2 auto;
+        flex: 0 1000 auto;
         color: var(--text-2);
         font-size: 12px;
       }
@@ -850,12 +850,14 @@
         border: 1px solid var(--border);
       }
       .avatar[data-agent] {
-        background: var(--accent-soft);
-        color: var(--accent);
+        color: var(--text);
       }
       .avatar .icon {
         width: 12px;
         height: 12px;
+      }
+      .h-owner-icon {
+        display: none;
       }
       .group-header {
         display: flex;
@@ -896,7 +898,7 @@
       @container list (max-width: 1000px) {
         .columns,
         .row {
-          grid-template-columns: minmax(0, 1fr) 16px 56px 136px 120px;
+          grid-template-columns: minmax(0, 1fr) 16px 56px 152px 120px;
         }
         .c-upd {
           display: none;
@@ -907,9 +909,20 @@
         .row {
           grid-template-columns: minmax(0, 1fr) 16px 56px 136px 24px;
         }
-        .owner-name,
-        .h-owner {
+        .owner-name {
           display: none;
+        }
+        /* Only the avatars stay: the header keeps a person icon and its name for screen readers. */
+        .h-owner .h-owner-icon {
+          display: inline-flex;
+        }
+        .h-owner-text {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          overflow: hidden;
+          clip: rect(0 0 0 0);
+          white-space: nowrap;
         }
       }
       @container list (max-width: 720px) {
@@ -1639,7 +1652,6 @@
         #view-select {
           flex: 1;
           min-width: 0;
-          max-width: 200px;
           font-weight: 600;
         }
         .search {
@@ -1669,9 +1681,9 @@
           height: 28px;
         }
         .row {
-          height: auto;
-          min-height: 52px;
-          padding: 6px var(--s3);
+          height: 52px;
+          padding: 0 var(--s3);
+          align-content: center;
           grid-template-columns: auto 16px auto auto minmax(0, 1fr) auto auto;
           grid-template-areas:
             "ind chev type key state prog owner"
@@ -1795,7 +1807,9 @@
               <span role="columnheader"><span class="sr-only">Verification</span></span>
               <span class="h-prog" role="columnheader">Progress</span>
               <span role="columnheader">State</span>
-              <span class="h-owner" role="columnheader">Owner</span>
+              <span class="h-owner" role="columnheader" title="Owner"
+                ><span class="h-owner-icon" data-icon="person"></span><span class="h-owner-text">Owner</span></span
+              >
               <span class="c-upd" role="columnheader">Updated</span>
             </div>
             <div id="rows" role="rowgroup"></div>
@@ -1969,6 +1983,7 @@
         agent: [["path", { d: "M8 2l1.5 4.5L14 8l-4.5 1.5L8 14l-1.5-4.5L2 8l4.5-1.5z" }]],
         filter: [["path", { d: "M2.5 3.5h11L9.3 8.5v4l-2.6 1.5V8.5z" }]],
         edit: [["path", { d: "M10.5 2.5l3 3-8 8h-3v-3z" }]],
+        person: [["circle", { cx: 8, cy: 5.5, r: 2.5 }], ["path", { d: "M3 13.5a5 5 0 0 1 10 0" }]],
       };
       function icon(name, label) {
         const svg = document.createElementNS(SVG, "svg");
@@ -2242,7 +2257,8 @@
           if (!tickTimer) tickTimer = setInterval(renderConn, 1000);
         }
         S.error = error.message;
-        showError(error.message, true);
+        // Once data shows, the connection indicator carries Retry; the banner only names the cause.
+        showError(error.message, !(error.network && S.data));
         if (!S.data) renderList();
         renderConn();
       }
@@ -2263,7 +2279,7 @@
         }
         for (const el of $$("[data-conn]")) {
           setAttr(el, "data-status", status);
-          setAttr(el, "title", text);
+          setAttr(el, "title", status === "live" ? text : `Taskman server is not reachable. ${text}`);
           if (!el._built) {
             el._built = true;
             el._text = h("span", { class: "c-text" });
@@ -2429,12 +2445,12 @@
       // ---- dialogs ----
       let dialogSeq = 0;
       /** One dialog component: header with title and close, body, error, footer, dirty-check on dismiss. */
-      function Dialog({ title, body, submit, danger = false, onSubmit, initialFocus }) {
+      function Dialog({ title, body, submit, danger = false, onSubmit, initialFocus, cancellable = true }) {
         const id = `dlg-title-${++dialogSeq}`;
         const heading = h("h2", { id, text: title });
         const error = h("div", { class: "message error dlg-error", role: "alert", hidden: true });
         const submitButton = h("button", { class: `btn ${danger ? "danger" : "primary"}`, type: "submit" }, submit);
-        const cancel = h("button", { class: "btn", type: "button" }, "Cancel");
+        const cancel = h("button", { class: "btn", type: "button", hidden: !cancellable }, "Cancel");
         const confirmBox = h("span", { class: "confirm-text", hidden: true }, "Discard changes?");
         const keep = h("button", { class: "btn", type: "button", hidden: true }, "Keep editing");
         const discard = h("button", { class: "btn danger", type: "button", hidden: true }, "Discard");
@@ -2464,7 +2480,8 @@
         };
         function showConfirm(on) {
           confirmBox.hidden = keep.hidden = discard.hidden = !on;
-          cancel.hidden = submitButton.hidden = on;
+          cancel.hidden = !cancellable || on;
+          submitButton.hidden = on;
           if (on) keep.focus();
         }
         function attemptClose() {
@@ -2664,6 +2681,7 @@
         if (document.activeElement !== search && search.value !== S.q) search.value = S.q;
         const sort = $("#sort");
         if (document.activeElement !== sort && sort.value !== S.sort) sort.value = S.sort;
+        setText(sort.options[0], defaultSortName());
         const dir = $("#direction");
         setAttr(dir, "aria-pressed", String(S.desc));
         setAttr(dir, "aria-label", S.desc ? "Descending order" : "Ascending order");
@@ -2916,8 +2934,9 @@
             icon("context", "Context item")) : null,
         ]);
         swap(c.ver, row.verification || "", () => (row.verification ? [VerificationMark(row.verification)] : []));
-        setText(c.prog, row.progress ? `${row.progress.done}/${row.progress.total}` : "");
-        setAttr(c.prog, "title", row.progress ? `${row.progress.done} of ${row.progress.total} tasks done` : null);
+        const progress = row.progress && row.progress.total ? row.progress : null;
+        setText(c.prog, progress ? `${progress.done}/${progress.total}` : "");
+        setAttr(c.prog, "title", progress ? `${progress.done} of ${progress.total} tasks done` : null);
         swap(c.state, JSON.stringify([row.state, row.draft, row.blockers]), () => [StateChip(row)]);
         swap(c.owner, row.assignee || "", () => (row.assignee ? Owner(row.assignee) : []));
         setAttr(c.owner, "title", row.assignee || null);
@@ -3165,8 +3184,10 @@
       /** Fetch the open item. Re-render only when it changed and the user is not reading or typing in it. */
       async function loadDetail(id, { force = false, signal } = {}) {
         let result;
+        // The etag of the rendered detail: the server answers "unchanged" until there is something new to show.
+        const etag = !force && !S.missing && S.detailSig ? "?etag=" + encodeURIComponent(S.detailSig) : "";
         try {
-          result = await api("/api/show/" + encodeURIComponent(id), undefined, signal);
+          result = await api("/api/show/" + encodeURIComponent(id) + etag, undefined, signal);
         } catch (error) {
           if (error.name === "AbortError") throw error;
           if (S.item !== id) return;
@@ -3179,11 +3200,11 @@
           }
           throw error;
         }
-        if (S.item !== id) return;
+        if (S.item !== id || result.unchanged) return;
         for (const entry of result.frontmatter.journal || []) {
           if (entry.kind === "verification" || entry.kind === "handoff") S.agents.add(entry.actor);
         }
-        const signature = JSON.stringify(result);
+        const signature = result.etag;
         const changed = signature !== S.detailSig || S.missing;
         S.missing = false;
         if (!changed) return;
@@ -3247,6 +3268,7 @@
         if (row.updated_at && row.updated_at !== fm.created_at) meta.append(" · updated ", timeEl(row.updated_at));
         out.push(meta);
         out.push(detailActions(d));
+        if (S.missing) return out;
         if (d.close_gates) out.push(readinessCard(d));
         const description = markdown(d.body, fm.title);
         if (description.length) out.push(h("section", { "aria-label": "Description" }, h("div", { class: "desc description" }, description)));
@@ -3291,15 +3313,16 @@
             text.append(gate.detail.slice(0, colon + 2),
               h("span", { class: "gate-status", "data-status": gate.status, text: cap(gate.detail.slice(colon + 2)) }));
           } else {
-            const base = gate.refs.length ? gate.detail.replace(/:?\s*[A-Z][A-Z0-9]*-\d+(,\s*[A-Z][A-Z0-9]*-\d+)*$/, "") : gate.detail;
+            const refs = gate.refs.filter((ref) => ref !== d.frontmatter.id);
+            const base = refs.length ? gate.detail.replace(/:?\s*[A-Z][A-Z0-9]*-\d+(,\s*[A-Z][A-Z0-9]*-\d+)*$/, "") : gate.detail;
             text.append(base);
-            if (gate.refs.length) {
+            if (refs.length) {
               text.append(base === gate.detail ? " · open: " : " ");
-              gate.refs.slice(0, 6).forEach((ref, index) => {
+              refs.slice(0, 6).forEach((ref, index) => {
                 if (index) text.append(", ");
                 text.append(RefLink(ref));
               });
-              if (gate.refs.length > 6) text.append(` +${gate.refs.length - 6}`);
+              if (refs.length > 6) text.append(` +${refs.length - 6}`);
             }
           }
           item.append(text);
@@ -3757,11 +3780,14 @@
           body: [h("p", { text: `This removes “${d.frontmatter.title}” and its history. You cannot undo it.` })],
           initialFocus: (self) => self.submitButton,
           onSubmit: async () => {
+            const index = S.visible.indexOf(id);
+            const neighbour = index < 0 ? null : S.visible[index + 1] || S.visible[index - 1];
             await api("/api/discard", { id });
             dlg.close();
             toast(`${id} deleted`);
             if (S.item === id) closeItem();
             await refresh({ force: true });
+            if (rowNode(neighbour)) focusRow(neighbour);
           },
         });
       }
@@ -3780,6 +3806,7 @@
         Dialog({
           title: "Keyboard shortcuts",
           submit: "Done",
+          cancellable: false,
           body: [h("dl", { class: "shortcuts" }, keys.map(([combo, text]) => [h("dt", {}, combo.map((k) => h("kbd", { text: k }))), h("dd", { text })]))],
           onSubmit: async (dlg) => dlg.close(),
         });
@@ -3918,6 +3945,10 @@
         });
         bar.append(sort, direction, display);
       }
+      /** The default order: manual rank, except Done, which lists the newest first. */
+      function defaultSortName() {
+        return S.view === "done" ? "Newest first" : "Manual";
+      }
       function setTheme(theme) {
         local.set("taskman.theme", theme === "system" ? null : theme);
         if (theme === "system") delete document.documentElement.dataset.theme;
@@ -3925,7 +3956,8 @@
       }
       /** Phones: every filter in one sheet. */
       function openFilterSheet() {
-        const sort = h("select", { "aria-label": "Sort" }, SORTS.map(([key, label]) => h("option", { value: key, selected: key === S.sort }, label)));
+        const sort = h("select", { "aria-label": "Sort" }, SORTS.map(([key, label]) =>
+          h("option", { value: key, selected: key === S.sort }, key === "manual" ? defaultSortName() : label)));
         sort.onchange = () => {
           S.sort = sort.value;
           filtersChanged();

@@ -352,7 +352,7 @@ def close_gates(item: Item, items: dict[str, Item]) -> list[dict[str, Any]]:
     if not drafts:
         finalized = "Finalized"
     elif item.draft:
-        finalized = "Draft"
+        finalized = "Not finalized (draft)"
     else:
         finalized = f"Draft ancestor: {', '.join(drafts)}"
     if closed:
