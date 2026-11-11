@@ -84,6 +84,13 @@ def list_tokens(store: SqlStore) -> list[dict[str, Any]]:
     return [dict(zip(fields, row)) for row in rows]
 
 
+def revoke_own_token(store: SqlStore, token: str) -> None:
+    """Revoke the token itself, for a logout."""
+    with store.lock():
+        _q(store, "UPDATE tokens SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL",
+           (datetime.now(timezone.utc).isoformat(), _fingerprint(token)))
+
+
 def revoke_token(store: SqlStore, token_id: int) -> bool:
     """Revoke a token. Returns ``False`` when no active token has this ID."""
     with store.lock():

@@ -148,15 +148,35 @@ taskman serve                               # listens on 127.0.0.1 and the port 
 
 `taskman serve --host 0.0.0.0` accepts calls from other machines. `taskman token list` shows the tokens without their secrets, and `taskman token revoke ID` stops one.
 
-On each computer that uses the server:
+### Log in
+
+On a computer with a browser:
 
 ```bash
-export TASKMAN_SERVER_URL=https://taskman.example.com
-export TASKMAN_TOKEN=...                    # the token from `taskman token create`
-taskman list
+taskman auth login --server https://taskman.example.com
 ```
 
-Every command then works through the server. The person of the token is the author of each change. With `--actor claude`, the author is `claude for Ada`. Taskman reads `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` from the environment only, never from a `.env` file. The address must start with `https://`, unless the server runs on the same computer.
+The command opens a browser. You sign in with your Google account, and the CLI saves its own token for this computer. Every later command works through the server. `taskman auth status` shows the server and your email address. `taskman auth logout` revokes the token and removes it.
+
+On a machine without a browser, for example a cloud virtual machine:
+
+1. On any computer, open `https://taskman.example.com/auth/token` and sign in. The page shows a personal access token one time.
+2. On the machine, run `taskman auth login --server https://taskman.example.com --with-token` and paste the token.
+
+An agent sandbox that accepts only environment variables can set `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` instead. `TASKMAN_TOKEN` wins over a saved login.
+
+The person of the token is the author of each change. With `--actor claude`, the author is `claude for ada@example.com`. Taskman reads `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` from the environment only, never from a `.env` file. The address must start with `https://`, unless the server runs on the same computer. The CLI keeps its login in `~/.config/taskman/credentials.json`, which only you can read. A token expires after 90 days.
+
+### Turn on browser login
+
+Browser login needs a Google OAuth client of type "Web application". Create it in the Google Cloud console, under APIs & Services, Credentials. Add `<public address>/auth/callback` as an authorized redirect URI. Then start the server with:
+
+| Variable | Value |
+| --- | --- |
+| `TASKMAN_GOOGLE_CLIENT_ID` | The client ID. Browser login is off without it. |
+| `TASKMAN_GOOGLE_CLIENT_SECRET` or `TASKMAN_GOOGLE_CLIENT_SECRET_FILE` | The client secret, or a file that holds it. |
+| `TASKMAN_PUBLIC_URL` | The address that people open, for example `https://taskman.example.com`. |
+| `TASKMAN_ALLOWED_EMAILS`, `TASKMAN_ALLOWED_DOMAINS` | Comma-separated email addresses and domains that may sign in. Set one or both. |
 
 ## Develop Taskman
 

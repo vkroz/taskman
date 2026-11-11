@@ -14,11 +14,12 @@ import typing
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 from taskman import lifecycle
 from taskman.model.ordering import reorder_item
-from taskman.storage.accounts import person_for_token
+from taskman.login import LoginError, Logins, error_page
+from taskman.storage.accounts import person_for_token, revoke_own_token
 from taskman.storage.sql_store import SqlStore
 from taskman.storage.store import Item, StorageError, item_data
 
@@ -94,7 +95,7 @@ def author_name(person: str, actor: Any) -> str:
     return f"{actor.strip()} for {person}"
 
 
-def make_handler(store: SqlStore, log: bool = True) -> type[BaseHTTPRequestHandler]:
+def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None) -> type[BaseHTTPRequestHandler]:
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "taskman"
@@ -131,16 +132,83 @@ def make_handler(store: SqlStore, log: bool = True) -> type[BaseHTTPRequestHandl
                 status, data = 500, {"error": {"kind": "server", "message": "The Taskman server failed."}}
             self._send(status, data)
 
-        def _person(self) -> str:
+        def _token(self) -> str:
             scheme, _, token = self.headers.get("Authorization", "").partition(" ")
-            person = person_for_token(store, token.strip()) if scheme == "Bearer" and token.strip() else None
+            return token.strip() if scheme == "Bearer" else ""
+
+        def _person(self) -> str:
+            token = self._token()
+            person = person_for_token(store, token) if token else None
             if person is None:
                 raise _Refused(401, "token", "a valid token is required")
             return person
 
+        def _body(self) -> dict[str, Any]:
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = 0
+            if length <= 0 or length > MAX_REQUEST_BYTES:
+                raise _Refused(413 if length > MAX_REQUEST_BYTES else 400, "request", "invalid request size")
+            try:
+                data = json.loads(self.rfile.read(length))
+            except ValueError:
+                raise _Refused(400, "request", "the request body must be JSON") from None
+            if not isinstance(data, dict):
+                raise _Refused(400, "request", "the request body must be an object")
+            return data
+
+        # ---- browser login ---------------------------------------------
+
+        def _send_page(self, status: int, text: str, location: str | None = None) -> None:
+            body = text.encode("utf-8")
+            self.send_response(status)
+            if location:
+                self.send_header("Location", location)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            # The pages carry one-time codes and tokens: no other site may frame them or see their address.
+            self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Frame-Options", "DENY")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _login_page(self, path: str, query: dict[str, str]) -> None:
+            try:
+                if logins is None:
+                    raise LoginError(404, "Browser login is not set up on this server. Use a personal access token.")
+                if path in ("/auth/cli", "/auth/token"):
+                    self._send_page(302, "", logins.start(path[len("/auth/"):], query))
+                elif path == "/auth/callback":
+                    kind, result = logins.finish(query)
+                    if kind == "redirect":
+                        self._send_page(302, "", result)
+                    else:
+                        self._send_page(200, result)
+                else:
+                    raise LoginError(404, f"Not found: {path}")
+            except LoginError as exc:
+                self._send_page(exc.status, error_page(exc.message))
+            except Exception:  # noqa: BLE001 - the browser gets a page, never a traceback
+                self._send_page(500, error_page("The Taskman server failed."))
+
+        def _exchange(self) -> tuple[int, dict[str, Any]]:
+            if logins is None:
+                raise _Refused(404, "missing", "Browser login is not set up on this server.")
+            try:
+                return 200, logins.exchange(self._body())
+            except LoginError as exc:
+                raise _Refused(exc.status, "login", exc.message) from None
+
         # ---- GET -------------------------------------------------------
 
         def do_GET(self) -> None:  # noqa: N802
+            url = urlsplit(self.path)
+            if url.path.startswith("/auth/"):
+                self._login_page(url.path, dict(parse_qsl(url.query)))
+                return
             self._answer(self._get)
 
         def _get(self) -> tuple[int, dict[str, Any]]:
@@ -191,6 +259,12 @@ def make_handler(store: SqlStore, log: bool = True) -> type[BaseHTTPRequestHandl
 
         def _post(self) -> tuple[int, dict[str, Any]]:
             path = urlsplit(self.path).path
+            if path == "/auth/exchange":
+                return self._exchange()
+            if path == API + "/logout":
+                self._person()
+                revoke_own_token(store, self._token())
+                return 200, {}
             prefix = API + "/operations/"
             if not path.startswith(prefix):
                 raise _Refused(404, "missing", f"Not found: {path}")
@@ -198,18 +272,7 @@ def make_handler(store: SqlStore, log: bool = True) -> type[BaseHTTPRequestHandl
             operation = OPERATIONS.get(path[len(prefix):])
             if operation is None:
                 raise _Refused(404, "missing", f"Unknown operation: {path[len(prefix):]}")
-            try:
-                length = int(self.headers.get("Content-Length", "0"))
-            except ValueError:
-                length = 0
-            if length <= 0 or length > MAX_REQUEST_BYTES:
-                raise _Refused(413 if length > MAX_REQUEST_BYTES else 400, "request", "invalid request size")
-            try:
-                data = json.loads(self.rfile.read(length))
-            except ValueError:
-                raise _Refused(400, "request", "the request body must be JSON") from None
-            if not isinstance(data, dict):
-                raise _Refused(400, "request", "the request body must be an object")
+            data = self._body()
             arguments = _arguments(operation, data.get("arguments", {}))
             # A comment names its author as an argument. That name is the agent, never the person.
             author = author_name(person, data.get("actor") or arguments.get("actor") or None)
@@ -234,8 +297,9 @@ def make_handler(store: SqlStore, log: bool = True) -> type[BaseHTTPRequestHandl
     return Handler
 
 
-def make_server(host: str, port: int, store: SqlStore, log: bool = True) -> ThreadingHTTPServer:
-    """A server for ``store``. The caller runs ``serve_forever`` and closes it."""
-    server = ThreadingHTTPServer((host, port), make_handler(store, log))
+def make_server(host: str, port: int, store: SqlStore, log: bool = True,
+                logins: Logins | None = None) -> ThreadingHTTPServer:
+    """A server for ``store``, with browser login when ``logins`` is given. The caller runs ``serve_forever``."""
+    server = ThreadingHTTPServer((host, port), make_handler(store, log, logins))
     server.daemon_threads = True
     return server

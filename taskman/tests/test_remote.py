@@ -92,7 +92,7 @@ def test_two_processes_in_different_directories_share_one_project(remote_env, tm
 
 def test_a_missing_token_stops_the_command(remote_env, monkeypatch):
     monkeypatch.delenv("TASKMAN_TOKEN")
-    assert "TASKMAN_TOKEN is not set" in run("list", code=2)
+    assert "Not logged in to" in run("list", code=2)
 
 
 def test_a_refused_token_stops_the_command(remote_env, monkeypatch):
@@ -213,6 +213,8 @@ def test_serve_listens_on_the_port_variable_and_stops_on_sigterm(sqlite_env):
     process = subprocess.Popen([sys.executable, "-m", "taskman.cli", "serve"], env=environment,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
+        first = process.stdout.readline()
+        assert "Browser login is off" in first
         line = process.stdout.readline()
         assert "Taskman server listens on http://127.0.0.1:" in line
         url = line.split()[4].rstrip("/")

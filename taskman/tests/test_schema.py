@@ -12,7 +12,7 @@ from taskman.storage.sql import connect, transaction
 from taskman.storage.store import StorageConfigError
 
 runner = CliRunner()
-TABLES = {"projects", "items", "labels", "dependencies", "comments", "activity", "persons", "tokens",
+TABLES = {"projects", "items", "labels", "dependencies", "comments", "activity", "persons", "tokens", "logins",
           "schema_versions"}
 
 

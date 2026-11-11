@@ -51,8 +51,19 @@ def serve(
         except ValueError:
             typer.echo("Error: PORT must be a number.", err=True)
             raise typer.Exit(2) from None
+    from taskman.login import Logins, login_settings
+
+    try:
+        settings = login_settings()
+    except StorageConfigError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(2) from None
     with _database() as store:
-        server = make_server(host, port, store)
+        server = make_server(host, port, store, logins=Logins(store, settings) if settings else None)
+        if settings:
+            typer.echo(f"Browser login with Google is on for {settings.public_url}.")
+        else:
+            typer.echo("Browser login is off: TASKMAN_GOOGLE_CLIENT_ID is not set. Tokens work.")
         # serve_forever must not be stopped from its own thread.
         signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown).start())
         typer.echo(f"Taskman server listens on http://{host}:{server.server_port}/  (Ctrl+C to stop)")

@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from typing import Any
 from urllib.parse import quote, urlsplit
 
+from taskman.storage.credentials import load_credentials, saved_token
 from taskman.storage.store import Item, StorageConfigError, StorageError, item_from_data
 
 _LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
@@ -22,21 +23,28 @@ _NO_RAW_WRITES = "A Taskman server accepts changes as operations only, not as di
 
 
 def server_url(environ: Mapping[str, str] = os.environ) -> str:
-    """The server named by ``TASKMAN_SERVER_URL``, or an empty string for direct database use."""
-    return environ.get("TASKMAN_SERVER_URL", "").strip().rstrip("/")
+    """The server of ``TASKMAN_SERVER_URL`` or of the last login, or an empty string for direct database use."""
+    url = environ.get("TASKMAN_SERVER_URL", "").strip() or str(load_credentials(environ).get("server") or "")
+    return url.strip().rstrip("/")
+
+
+def check_server_url(url: str) -> str:
+    """The address, when a token may go to it: over HTTPS, or to this machine only."""
+    url = url.strip().rstrip("/")
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise StorageConfigError("The Taskman server address must start with http:// or https://.")
+    if parts.scheme == "http" and parts.hostname not in _LOCAL_HOSTS:
+        raise StorageConfigError("The Taskman server address must use https:// unless the server runs on this machine.")
+    return url
 
 
 def remote_settings(environ: Mapping[str, str] = os.environ) -> tuple[str, str]:
-    """The server URL and the token. A token travels over HTTPS, or to this machine only."""
-    url = server_url(environ)
-    parts = urlsplit(url)
-    if parts.scheme not in ("http", "https") or not parts.hostname:
-        raise StorageConfigError("TASKMAN_SERVER_URL must be an http:// or https:// address.")
-    if parts.scheme == "http" and parts.hostname not in _LOCAL_HOSTS:
-        raise StorageConfigError("TASKMAN_SERVER_URL must use https:// unless the server runs on this machine.")
-    token = environ.get("TASKMAN_TOKEN", "").strip()
+    """The server URL and the token: ``TASKMAN_TOKEN``, or the token of the last login to that server."""
+    url = check_server_url(server_url(environ))
+    token = environ.get("TASKMAN_TOKEN", "").strip() or saved_token(url, environ)
     if not token:
-        raise StorageConfigError(f"TASKMAN_TOKEN is not set. Taskman needs a token for {url}.")
+        raise StorageConfigError(f"Not logged in to {url}. Run: taskman auth login")
     return url, token
 
 
@@ -66,7 +74,7 @@ class RemoteStore:
         if self._actor:
             return self._actor
         if self._person is None:
-            self._person = self._request("GET", "/api/v1/whoami")["person"]
+            self._person = self.whoami()
         return self._person
 
     @actor.setter
@@ -86,7 +94,8 @@ class RemoteStore:
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         body = None if payload is None else json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(self.url + path, data=body, method=method)
-        request.add_header("Authorization", f"Bearer {self._token}")
+        if self._token:
+            request.add_header("Authorization", f"Bearer {self._token}")
         if body is not None:
             request.add_header("Content-Type", "application/json")
         try:
@@ -101,6 +110,17 @@ class RemoteStore:
             raise StorageConfigError(f"Cannot reach the Taskman server at {self.url}: {reason}") from None
         except ValueError:
             raise StorageConfigError(f"{self.url} did not answer as a Taskman server.") from None
+
+    def whoami(self) -> str:
+        return self._request("GET", "/api/v1/whoami")["person"]
+
+    def logout(self) -> None:
+        """Revoke the token of this store on the server."""
+        self._request("POST", "/api/v1/logout", {})
+
+    def exchange(self, code: str, verifier: str) -> dict[str, str]:
+        """Trade a one-time login code for a token. Needs no token."""
+        return self._request("POST", "/auth/exchange", {"code": code, "verifier": verifier})
 
     def forward(self, operation: str, arguments: dict[str, Any]) -> Any:
         """Run one operation on the server and return what it returns locally."""

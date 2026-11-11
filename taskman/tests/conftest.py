@@ -21,6 +21,7 @@ TEST_DATABASE_URL = os.environ.get("TASKMAN_TEST_DATABASE_URL", "").strip()
 def _isolated_home(tmp_path_factory, monkeypatch):
     """No test reaches the user's default database under ``~/.local/share/taskman``."""
     monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("home")))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
 
 
 @pytest.fixture
@@ -77,7 +78,7 @@ def sql_settings(request, tmp_path) -> StorageSettings:
 class RunningServer:
     """A Taskman server on a free local port, for tests. ``token`` belongs to ``person``."""
 
-    def __init__(self, settings: StorageSettings, person: str = "Vlad") -> None:
+    def __init__(self, settings: StorageSettings, person: str = "Vlad", login=None, post_form=None) -> None:
         import threading
 
         from taskman.server import make_server
@@ -86,7 +87,13 @@ class RunningServer:
 
         self.store = open_sql_store(settings, actor="server")
         self.token_id, self.token = create_token(self.store, person)
-        self._server = make_server("127.0.0.1", 0, self.store, log=False)
+        logins = None
+        if login is not None:
+            from taskman.login import Logins
+
+            logins = Logins(self.store, login, post_form) if post_form else Logins(self.store, login)
+        self.logins = logins
+        self._server = make_server("127.0.0.1", 0, self.store, log=False, logins=logins)
         self.url = f"http://127.0.0.1:{self._server.server_port}"
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
