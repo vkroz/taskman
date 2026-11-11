@@ -14,6 +14,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -126,12 +127,12 @@ def chromium():
     try:
         playwright = sync_api.sync_playwright().start()
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"Playwright cannot start: {exc}")
+        pytest.skip(f"Playwright cannot start: {str(exc).splitlines()[0]}")
     try:
         browser = playwright.chromium.launch()
     except Exception as exc:  # noqa: BLE001
         playwright.stop()
-        pytest.skip(f"Chromium is not installed for Playwright: {exc}")
+        pytest.skip(f"Chromium cannot launch: {str(exc).splitlines()[0]}")
     yield browser
     browser.close()
     playwright.stop()
@@ -296,9 +297,9 @@ def test_views_and_counts(ro, desktop):
     assert set(row_ids(desktop, context=False)) == {"TM-12", "TM-13", "RES-6", "RES-8", "RES-10", "RES-12"}
 
     visit(desktop, ro, "/?view=done")
-    rows = ro.api("/api/query", {"view": "done"})["rows"]
-    newest = max((r for r in rows if not r["context"]), key=lambda r: r["changed_at"])
-    assert row_ids(desktop)[0] == newest["id"]
+    rows = [r for r in ro.api("/api/query", {"view": "done"})["rows"] if not r["context"]]
+    newest_first = [r["id"] for r in sorted(rows, key=lambda r: r["changed_at"], reverse=True)]
+    assert row_ids(desktop) == newest_first
 
 
 # ---- 4. projects (P0-6) ----
@@ -323,8 +324,35 @@ def test_projects(rw, desktop):
     values = select.evaluate("s => [...s.options].map(o => o.value)")
     assert set(values) <= {"TM", "RES", "DIV", "__new", ""}
 
-    order = rw.api("/api/reorder", {"id": "RES-5", "position": 1})["order"]
-    assert order[0] == "RES-5" and all(key.startswith("RES-") for key in order)
+    desktop.keyboard.press("Escape")
+    expect(desktop.locator("dialog[open]")).to_have_count(0)
+
+    # A drag onto another project's row is not a drop target and sends nothing.
+    seen = queries(desktop)
+    visit(desktop, rw, "/?view=backlog")
+    before = rw.api("/api/query", {})["rows"]
+    roots = {project: [r["id"] for r in before if r["project"] == project and r["parent_id"] is None
+                       and r["status"] != "done" and row(desktop, r["id"]).count()] for project in ("TM", "RES")}
+    source, top = roots["RES"][-1], roots["RES"][0]
+    assert source != top
+    handle = f'.row[data-id="{source}"] .handle'
+    row(desktop, source).hover()
+    desktop.drag_and_drop(handle, f'.row[data-id="{roots["TM"][0]}"]')
+    desktop.wait_for_timeout(500)
+    assert not [url for url in seen if url.endswith("/api/reorder")]
+    assert [r["order"] for r in rw.api("/api/query", {})["rows"]] == [r["order"] for r in before]
+
+    # A drag within the project reorders, and the API keeps the order per project.
+    with desktop.expect_response(lambda r: r.url.endswith("/api/reorder")) as info:
+        row(desktop, source).hover()
+        desktop.drag_and_drop(handle, f'.row[data-id="{top}"]', target_position={"x": 40, "y": 2})
+    assert info.value.status == 200
+    order = info.value.json()["order"]
+    # Rows outside the view (RES-1 is active) keep their place; the source lands just above the target.
+    assert order.index(source) == order.index(top) - 1 and all(key.startswith("RES-") for key in order)
+    with pytest.raises(urllib.error.HTTPError) as error:
+        rw.api("/api/reorder", {"id": source, "position": len(order) + 1})
+    assert error.value.code == 400
 
 
 # ---- 5. URL state (P0-3) ----
@@ -595,6 +623,19 @@ def test_keyboard(ro, desktop):
     row(desktop, "TM-6").focus()
     desktop.keyboard.press("?")
     expect(desktop.get_by_role("dialog", name="Keyboard shortcuts")).to_be_visible()
+    desktop.keyboard.press("Escape")
+
+    # Every dialog the detail panel opens has an accessible name.
+    visit(desktop, ro, "/?item=RES-5")
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    for opener in ("#edit-item", "Add comment", "Assignee and labels"):
+        if opener.startswith("#"):
+            desktop.click(opener)
+        else:
+            open_menu_item(desktop, opener)
+        expect(desktop.locator("dialog[open]")).to_have_accessible_name(re.compile(r"\S"))
+        desktop.keyboard.press("Escape")
+        expect(desktop.locator("dialog[open]")).to_have_count(0)
 
 
 # ---- 11. create and comment (P0-14) ----
@@ -749,11 +790,16 @@ def test_theme_and_contrast(ro, chromium, scheme):
 def test_item_text_never_becomes_markup(rw, desktop):
     evil = "<img src=x onerror=alert(1)>"
     key = rw.api("/api/items", {"title": evil, "type": "feat", "project": "TM", "body": evil})["id"]
+    rw.api("/api/fields", {"id": key, "assignee": evil, "labels": []})
     dialogs = []
     desktop.on("dialog", lambda dialog: (dialogs.append(dialog.message), dialog.dismiss()))
     visit(desktop, rw, f"/?view=drafts&item={key}")
     expect(row(desktop, key).locator(".title")).to_have_text(evil)
     expect(desktop.locator("#detail-title")).to_have_text(evil)
+    expect(row(desktop, key).locator(".owner-name")).to_have_text(evil)
+    desktop.click("[data-facet=assignee]")
+    expect(desktop.locator(".popover")).to_contain_text(evil)
+    desktop.keyboard.press("Escape")
     desktop.click("#new")
     parent = desktop.locator(f"dialog[open] select[name=parent] option[value='{key}']")
     expect(parent).to_have_text(f"{key} · {evil}")

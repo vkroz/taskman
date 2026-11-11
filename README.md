@@ -150,13 +150,20 @@ uv sync --extra dev --extra postgres
 TASKMAN_TEST_DATABASE_URL=postgresql://taskman:taskman@127.0.0.1:54329/taskman_test uv run pytest
 ```
 
+The browser tests of the workspace page need the `ui` extra, which installs Playwright 1.63.0. They also need its Chromium build (`uv run playwright install chromium`). Without Playwright or Chromium, pytest reports them as skipped. `uv run pytest -m ui` runs only the workspace page tests.
+
+```sh
+uv sync --extra dev --extra postgres --extra ui
+uv run pytest -m ui
+```
+
 Python code is under `taskman/src/taskman/`; plugin sources are under `plugins/tm/`. Add a platform adapter to the installer to support another coding tool without changing task storage.
 
 ### Workspace UI
 
-Run `taskman ui` for the local workspace. The left navigation selects all, current, backlog or done work. Search combines with epic scope and metadata filters; matching descendants retain labeled parent context. Sort orders siblings; drag an open item to change its position. Expand or collapse branches, and select a title to open details; Close returns the space to the list.
+Run `taskman ui` for the local workspace. The sidebar selects a view (Attention, Active, Ready, Blocked, Drafts, Backlog or Done) and a project. Search, facet filters and the epic scope apply at once and stay in the URL. Sort orders siblings; drag an open item to change its position within its parent and project. Select a row to open its details; Back or Esc closes them. [docs/ui-design.md](docs/ui-design.md) describes the page.
 
-Create work with **New task**; a top-level item needs a project key. Open task details offer title/description editing with a recorded reason, **Add comment** with a kind (and a result for a verification), and **Assignee and labels**. Details also show comments and the activity history. **Delete draft** is limited to draft leaves with no incoming dependencies; finalized and completed work cannot be deleted. Agents finalize, move and close items through the CLI.
+Create work with **New**; a top-level item needs a project key. Details show the state, blockers, close readiness and one timeline of comments and changes. **Edit** changes the title and description with a recorded reason. The menu offers **Add comment** with a kind (and a result for a verification), **Assignee and labels**, and **Delete draft** for draft leaves with no incoming dependencies. Finalized and completed work cannot be deleted. Agents finalize, move and close items through the CLI.
 
 The same operations are available from the CLI:
 
