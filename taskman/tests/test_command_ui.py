@@ -108,6 +108,7 @@ def test_render_page_contains_required_sections(store) -> None:
     assert 'id="editor"' in html
     assert 'id="preview"' in html
     assert 'Consolidated history' not in html
+    assert 'type="checkbox"' not in html and 'id="bulk"' not in html  # rows have no selection
     assert 'cdn.jsdelivr' not in html
 
 
@@ -223,60 +224,3 @@ def test_ui_stop_when_no_server_running(sqlite_env, tmp_path: Path, monkeypatch)
     monkeypatch.setattr("taskman.commands.ui._pid_file", lambda: tmp_path / "ui.pid")
     r = runner.invoke(app, ["ui", "--stop"])
     assert r.exit_code == 0
-
-
-def test_checkbox_selection_follows_hierarchy_and_deselects_individually():
-    """Execute the shipped event handler with hidden descendants and two branches."""
-    import shutil
-    import subprocess
-
-    import pytest
-    import taskman.commands.ui as ui
-
-    node = shutil.which("node")
-    if node is None:
-        pytest.skip("Node.js is required to exercise the browser event handler")
-    source = Path(ui.__file__).with_name("workspace.html").read_text()
-    handler = source.split('$("#tree").onchange = (e) => {', 1)[1].split(
-        '\n      };', 1
-    )[0]
-    script = r'''
-const assert = require("node:assert/strict");
-const all = [
-  {id: "root", parent_id: null},
-  {id: "child", parent_id: "root"},
-  {id: "grandchild", parent_id: "child"},
-  {id: "sibling", parent_id: "root"},
-  {id: "other", parent_id: null},
-  {id: "other-child", parent_id: "other"},
-];
-// Only root is visible: selection must use all, not rendered rows.
-const rows = [all[0]], collapsed = new Set(["root"]);
-const selected = new Set(["other-child"]);
-let renders = 0;
-function render() { renders++; }
-const change = (e) => { HANDLER };
-function click(id, checked) { change({target: {dataset: {select: id}, checked}}); }
-function expect(ids) { assert.deepEqual([...selected].sort(), ids.sort()); }
-click("root", true);
-expect(["root", "child", "grandchild", "sibling", "other-child"]);
-click("root", false);
-expect(["child", "grandchild", "sibling", "other-child"]);
-click("child", false);
-expect(["grandchild", "sibling", "other-child"]);
-click("root", true);
-click("child", false);
-expect(["root", "grandchild", "sibling", "other-child"]);
-click("grandchild", false);
-expect(["root", "sibling", "other-child"]);
-click("grandchild", true);
-expect(["root", "grandchild", "sibling", "other-child"]);
-// An already selected descendant must not stop recursive traversal.
-click("root", true);
-expect(["root", "child", "grandchild", "sibling", "other-child"]);
-assert.equal(renders, 8);
-change({target: {dataset: {}, checked: true}});
-assert.equal(renders, 8);
-'''.replace("HANDLER", handler)
-    result = subprocess.run([node, "-e", script], capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
