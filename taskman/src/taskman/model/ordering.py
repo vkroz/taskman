@@ -1,18 +1,24 @@
-"""Sibling order: the store keeps a rank per item."""
+"""Sibling order: the store keeps a rank per item.
+
+Children are ordered under their parent. Top-level items are ordered within
+their project, under the group key ``root:<PROJECT>``.
+"""
 
 from __future__ import annotations
 
 from taskman.storage.store import Store, key_order
 
 
-_ROOT = "root"
+def sibling_group(row: dict) -> str:
+    """The parent ID, or ``root:<PROJECT>`` for a top-level item."""
+    return row["parent_id"] or f"root:{row['metadata'].get('project')}"
 
 
 def apply_order(rows: list[dict], parents: dict[str, list[str]]) -> list[dict]:
     """Add numeric sibling order without changing work-item metadata."""
     groups: dict[str, list[dict]] = {}
     for row in rows:
-        groups.setdefault(row["parent_id"] or _ROOT, []).append(row)
+        groups.setdefault(sibling_group(row), []).append(row)
     for parent, siblings in groups.items():
         saved = parents.get(parent, [])
         rank = {item_id: index for index, item_id in enumerate(saved)}
@@ -28,22 +34,22 @@ def apply_order(rows: list[dict], parents: dict[str, list[str]]) -> list[dict]:
 
 
 def ordered_siblings(store: Store, item_id: str) -> list[dict]:
-    """Return ordinary siblings in their persisted order."""
+    """Return the item's siblings, itself included, in their persisted order."""
     from taskman.model.collection import collection
 
     rows = collection(store)
     by_id = {row["id"]: row for row in rows}
     if item_id not in by_id:
         raise ValueError(f"item not found: {item_id}")
-    parent_id = by_id[item_id]["parent_id"]
+    group = sibling_group(by_id[item_id])
     return sorted(
-        (row for row in rows if row["parent_id"] == parent_id),
+        (row for row in rows if sibling_group(row) == group),
         key=lambda row: (row["order"], key_order(row["id"])),
     )
 
 
 def reorder_item(store: Store, item_id: str, position: int) -> list[str]:
-    """Move an item to a one-based sibling position."""
+    """Move an item to a one-based position among its siblings; a top-level item stays in its project."""
     siblings = ordered_siblings(store, item_id)
     if not isinstance(position, int) or isinstance(position, bool):
         raise ValueError("Position must be an integer")
@@ -56,5 +62,5 @@ def reorder_item(store: Store, item_id: str, position: int) -> list[str]:
     moved = siblings.pop(current)
     siblings.insert(target, moved)
     order = [row["id"] for row in siblings]
-    store.save_order(moved["parent_id"] or _ROOT, order, item_id)
+    store.save_order(sibling_group(moved), order, item_id)
     return order

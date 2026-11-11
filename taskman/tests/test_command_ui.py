@@ -14,13 +14,7 @@ from typer.testing import CliRunner
 
 from taskman.cli import app
 from tests import sql_helpers as sql
-from taskman.commands.ui import (
-    _build_mermaid,
-    _Item,
-    _make_handler,
-    collect_page,
-    render_page,
-)
+from taskman.commands.ui import _make_handler, render_page
 from taskman.storage.sql_store import open_sql_store
 
 runner = CliRunner()
@@ -39,63 +33,11 @@ def _new(title: str, item_type: str = "task") -> str:
     return key
 
 
-# ---- data aggregation ----
-
-
-def test_collect_page_empty_tree(store) -> None:
-    page = collect_page(store)
-    assert page.items == []
-    assert page.ready == []
-    assert page.blocked == []
-    assert page.recent == []
-
-
-def test_collect_page_ready_and_blocked(store) -> None:
-    a = _new("A")
-    b = _new("B")
-    sql.run("depend", b, "--on", a)
-    page = collect_page(store)
-    ready_ids = {i.item_id for i in page.ready}
-    blocked_ids = {i.item_id for i in page.blocked}
-    assert a in ready_ids
-    assert b in blocked_ids
-    assert f"{a} --> {b}" in page.graph_mermaid
-
-
-def test_collect_page_includes_done_in_items_but_not_ready(store) -> None:
-    a = _new("A")
-    sql.run("close", a)
-    page = collect_page(store)
-    assert any(i.item_id == a for i in page.items)
-    assert not any(i.item_id == a for i in page.ready)
-    assert not any(i.item_id == a for i in page.blocked)
-    assert [i.item_id for i in page.recent] == [a]
-
-
-def test_build_mermaid_empty() -> None:
-    out = _build_mermaid([])
-    assert out.startswith("flowchart")
-    assert "empty" in out
-
-
-def test_build_mermaid_with_edges() -> None:
-    items = [
-        _Item("TM-1", None, "epic", "backlog", "00", "a", "A", "sqlite:TM-1", (), 0),
-        _Item("TM-2", None, "task", "backlog", "00", "b", "B", "sqlite:TM-2", ("TM-1",), 0),
-    ]
-    out = _build_mermaid(items)
-    assert "TM-1" in out
-    assert "TM-2" in out
-    assert "TM-1 --> TM-2" in out
-
-
 # ---- rendering ----
 
 
 def test_render_page_contains_required_sections(store) -> None:
-    _new("X")
-    page = collect_page(store)
-    html = render_page(page)
+    html = render_page()
     assert 'id="tree"' in html
     assert 'aria-label="Work views"' in html
     assert 'id="filters"' in html
@@ -112,13 +54,12 @@ def test_render_page_contains_required_sections(store) -> None:
     assert 'cdn.jsdelivr' not in html
 
 
-def test_render_page_escapes_html(store) -> None:
-    """Item titles with HTML characters are escaped."""
+def test_render_page_holds_no_item_data(store) -> None:
+    """Item data arrives through JSON, never interpolated into the page."""
     _new("<script>alert(1)</script>")
-    page = collect_page(store)
-    html = render_page(page)
+    html = render_page()
     assert "<script>alert" not in html
-    assert "alert(1)" not in html  # Data arrives through JSON, never interpolated into script.
+    assert "alert(1)" not in html
 
 
 # ---- server smoke ----
@@ -206,7 +147,7 @@ def test_server_api_reorder_persists_and_rejects_invalid_position(store) -> None
     try:
         assert post({"id": ids[2], "position": 1})["order"] == [ids[2], ids[0], ids[1]]
         before = store.sibling_order()
-        assert before["root"] == [ids[2], ids[0], ids[1]]
+        assert before["root:TM"] == [ids[2], ids[0], ids[1]]
         with pytest.raises(HTTPError) as error:
             post({"id": ids[0], "position": 99})
         assert error.value.code == 400

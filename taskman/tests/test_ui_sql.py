@@ -53,7 +53,9 @@ def api(tmp_path):
 
 
 def _create(api, title, **fields):
-    return api("/api/items", {"title": title, "type": "task", "body": "Body", **fields}, status=201)
+    created = api("/api/items", {"title": title, "type": "task", "body": "Body", **fields}, status=201)
+    assert created.pop("row")["id"] == created["id"]
+    return created
 
 
 def test_create_uses_projects_and_keys(api):
@@ -83,7 +85,8 @@ def test_comments_with_kinds_and_results(api):
 
 def test_assignee_and_labels(api):
     _create(api, "Item", project="TM")
-    assert api("/api/assign", {"id": "TM-1", "assignee": "codex"}) == {"ok": True}
+    assigned = api("/api/assign", {"id": "TM-1", "assignee": "codex"})
+    assert (assigned["ok"], assigned["row"]["assignee"]) == (True, "codex")
     assert "already" in api("/api/assign", {"id": "TM-1", "assignee": "codex"})["message"]
     assert "1-100" in api("/api/assign", {"id": "TM-1", "assignee": "x" * 101}, status=400)["error"]
     api("/api/label", {"id": "TM-1", "add": ["ui", "db"], "remove": []})

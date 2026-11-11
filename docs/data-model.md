@@ -33,7 +33,7 @@ Work is centered on items, not on repositories (decision M5). A command that nam
 | status | `backlog`, `active` or `done`. `done` means the item is complete. Status is a field of the item: `move` and `close` change its value. Nothing moves between tables. |
 | draft | True when the item is new. `finalize` sets it to false. |
 | parent | A work item in the same project, or none. A `task` has no children. |
-| rank | The position among siblings. Lower rank shows first. |
+| rank | The position among siblings. Lower rank shows first. The top-level items of one project are siblings. |
 | revision | An integer that starts at 0. See "Revision". |
 | assignee | A person or an agent name, for example `claude-code`. Optional. 1 to 100 characters. |
 | labels | A set of labels. Each label has 1 to 50 characters: lowercase letters, digits, `-` and `_`. |
@@ -79,14 +79,14 @@ Each rule of epic requirement R1 applies to the SQL model as follows.
 
 | Rule | SQL model |
 | --- | --- |
-| Drafts | A new item has draft true. `finalize` sets it to false. A draft can not become active or done. An item can not become active when an ancestor is a draft. |
+| Drafts | A new item has draft true. `finalize` sets it to false. A draft can not become active or done. An item can not become active when an ancestor is a draft. `edit` accepts an empty description only while the item is a draft. |
 | Close gates | `close` needs: no open descendant, no unfinished dependency on the item or an ancestor, a `summary` comment at the current revision, and the latest `verification` comment at the current revision with result `pass`. |
 | Immutability | The change of status to `done` is the last change to an item. After it, the item accepts no change and no comment: no field, link, label, assignee or rank changes (decision M2). |
 | Revision | The revision increases by 1 when the description, type or dependencies change, and when a `decision` or `progress` comment is added. When an item gets a new revision, a new child, a discarded child, or a status change, the revision of each ancestor increases by 1. Assignee, labels and rank do not change the revision. |
 | Cycles | `depend` refuses a link that makes a cycle, with parent completion included. |
 | Task is a leaf | A `task` can not have children. `convert` to `task` is refused when the item has children. |
 | Discard | Only a draft with no children and no item that depends on it can be discarded. Discard deletes the item with its comments, links, labels and activity. The key number is not used again. |
-| Rank | `reorder` moves an open item among its siblings. A done item keeps its rank. Moving one item does not change the rank of a done sibling. |
+| Rank | `reorder` moves an open item among its siblings. A top-level item moves only among the top-level items of its project. A done item keeps its rank. Moving one item does not change the rank of a done sibling. |
 | Readiness | An item is ready when it is not done, and the item and all its ancestors are finalized, not done, and have no unfinished dependency. |
 
 ## Transactions and locking

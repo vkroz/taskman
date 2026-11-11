@@ -111,7 +111,7 @@ class Store(Protocol):
         ...
 
     def save_order(self, parent_key: str, item_ids: list[str], moved_id: str) -> None:
-        """Save the sibling order under a parent ID, or ``root``, after ``moved_id`` moved.
+        """Save the sibling order under a parent ID, or ``root:<PROJECT>``, after ``moved_id`` moved.
 
         Only the moved item changes position; the other siblings keep their order.
         """
@@ -134,7 +134,11 @@ class Store(Protocol):
         ...
 
     def sibling_order(self) -> dict[str, list[str]]:
-        """Saved sibling order: parent ID (or ``root``) to ordered child IDs."""
+        """Saved sibling order: parent ID, or ``root:<PROJECT>`` for top-level items, to ordered IDs."""
+        ...
+
+    def projects(self) -> list[dict[str, str]]:
+        """Every project as ``key`` and ``name``, oldest first."""
         ...
 
 

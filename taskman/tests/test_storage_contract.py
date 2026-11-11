@@ -352,7 +352,7 @@ def test_closed_items_are_immutable(store):
         with pytest.raises((LifecycleError, StorageError), match="immutable"):
             change()
     assert store.get(item) == before
-    assert store.sibling_order()["root"] == [item, sibling]
+    assert store.sibling_order()["root:TM"] == [item, sibling]
 
 
 def test_edit_comments_the_reason(store):
@@ -481,9 +481,9 @@ def test_reorder_moves_only_the_open_item(store):
     _closed(store, ids[1])
     ranks = {r[0]: r[1] for r in store.conn.execute("SELECT number, rank FROM items").fetchall()}
     assert reorder_item(store, ids[3], 1) == [ids[3], ids[0], ids[1], ids[2]]
-    assert store.sibling_order()["root"] == [ids[3], ids[0], ids[1], ids[2]]
+    assert store.sibling_order()["root:TM"] == [ids[3], ids[0], ids[1], ids[2]]
     assert reorder_item(store, ids[0], 4) == [ids[3], ids[1], ids[2], ids[0]]
-    assert store.sibling_order()["root"] == [ids[3], ids[1], ids[2], ids[0]]
+    assert store.sibling_order()["root:TM"] == [ids[3], ids[1], ids[2], ids[0]]
     after = {r[0]: r[1] for r in store.conn.execute("SELECT number, rank FROM items").fetchall()}
     assert [n for n in ranks if ranks[n] != after[n]] == [1, 4]  # TM-1 and TM-4 moved; done TM-2 kept its rank
     with pytest.raises(ValueError, match="between 1 and 4"):
@@ -492,7 +492,7 @@ def test_reorder_moves_only_the_open_item(store):
 
 def test_new_items_rank_after_their_siblings(store):
     ids = [_new(store, f"Item {n}") for n in range(11)]
-    assert store.sibling_order()["root"] == ids  # TM-10 and TM-11 follow TM-9
+    assert store.sibling_order()["root:TM"] == ids  # TM-10 and TM-11 follow TM-9
 
 
 # ---- transactions, schema and concurrency ---------------------------------

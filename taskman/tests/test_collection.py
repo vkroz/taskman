@@ -97,7 +97,8 @@ def test_http_query_edit_and_discard(store):
     try:
         result = post("query", {"filters": [{"field": "status", "value": "done"}]})
         assert [r["id"] for r in result["rows"]] == [done]
-        assert "draft" in result["fields"]
+        assert not {"all", "fields"} & set(result)
+        assert not {"metadata", "body", "journal"} & set(result["rows"][0])
         post(
             "edit",
             {"id": id, "title": "Edited", "body": "Updated", "reason": "Clear scope"},
@@ -191,7 +192,7 @@ def test_reorder_refuses_completed_records(store):
     assert result.exit_code != 0
     assert "immutable" in result.output
     assert {item.id: item.metadata for item in store.items()} == before
-    assert store.sibling_order()["root"] == [first, second]
+    assert store.sibling_order()["root:TM"] == [first, second]
 
 
 def test_hide_done_filter_composes_with_other_filters_and_context(store):
@@ -225,3 +226,11 @@ def test_hide_done_filter_composes_with_other_filters_and_context(store):
         epic=epic,
     )
     assert [row["id"] for row in restored] == [epic, done_id]
+
+
+def test_sort_by_id_orders_keys_numerically(store):
+    ids = [sql.new(f"Item {n}") for n in range(11)]
+    rows = collection(store)
+    assert [row["id"] for row in query(rows, sort="id")] == ids
+    assert [row["id"] for row in query(rows, sort="id", descending=True)] == ids[::-1]
+    assert [row["id"] for row in query(rows, where=lambda row: row["id"] in ids[9:])] == ids[9:]

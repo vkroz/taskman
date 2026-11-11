@@ -36,9 +36,12 @@ def text_value(value):
 
 
 def query(
-    rows: list[dict], filters=(), keyword="", epic="", sort="priority", descending=False
+    rows: list[dict], filters=(), keyword="", epic="", sort="priority", descending=False, where=None
 ):
-    """Filter matches then order siblings; return matches with contextual ancestors."""
+    """Filter matches then order siblings; return matches with contextual ancestors.
+
+    ``where`` is an optional extra condition on a row. Sort ``id`` orders keys numerically.
+    """
     if not isinstance(filters, (list, tuple)) or not all(
         isinstance(f, dict) and isinstance(f.get("field"), str) for f in filters
     ):
@@ -57,6 +60,8 @@ def query(
         return False
 
     def matches(row):
+        if where is not None and not where(row):
+            return False
         if epic and not within(row):
             return False
         if (
@@ -110,6 +115,8 @@ def query(
     def order(row):
         if sort == "priority":
             return (0, row.get("order", 0), key_order(row["id"]))
+        if sort == "id":
+            return (0, 0, key_order(row["id"]))
         value = field_value(row, sort)
         # Numeric priorities and revisions should not sort lexicographically.
         if isinstance(value, (int, float)) or (

@@ -79,7 +79,7 @@ def reorder(
     item_id: str = typer.Argument(..., help="Item ID to move."),
     position: int = typer.Option(..., "--position", min=1, help="One-based sibling position."),
 ):
-    """Move an item to a persisted position within its current parent."""
+    """Move an item to a persisted position among its siblings; a top-level item stays in its project."""
     try:
         order = reorder_item(open_store(), item_id, position)
     except ValueError as exc:

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from taskman.model.graph import find_cycles, unknown_references
-from taskman.storage.store import Item, Store
+from taskman.storage.store import Item, Store, key_order
 
 _PROJECT_KEY = re.compile(r"^[A-Z][A-Z0-9]{1,9}$")
 _LABEL = re.compile(r"^[a-z0-9_-]{1,50}$")
@@ -65,7 +65,7 @@ def _open(item: Item) -> None:
         raise LifecycleError(IMMUTABLE, usage=True)
 
 
-def _ancestors(items: dict[str, Item], item: Item) -> list[Item]:
+def ancestors(items: dict[str, Item], item: Item) -> list[Item]:
     chain = []
     parent = item.parent_id
     while parent in items:
@@ -239,6 +239,21 @@ def set_dependencies(store: Store, item_id: str, depends_on: list[str]) -> Item:
     return item
 
 
+def discard_blocker(item: Item, items: dict[str, Item]) -> str | None:
+    """Why ``discard`` would refuse the item, or ``None`` when it can be discarded. Changes nothing."""
+    if item.status == "done":
+        return "closed"
+    if not item.draft:
+        return "not a draft"
+    children = sum(other.parent_id == item.id for other in items.values())
+    if children:
+        return f"has {children} {'child' if children == 1 else 'children'}"
+    dependents = sorted((other.id for other in items.values() if item.id in other.depends_on), key=key_order)
+    if dependents:
+        return f"{', '.join(dependents)} {'depends' if len(dependents) == 1 else 'depend'} on it"
+    return None
+
+
 def discard(store: Store, item_id: str) -> None:
     items = {item.id: item for item in store.items()}
     if item_id not in items:
@@ -262,10 +277,10 @@ def move(store: Store, item_id: str, target_status: str) -> Item:
     if item.status == target_status:
         raise NoChange(f"No change: {item_id} already in {target_status}.")
     items = {other.id: other for other in store.items()}
-    if any(ancestor.status == "done" for ancestor in _ancestors(items, item)):
+    if any(ancestor.status == "done" for ancestor in ancestors(items, item)):
         raise LifecycleError("closed ancestors are immutable; create a follow-up task", usage=True)
     if target_status == "active":
-        for current in [item, *_ancestors(items, item)]:
+        for current in [item, *ancestors(items, item)]:
             if current.draft:
                 raise LifecycleError("finalize the item and its ancestors before starting work", usage=True)
             for dep in current.depends_on:
@@ -297,28 +312,89 @@ def convert(store: Store, item_id: str, target_type: str) -> Item:
     return item
 
 
+def blockers(item: Item, items: dict[str, Item]) -> list[str]:
+    """Unfinished dependencies of the item and its ancestors, item first."""
+    chain = [item, *ancestors(items, item)]
+    deps = dict.fromkeys(dep for current in chain for dep in current.depends_on)
+    return [dep for dep in deps if dep not in items or items[dep].status != "done"]
+
+
+def _evidence(entries: list[dict], kind: str, revision: int) -> tuple[str, int | None]:
+    """The state of the latest summary or verification: its status and, when stale, its revision."""
+    found = [e for e in entries if e.get("kind") == kind]
+    if not found:
+        return "missing", None
+    if kind == "summary":
+        if any(e.get("revision") == revision for e in found):
+            return "present", None
+        return "stale", found[-1].get("revision")
+    if found[-1].get("revision") != revision:
+        return "stale", found[-1].get("revision")
+    return str(found[-1].get("result")), None
+
+
+def close_gates(item: Item, items: dict[str, Item]) -> list[dict[str, Any]]:
+    """The checks that ``close`` applies, in display order. Reads only ``items``; changes nothing.
+
+    Each check has ``check``, ``ok``, ``detail`` (display text) and ``refs`` (keys
+    that fail the check). Summary and verification also have ``status`` and ``revision``.
+    """
+    chain = [item, *ancestors(items, item)]
+    drafts = [current.id for current in chain if current.draft]
+    closed = [ancestor.id for ancestor in chain[1:] if ancestor.status == "done"]
+    deps = list(dict.fromkeys(dep for current in chain for dep in current.depends_on))
+    waiting = blockers(item, items)
+    descendants = _descendants(items, item.id)
+    unfinished = [other.id for other in descendants if other.status != "done"]
+    revision = _revision(item)
+    entries = item.metadata.get("journal") or []
+
+    if not drafts:
+        finalized = "Finalized"
+    elif item.draft:
+        finalized = "Draft"
+    else:
+        finalized = f"Draft ancestor: {', '.join(drafts)}"
+    if closed:
+        dependencies = f"Closed ancestor: {', '.join(closed)}"
+    elif waiting:
+        dependencies = f"Waiting on {', '.join(waiting)}"
+    else:
+        dependencies = f"Dependencies done ({len(deps)}/{len(deps)})" if deps else "No dependencies"
+    done_count = len(descendants) - len(unfinished)
+    children = f"Sub-items done ({done_count}/{len(descendants)})" if descendants else "No sub-items"
+    gates: list[dict[str, Any]] = [
+        {"check": "finalized", "ok": not drafts, "detail": finalized, "refs": drafts},
+        {"check": "dependencies", "ok": not waiting and not closed, "detail": dependencies,
+         "refs": waiting + closed},
+        {"check": "children", "ok": not unfinished, "detail": children, "refs": unfinished},
+    ]
+    for kind, label, passing in (("summary", "Summary", "present"), ("verification", "Verification", "pass")):
+        status, stale_at = _evidence(entries, kind, revision)
+        detail = f"stale at rev {stale_at}" if status == "stale" else status
+        gates.append({"check": kind, "ok": status == passing, "detail": f"{label} for rev {revision}: {detail}",
+                      "refs": [], "status": status, "revision": revision})
+    return gates
+
+
 def close(store: Store, item_id: str) -> Item:
     item = _require(store, item_id, usage=False)
     if item.status == "done":
         raise NoChange(f"No change: {item_id} already done.")
     items = {other.id: other for other in store.items()}
-    unfinished = [other for other in _descendants(items, item_id) if other.status != "done"]
-    if unfinished:
+    gates = {gate["check"]: gate for gate in close_gates(item, items)}
+    if not gates["children"]["ok"]:
         lines = [f"cannot close {item_id} — descendants not in done:"]
-        lines += [f"  {other.id}" for other in unfinished]
+        lines += [f"  {ref}" for ref in gates["children"]["refs"]]
         raise LifecycleError("\n".join(lines))
     _readable(item, usage=False)
     if item.draft:
         raise LifecycleError("finalize the draft before closing it", usage=True)
-    readable = {other_id: other for other_id, other in items.items() if not other.error}
-    if not is_ready(readable[item_id], readable):
+    if not (gates["finalized"]["ok"] and gates["dependencies"]["ok"]):
         raise LifecycleError("item or ancestor has an unfinished dependency or is a draft", usage=True)
-    entries = item.metadata.get("journal") or []
-    revision = _revision(item)
-    checks = [e for e in entries if e.get("kind") == "verification"]
-    if not checks or checks[-1].get("result") != "pass" or checks[-1].get("revision") != revision:
+    if not gates["verification"]["ok"]:
         raise LifecycleError("record a passing verification for the current revision before closing", usage=True)
-    if not any(e.get("kind") == "summary" and e.get("revision") == revision for e in entries):
+    if not gates["summary"]["ok"]:
         raise LifecycleError("record a summary for the current revision before closing", usage=True)
     closed = store.set_status(item_id, "done")
     invalidate_ancestors(store, item_id)
@@ -331,7 +407,8 @@ def edit(store: Store, item_id: str, title: Any, body: Any, reason: Any) -> Item
         raise LifecycleError("Completed work is immutable; create a follow-up task", usage=True)
     if not isinstance(title, str) or not title.strip() or len(title) > 200:
         raise LifecycleError("Enter a title of 1–200 characters", usage=True)
-    if not isinstance(body, str) or not body.strip():
+    # A draft may stay title-only (decision D2); finalized work keeps a description.
+    if not isinstance(body, str) or (not body.strip() and not item.draft):
         raise LifecycleError("Description must not be empty", usage=True)
     if not isinstance(reason, str) or not reason.strip():
         raise LifecycleError("Explain why the task changed", usage=True)
@@ -341,7 +418,7 @@ def edit(store: Store, item_id: str, title: Any, body: Any, reason: Any) -> Item
     metadata.setdefault("journal", []).append(
         {
             "kind": "decision",
-            "actor": "Taskman user",
+            "actor": store.actor,
             "at": _now(),
             "text": reason.strip(),
             "revision": metadata["revision"],
