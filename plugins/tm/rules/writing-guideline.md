@@ -42,10 +42,18 @@ Structure:
 - Use headings, lists, tables, and appendices only when they help the reader.
 - Add status labels, timestamps, version blocks, approval fields, and disclaimers only when they fulfill a real requirement.
 
+Keep content together:
+- Name things in words. Do not invent codes or labels. ❌ "3a", "D1", "option C5" → ✅ "browser login", "the choice of token issuer"
+- Do not refer to an earlier item by its number or position. Restate the content. ❌ "Line 3 changes" → ✅ "The rule 'a copied login must not work on another machine' changes"
+- Quote the sentence you discuss. ❌ "the unclear line" → ✅ "the line 'The design needs no machine key and no signed requests'"
+- The reader must understand each message without scrolling back.
+
 Test before sending:
 - Can you state the document's purpose in one sentence?
 - Does every claim have a number or source?
 - Any relative time references or undefined acronyms?
 - Any sentence over 30 words?
 - Does technical documentation comply with ASD-STE100?
+- Any code or label that stands for content? Any reference to an earlier item by number or position?
+- Is each sentence under discussion quoted?
 - Did edits for brevity preserve necessary evidence, tradeoffs, constraints, and distinctions?
