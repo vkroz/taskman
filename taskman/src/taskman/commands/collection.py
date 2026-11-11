@@ -1,22 +1,17 @@
-"""CLI access to the same queries, editing and history operations as the UI."""
+"""CLI access to the same queries, editing and ordering operations as the UI."""
 
 import json
 import typer
 from taskman import lifecycle
 from taskman.commands.context import read_body
-from taskman.model.collection import (
-    collection,
-    query,
-    consolidate as do_consolidate,
-    histories,
-)
+from taskman.model.collection import collection, query
 from taskman.model.ordering import reorder_item
-from taskman.storage.store import as_store, open_store
+from taskman.storage.store import open_store
 
 
-def edit_item(source, item_id, title, body, reason):
+def edit_item(store, item_id, title, body, reason):
     """Edit a title and description and journal the reason. Raises ValueError on a rule failure."""
-    lifecycle.edit(as_store(source), item_id, title, body, reason)
+    lifecycle.edit(store, item_id, title, body, reason)
 
 
 def edit(
@@ -48,7 +43,6 @@ def browse(
     epic: str = typer.Option(""),
     sort: str = typer.Option("priority"),
     descending: bool = typer.Option(False),
-    include_archived: bool = typer.Option(False),
     project: str | None = typer.Option(None, "--project", help="Only items of this project key."),
 ):
     """Query all metadata and emit hierarchy-preserving JSON with context markers."""
@@ -68,7 +62,7 @@ def browse(
     typer.echo(
         json.dumps(
             query(
-                collection(open_store(), include_archived),
+                collection(open_store()),
                 filters,
                 keyword,
                 epic,
@@ -79,25 +73,6 @@ def browse(
             default=str,
         )
     )
-
-
-def consolidate(ids: list[str] = typer.Argument(...), title: str = typer.Option(...)):
-    """Summarize completed subtrees; retain immutable originals and hide ordinary rows."""
-    try:
-        result = do_consolidate(open_store(), ids, title)
-    except ValueError as e:
-        raise typer.BadParameter(str(e)) from e
-    typer.echo(json.dumps(result, indent=2))
-
-
-def history():
-    """Retrieve consolidation summaries and original task IDs."""
-    store = open_store()
-    if not store.consolidation:
-        from taskman.storage.sql_store import NO_CONSOLIDATION
-
-        raise typer.BadParameter(NO_CONSOLIDATION)
-    typer.echo(json.dumps(histories(store), indent=2))
 
 
 def reorder(

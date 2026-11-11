@@ -1,51 +1,11 @@
-"""Durable sibling ordering stored outside immutable work-item records."""
+"""Sibling order: the store keeps a rank per item."""
 
 from __future__ import annotations
 
-import json
-import os
-import tempfile
-from pathlib import Path
-
-from taskman.storage.store import Store, as_store
+from taskman.storage.store import Store, key_order
 
 
-_ORDER_FILE = ".taskman-order.json"
 _ROOT = "root"
-
-
-def read_order(tasks_dir: Path) -> dict[str, list[str]]:
-    path = tasks_dir / _ORDER_FILE
-    if not path.exists():
-        return {}
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise ValueError(f"Cannot read persisted task order: {exc}") from exc
-    parents = value.get("parents") if isinstance(value, dict) else None
-    if not isinstance(parents, dict) or not all(
-        isinstance(key, str)
-        and isinstance(ids, list)
-        and all(isinstance(item_id, str) for item_id in ids)
-        for key, ids in parents.items()
-    ):
-        raise ValueError("Persisted task order is invalid")
-    return parents
-
-
-def write_order(tasks_dir: Path, parents: dict[str, list[str]]) -> None:
-    tasks_dir.mkdir(parents=True, exist_ok=True)
-    path = tasks_dir / _ORDER_FILE
-    handle, temporary = tempfile.mkstemp(prefix=".taskman-order-", dir=tasks_dir)
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8") as output:
-            json.dump({"version": 1, "parents": parents}, output, indent=2)
-            output.write("\n")
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(temporary, path)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
 
 
 def apply_order(rows: list[dict], parents: dict[str, list[str]]) -> list[dict]:
@@ -58,7 +18,7 @@ def apply_order(rows: list[dict], parents: dict[str, list[str]]) -> list[dict]:
         rank = {item_id: index for index, item_id in enumerate(saved)}
         fallback = sorted(
             (row for row in siblings if row["id"] not in rank),
-            key=lambda row: (str(row["metadata"].get("priority", "")), row["id"]),
+            key=lambda row: key_order(row["id"]),
         )
         complete = saved + [row["id"] for row in fallback]
         complete_rank = {item_id: index for index, item_id in enumerate(complete)}
@@ -67,24 +27,23 @@ def apply_order(rows: list[dict], parents: dict[str, list[str]]) -> list[dict]:
     return rows
 
 
-def ordered_siblings(source: Store | Path, item_id: str) -> list[dict]:
+def ordered_siblings(store: Store, item_id: str) -> list[dict]:
     """Return ordinary siblings in their persisted order."""
     from taskman.model.collection import collection
 
-    rows = collection(source)
+    rows = collection(store)
     by_id = {row["id"]: row for row in rows}
     if item_id not in by_id:
         raise ValueError(f"item not found: {item_id}")
     parent_id = by_id[item_id]["parent_id"]
     return sorted(
         (row for row in rows if row["parent_id"] == parent_id),
-        key=lambda row: (row["order"], row["id"]),
+        key=lambda row: (row["order"], key_order(row["id"])),
     )
 
 
-def reorder_item(source: Store | Path, item_id: str, position: int) -> list[str]:
-    """Move an item to a one-based sibling position and atomically persist it."""
-    store = as_store(source)
+def reorder_item(store: Store, item_id: str, position: int) -> list[str]:
+    """Move an item to a one-based sibling position."""
     siblings = ordered_siblings(store, item_id)
     if not isinstance(position, int) or isinstance(position, bool):
         raise ValueError("Position must be an integer")

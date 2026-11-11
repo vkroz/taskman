@@ -17,7 +17,7 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from taskman.model.yaml_io import emit_frontmatter
 from taskman.storage.schema import CURRENT_VERSION
@@ -25,11 +25,7 @@ from taskman.storage.settings import StorageSettings
 from taskman.storage.sql import SQLITE, Dialect, connect, transaction
 from taskman.storage.store import Item, StorageConfigError, StorageError
 
-if TYPE_CHECKING:
-    from taskman.integrity import Finding
-
 _KEY = re.compile(r"^([A-Z][A-Z0-9]{1,9})-([1-9][0-9]*)$")
-NO_CONSOLIDATION = "Consolidation is not available with a SQL backend (decision D8)."
 # Item data that only dedicated operations or the database itself change.
 _READ_ONLY = ("id", "project", "type", "status", "created_at", "created_by", "changed_at")
 _ITEM_COLUMNS = (
@@ -74,9 +70,6 @@ def _text(field: str, value: Any) -> str | None:
 
 
 class SqlStore:
-    consolidation = False  # decision D8
-    reorder_done = False  # decision M2
-
     def __init__(self, conn: Any, dialect: Dialect, actor: str | None = None) -> None:
         self.conn = conn
         self.dialect = dialect
@@ -176,9 +169,6 @@ class SqlStore:
             ).fetchall()
         return [{"field": f, "old": old, "new": new, "author": a, "at": at} for f, old, new, a, at in rows]
 
-    def histories(self) -> list[dict]:
-        return []
-
     def sibling_order(self) -> dict[str, list[str]]:
         with self._read():
             rows = self._q(
@@ -191,9 +181,6 @@ class SqlStore:
             order.setdefault(parent, []).append(f"{project}-{number}")
         return order
 
-    def check_layout(self) -> list[Finding]:
-        return []
-
     # ---- writes --------------------------------------------------------
 
     def create(
@@ -203,7 +190,6 @@ class SqlStore:
         title: str,
         body: str,
         parent_id: str | None,
-        slug: str,
         status: str,
         draft: bool,
         project: str | None = None,
@@ -336,12 +322,6 @@ class SqlStore:
             now = _now()
             self._q("UPDATE items SET rank = ?, changed_at = ? WHERE id = ?", (new_rank, now, row_id))
             self._activity(row_id, "rank", old_rank, new_rank, now)
-
-    def history_link(self, item_id: str) -> str:
-        raise StorageError(NO_CONSOLIDATION)
-
-    def save_history(self, record: dict[str, Any]) -> dict[str, Any]:
-        raise StorageError(NO_CONSOLIDATION)
 
     # ---- helpers -------------------------------------------------------
 

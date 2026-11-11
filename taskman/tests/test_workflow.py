@@ -220,18 +220,3 @@ def test_cannot_close_through_unfinished_parent_dependency(sqlite_env):
     cli("close", child, ok=False)
     complete(dependency)
     cli("close", child)
-
-
-# ---- file backend: layout only; removed with 261110001 ----
-
-
-def test_find_project_tasks_from_nested_directory(tmp_path, monkeypatch):
-    monkeypatch.delenv("TASKMAN_TASKS_DIR", raising=False)
-    (tmp_path / ".git").mkdir()
-    nested = tmp_path / "src" / "nested"
-    nested.mkdir(parents=True)
-    monkeypatch.chdir(nested)
-    from taskman.commands.new import get_tasks_dir
-    assert get_tasks_dir() == tmp_path / "tasks"
-    (tmp_path / "tasks").mkdir()
-    assert get_tasks_dir() == tmp_path / "tasks"

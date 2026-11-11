@@ -16,8 +16,7 @@ from pathlib import Path
 
 import typer
 
-from taskman.storage.sql_store import default_actor
-from taskman.storage.store import Store, StorageError, as_store, open_store, key_order
+from taskman.storage.store import Store, StorageError, open_store, key_order
 
 
 # ---- data preparation ----
@@ -26,6 +25,7 @@ from taskman.storage.store import Store, StorageError, as_store, open_store, key
 @dataclass(frozen=True, slots=True)
 class _Item:
     item_id: str
+    parent_id: str | None
     item_type: str
     status: str
     priority: str
@@ -47,10 +47,10 @@ class _Page:
 
 
 def _load_items(store: Store) -> list[_Item]:
-    archived = {id for h in store.histories() for id in h["ids"]}
     return [
         _Item(
             item_id=item.id,
+            parent_id=item.parent_id,
             item_type=item.type,
             status=item.status,
             priority=item.priority,
@@ -62,12 +62,11 @@ def _load_items(store: Store) -> list[_Item]:
             draft=item.draft,
         )
         for item in store.items()
-        if item.id not in archived and not item.error
+        if not item.error
     ]
 
 
-def collect_page(source: Store | Path) -> _Page:
-    store = as_store(source)
+def collect_page(store: Store) -> _Page:
     items = _load_items(store)
     graph = _load_graph(store)
     page = _Page(items=sorted(items, key=lambda i: (i.priority, key_order(i.item_id))))
@@ -251,14 +250,13 @@ def _render_section(title: str, items: list[_Item], section_id: str) -> str:
 
 
 def _render_tree(items: list[_Item]) -> str:
-    by_path = {i.path: i for i in items}
+    keys = {i.item_id for i in items}
     children: dict[str | None, list[_Item]] = {}
     for item in items:
-        parent = str(Path(item.path).parent)
-        children.setdefault(parent if parent in by_path else None, []).append(item)
+        children.setdefault(item.parent_id if item.parent_id in keys else None, []).append(item)
 
     def branch(parent):
-        return '<ul>' + ''.join('<li>' + _render_item(i) + branch(i.path) + '</li>'
+        return '<ul>' + ''.join('<li>' + _render_item(i) + branch(i.item_id) + '</li>'
                                for i in children.get(parent, [])) + '</ul>'
     return '<section id="tree"><h2>Nested tree</h2>' + branch(None) + '</section>'
 
@@ -293,8 +291,7 @@ def _unchanged_ok(change) -> dict:
     return {'ok': True}
 
 
-def _make_handler(source: Store | Path):
-    store = as_store(source)
+def _make_handler(store: Store):
 
     class _Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args) -> None:  # noqa: A002
@@ -318,7 +315,7 @@ def _make_handler(source: Store | Path):
             if not self._local_request() or self.headers.get('X-Taskman') != '1':
                 self._json(403, {'error': 'Only local Taskman UI requests are accepted.'})
                 return
-            if self.path not in ('/api/items', '/api/query', '/api/edit', '/api/discard', '/api/consolidate', '/api/reorder',
+            if self.path not in ('/api/items', '/api/query', '/api/edit', '/api/discard', '/api/reorder',
                                  '/api/comment', '/api/assign', '/api/label'):
                 self._json(404, {'error': 'Unknown endpoint'})
                 return
@@ -332,21 +329,19 @@ def _make_handler(source: Store | Path):
                 if not isinstance(data, dict):
                     raise ValueError('Expected an object')
                 if self.path != '/api/items':
-                    from taskman.model.collection import collection, query, histories, consolidate
+                    from taskman.model.collection import collection, query
                     from taskman.model.ordering import reorder_item
                     with store.lock():
                         if self.path == '/api/query':
                             rows = collection(store)
-                            all_rows = collection(store, True)
-                            fields = sorted({k for r in all_rows for k in r['metadata']} | {'parent_id'})
-                            result = {'rows': query(rows, data.get('filters', []), data.get('keyword', ''), data.get('epic', ''), data.get('sort', 'priority'), data.get('descending', False)), 'all': all_rows, 'fields': fields, 'history': histories(store),
-                                      'capabilities': {'consolidation': store.consolidation, 'reorder_done': store.reorder_done}}
+                            fields = sorted({k for r in rows for k in r['metadata']} | {'parent_id'})
+                            result = {'rows': query(rows, data.get('filters', []), data.get('keyword', ''), data.get('epic', ''), data.get('sort', 'priority'), data.get('descending', False)), 'all': rows, 'fields': fields}
                         elif self.path == '/api/edit':
                             lifecycle.edit(store, str(data.get('id', '')), data.get('title'), data.get('body'), data.get('reason'))
                             result = {'ok': True}
                         elif self.path == '/api/comment':
                             kind, result_value = data.get('kind'), data.get('result') or None
-                            author = getattr(store, 'actor', None) or default_actor()
+                            author = store.actor
                             lifecycle.check_entry(kind, author, result_value)
                             text = data.get('text')
                             if not isinstance(text, str) or not text.strip():
@@ -366,17 +361,12 @@ def _make_handler(source: Store | Path):
                         elif self.path == '/api/discard':
                             lifecycle.discard(store, str(data.get('id', '')))
                             result = {'ok': True}
-                        elif self.path == '/api/reorder':
+                        else:
                             item_id = data.get('id')
                             position = data.get('position')
                             if not isinstance(item_id, str):
                                 raise ValueError('Select a valid task ID')
                             result = {'order': reorder_item(store, item_id, position)}
-                        else:
-                            ids = data.get('ids', [])
-                            if not isinstance(ids, list) or not all(isinstance(id, str) for id in ids):
-                                raise ValueError('Select valid task IDs')
-                            result = consolidate(store, ids, data.get('title', ''))
                     self._json(200, result)
                     return
                 title, kind = data.get('title', ''), data.get('type', 'task')
@@ -401,26 +391,13 @@ def _make_handler(source: Store | Path):
             if not self._local_request():
                 self.send_error(403)
                 return
-            # Readers share the mutation lock so a rename cannot split a snapshot.
+            # Readers share the write lock so a page never mixes two states.
             with store.lock():
                 self._get()
 
         def _get(self):
             if self.path == "/":
                 self._send_html(render_page(collect_page(store)))
-            elif self.path.startswith('/api/history/'):
-                from taskman.model.collection import histories
-                key = self.path.rsplit('/', 1)[-1]
-                record = next((h for h in histories(store) if h['key'] == key), None)
-                if record is None:
-                    self.send_error(404)
-                    return
-                body = record['summary'].encode('utf-8')
-                self.send_response(200)
-                self.send_header('Content-Type', 'text/markdown; charset=utf-8')
-                self.send_header('Content-Length', str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
             elif self.path == '/api/page':
                 page = collect_page(store)
                 self._json(200, {'sections': render_sections(page), 'parents': [
@@ -448,9 +425,8 @@ def _make_handler(source: Store | Path):
             if item.error:
                 self.send_error(500, item.error)
                 return
-            data = {"frontmatter": item.metadata, "body": item.body, "path": item.location}
-            if hasattr(store, "activity"):
-                data["activity"] = store.activity(item_id)
+            data = {"frontmatter": item.metadata, "body": item.body, "path": item.location,
+                    "activity": store.activity(item_id)}
             payload = json.dumps(data, default=str).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -461,8 +437,8 @@ def _make_handler(source: Store | Path):
     return _Handler
 
 
-def _start_server(host: str, port: int, source: Store | Path, open_browser: bool = True) -> ThreadingHTTPServer:
-    server = ThreadingHTTPServer((host, port), _make_handler(source))
+def _start_server(host: str, port: int, store: Store, open_browser: bool = True) -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer((host, port), _make_handler(store))
     _pid_file().write_text(str(os.getpid()), encoding="utf-8")
     if open_browser:
         webbrowser.open(f"http://{host}:{port}/")

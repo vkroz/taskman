@@ -7,17 +7,16 @@ work-item frontmatter. They share a single tree-walk + graph-build pass
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import typer
 
 from taskman.lifecycle import is_ready
-from taskman.storage.store import Item, Store, as_store, key_order, open_store
+from taskman.storage.store import Item, Store, key_order, open_store
 
 
-def _load_graph(source: Store | Path) -> dict[str, Item]:
-    """Read every item once; return id → Item. Unreadable items are skipped."""
-    return {item.id: item for item in as_store(source).items() if not item.error}
+def _load_graph(store: Store) -> dict[str, Item]:
+    """Read every item once; return key → Item."""
+    return {item.id: item for item in store.items() if not item.error}
 
 
 def _as_dict(item: Item) -> dict[str, str | bool | None | list[str]]:

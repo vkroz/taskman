@@ -11,11 +11,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
-
-if TYPE_CHECKING:
-    from taskman.integrity import Finding
+from typing import Any, Protocol
 
 class StorageConfigError(ValueError):
     """The configured storage backend is not supported."""
@@ -67,15 +63,15 @@ class Store(Protocol):
 
     Write operations persist what they are given. Lifecycle rules (drafts,
     close gates, immutability, revisions) are checked by ``taskman.lifecycle``
-    before a write is requested.
-
-    ``consolidation`` tells whether the backend stores consolidation records
-    (decision D8). ``reorder_done`` tells whether a done item can still change
-    its sibling position (decision M2 says no).
+    before a write is requested. ``actor`` is the author of the changes:
+    the ``--actor`` value, or the git ``user.name`` (decision M1).
     """
 
-    consolidation: bool
-    reorder_done: bool
+    actor: str
+
+    def close(self) -> None:
+        """Release the connection."""
+        ...
 
     def lock(self) -> AbstractContextManager[None]:
         """Serialize mutations of this store across processes."""
@@ -88,15 +84,13 @@ class Store(Protocol):
         title: str,
         body: str,
         parent_id: str | None,
-        slug: str,
         status: str,
         draft: bool,
         project: str | None = None,
     ) -> Item:
-        """Store a new item and return it with its allocated ID.
+        """Store a new item and return it with its allocated key.
 
-        A child belongs to its parent's project. Backends without projects
-        ignore ``project``.
+        A child belongs to its parent's project; a top-level item needs ``project``.
         """
         ...
 
@@ -105,7 +99,7 @@ class Store(Protocol):
         ...
 
     def set_status(self, item_id: str, status: str) -> Item:
-        """Change an item's status. A top-level item takes its subtree along."""
+        """Change an item's status. Children keep their own status."""
         ...
 
     def set_type(self, item_id: str, item_type: str) -> Item:
@@ -123,20 +117,8 @@ class Store(Protocol):
         """
         ...
 
-    def check_layout(self) -> list[Finding]:
-        """Integrity findings specific to how this backend stores items."""
-        ...
-
-    def history_link(self, item_id: str) -> str:
-        """A link from a consolidation summary to the item's full record."""
-        ...
-
-    def save_history(self, record: dict[str, Any]) -> dict[str, Any]:
-        """Store a consolidation record and return it with its ``path``."""
-        ...
-
     def items(self) -> list[Item]:
-        """Every work item, including consolidated ones."""
+        """Every work item."""
         ...
 
     def get(self, item_id: str) -> Item | None:
@@ -147,8 +129,8 @@ class Store(Protocol):
         """The item's full record as Markdown with frontmatter."""
         ...
 
-    def histories(self) -> list[dict]:
-        """Consolidation records: key, title, summary, path and original IDs."""
+    def activity(self, item_id: str) -> list[dict[str, Any]]:
+        """The item's field changes, oldest first: field, old, new, author and time."""
         ...
 
     def sibling_order(self) -> dict[str, list[str]]:
@@ -160,7 +142,7 @@ _TRAILING_NUMBER = re.compile(r"^(.*?)([0-9]+)$")
 
 
 def key_order(item_id: str) -> tuple[str, int, str]:
-    """Sort key for item IDs: ``TM-10`` after ``TM-9``. File IDs keep their numeric order."""
+    """Sort key for item keys: ``TM-10`` after ``TM-9``."""
     match = _TRAILING_NUMBER.match(item_id)
     return (match[1], int(match[2]), "") if match else (item_id, 0, item_id)
 
@@ -182,9 +164,7 @@ def begin_command() -> Callable[[], None]:
     def end() -> None:
         _command_store.reset(token)
         for store in holder:
-            close = getattr(store, "close", None)
-            if close is not None:
-                close()
+            store.close()
 
     return end
 
@@ -203,20 +183,6 @@ def open_store() -> Store:
 def _new_store() -> Store:
     from taskman.storage.settings import storage_settings
 
-    settings = storage_settings()
-    if settings.backend == "file":
-        from taskman.storage.file import FileStore, get_tasks_dir
-
-        return FileStore(get_tasks_dir())
     from taskman.storage.sql_store import open_sql_store
 
-    return open_sql_store(settings)
-
-
-def as_store(source: Store | Path | str) -> Store:
-    """Accept a store, or a tasks directory from callers not yet on the interface."""
-    if isinstance(source, (Path, str)):
-        from taskman.storage.file import FileStore
-
-        return FileStore(Path(source))
-    return source
+    return open_sql_store(storage_settings())

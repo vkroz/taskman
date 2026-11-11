@@ -1,26 +1,16 @@
-"""Shared collection queries and non-destructive completed-work consolidation."""
+"""Collection queries shared by `taskman browse` and the UI."""
 
 from __future__ import annotations
 
 import json
-import uuid
-from pathlib import Path
 
 from taskman.model.ordering import apply_order
-from taskman.storage.store import Store, StorageError, as_store, key_order
+from taskman.storage.store import Store, key_order
 
 
-def histories(source: Store | Path) -> list[dict]:
-    return as_store(source).histories()
-
-
-def collection(source: Store | Path, include_archived=False) -> list[dict]:
-    store = as_store(source)
-    archived = {i for h in store.histories() for i in h["ids"]}
+def collection(store: Store) -> list[dict]:
     rows = []
     for item in store.items():
-        if item.id in archived and not include_archived:
-            continue
         if item.error:
             raise ValueError(item.error)
         rows.append(
@@ -30,7 +20,6 @@ def collection(source: Store | Path, include_archived=False) -> list[dict]:
                 "metadata": item.metadata,
                 "body": item.body,
                 "path": item.location,
-                "archived": item.id in archived,
             }
         )
     return apply_order(rows, store.sibling_order())
@@ -138,82 +127,3 @@ def query(
 
     walk(None, 0)
     return result
-
-
-def compact_text(text: str, limit: int = 420) -> str:
-    """Bound each evidence excerpt; the immutable original carries full detail."""
-    text = " ".join(text.split())
-    if len(text) <= limit:
-        return text
-    return text[:limit].rsplit(" ", 1)[0] + " … (full detail in original record)"
-
-
-def consolidate(source: Store | Path, ids: list[str], title: str) -> dict:
-    store = as_store(source)
-    if not store.consolidation:
-        from taskman.storage.sql_store import NO_CONSOLIDATION
-
-        raise StorageError(NO_CONSOLIDATION)
-    if not isinstance(title, str) or not title.strip() or len(title) > 200:
-        raise ValueError("Enter a summary title of 1–200 characters")
-    rows = collection(store, True)
-    by_id = {r["id"]: r for r in rows}
-    if not ids:
-        raise ValueError("Select completed work to consolidate")
-    if any(id not in by_id for id in ids):
-        raise ValueError("Selected item not found")
-    selected = set(ids)
-    changed = True
-    while changed:
-        before = len(selected)
-        selected.update(r["id"] for r in rows if r["parent_id"] in selected)
-        changed = len(selected) != before
-    chosen = [r for r in rows if r["id"] in selected]
-    if any(r["metadata"].get("status") != "done" for r in chosen):
-        raise ValueError("Every selected item and descendant must be done")
-    if any(r["archived"] for r in chosen):
-        raise ValueError(
-            "Selection includes already consolidated work; select unconsolidated items"
-        )
-    key = uuid.uuid4().hex
-    lines = [
-        "# " + title.strip(),
-        "",
-        "Completed work retained in Taskman; original requirements and evidence remain available by ID.",
-        "",
-    ]
-    for row in chosen:
-        meta = row["metadata"]
-        lines += [
-            "## " + str(meta.get("title", row["id"])),
-            "",
-            "Taskman ID: " + row["id"],
-            "",
-        ]
-        journal = meta.get("journal") or []
-        summaries = [e for e in journal if e.get("kind") == "summary"]
-        decisions = [e for e in journal if e.get("kind") == "decision"]
-        evidence = [e for e in journal if e.get("kind") == "verification"]
-        if not summaries:
-            lines += [
-                "No completion summary recorded. See original specification below.",
-                "",
-            ]
-        for e in summaries[-1:] + decisions[-3:] + evidence[-1:]:
-            lines += [
-                f"**{e.get('kind', '').title()}** ({e.get('actor', 'unknown')})"
-                + (" — " + str(e["result"]) if "result" in e else ""),
-                compact_text(
-                    str(e.get("text", "")), 420 if e.get("kind") == "summary" else 220
-                ),
-                "",
-            ]
-        if len(decisions) > 3 or len(evidence) > 1:
-            lines += [
-                f"Original record contains {len(decisions)} decisions and {len(evidence)} verification entries; excerpts above show the latest.",
-                "",
-            ]
-        lines += [f"[Full requirements, decisions and evidence]({store.history_link(row['id'])})", ""]
-    return store.save_history(
-        {"key": key, "title": title.strip(), "ids": sorted(selected), "summary": "\n".join(lines)}
-    )

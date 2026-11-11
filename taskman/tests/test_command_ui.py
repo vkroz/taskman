@@ -80,13 +80,13 @@ def test_build_mermaid_empty() -> None:
 
 def test_build_mermaid_with_edges() -> None:
     items = [
-        _Item("260527000", "epic", "backlog", "00", "a", "A", "/p/a", (), 0),
-        _Item("260527001", "task", "backlog", "00", "b", "B", "/p/b", ("260527000",), 0),
+        _Item("TM-1", None, "epic", "backlog", "00", "a", "A", "sqlite:TM-1", (), 0),
+        _Item("TM-2", None, "task", "backlog", "00", "b", "B", "sqlite:TM-2", ("TM-1",), 0),
     ]
     out = _build_mermaid(items)
-    assert "260527000" in out
-    assert "260527001" in out
-    assert "260527000 --> 260527001" in out
+    assert "TM-1" in out
+    assert "TM-2" in out
+    assert "TM-1 --> TM-2" in out
 
 
 # ---- rendering ----
@@ -107,7 +107,7 @@ def test_render_page_contains_required_sections(store) -> None:
     assert 'id="direction"' not in html
     assert 'id="editor"' in html
     assert 'id="preview"' in html
-    assert 'Consolidated history' in html
+    assert 'Consolidated history' not in html
     assert 'cdn.jsdelivr' not in html
 
 
@@ -249,7 +249,6 @@ const all = [
   {id: "sibling", parent_id: "root"},
   {id: "other", parent_id: null},
   {id: "other-child", parent_id: "other"},
-  {id: "archived", parent_id: "root", archived: true},
 ];
 // Only root is visible: selection must use all, not rendered rows.
 const rows = [all[0]], collapsed = new Set(["root"]);

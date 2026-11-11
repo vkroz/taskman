@@ -1,27 +1,11 @@
-"""Serialize CLI and UI mutations of the same task tree."""
+"""Run CLI mutations under the store's write lock."""
 import inspect
-from contextlib import contextmanager
 from functools import wraps
-from pathlib import Path
-from threading import RLock
 from typing import Optional
-import fcntl
 
 import typer
 
-_thread_lock = RLock()
 _ACTOR_HELP = "Author of the change. Default: git user.name."
-
-
-@contextmanager
-def mutation_lock(tasks_dir: Path):
-    tasks_dir.mkdir(parents=True, exist_ok=True)
-    with _thread_lock, (tasks_dir / "_taskman.lock").open("a") as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def mutating(command):
@@ -37,7 +21,7 @@ def mutating(command):
         from taskman.storage.store import open_store
 
         store = open_store()
-        if actor and hasattr(store, "actor"):
+        if actor:
             store.actor = actor
         if own_actor:
             kwargs["actor"] = actor

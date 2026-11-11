@@ -14,7 +14,6 @@ import pytest
 
 from taskman import lifecycle
 from taskman.lifecycle import LifecycleError, NoChange
-from taskman.model.collection import consolidate
 from taskman.model.ordering import reorder_item
 from taskman.storage.schema import upgrade
 from taskman.storage.settings import StorageSettings
@@ -454,7 +453,7 @@ def test_last_change_time_follows_every_change(store):
     assert store.get(item).modified == before
 
 
-# ---- discard, order and consolidation -------------------------------------
+# ---- discard and order ---------------------------------------------------
 
 
 def test_discard_only_unreferenced_draft_leaves_and_keys_are_not_reused(store):
@@ -494,14 +493,6 @@ def test_reorder_moves_only_the_open_item(store):
 def test_new_items_rank_after_their_siblings(store):
     ids = [_new(store, f"Item {n}") for n in range(11)]
     assert store.sibling_order()["root"] == ids  # TM-10 and TM-11 follow TM-9
-
-
-def test_consolidation_is_not_available(store):
-    done = _new(store, "Done")
-    _closed(store, done)
-    assert store.histories() == []
-    with pytest.raises(StorageError, match="D8"):
-        consolidate(store, [done], "Delivered")
 
 
 # ---- transactions, schema and concurrency ---------------------------------
