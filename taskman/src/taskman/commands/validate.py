@@ -1,9 +1,7 @@
 """`validate` command — integrity check across the work items.
 
-Reports the storage backend's own findings (for the file backend: names,
-locations, body files and frontmatter) and the dependency findings that
-apply to every backend. Each finding has a ``severity`` (``error`` or
-``warning``). The command exits non-zero if any error finding is present.
+Reports dependency findings: unknown dependency keys and dependency cycles.
+Each finding has a ``severity`` (``error`` or ``warning``). The command exits non-zero if any error finding is present.
 """
 from __future__ import annotations
 
@@ -19,7 +17,7 @@ from taskman.storage.store import open_store
 def validate(
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON."),
 ) -> None:
-    """Walk the work-item tree and report integrity findings."""
+    """Check the dependency graph of all work items."""
     findings = check(open_store())
     has_error = any(f.severity == "error" for f in findings)
 

@@ -15,7 +15,6 @@ from taskman.commands.close import close as _close
 from taskman.commands.convert import convert as _convert
 from taskman.commands.help_cmd import help_cmd as _help
 from taskman.commands.list_cmd import list_items as _list
-from taskman.commands.migrate import migrate as _migrate
 from taskman.commands.move import move as _move
 from taskman.commands.new import finalize as _finalize
 from taskman.commands.new import new as _new
@@ -26,7 +25,6 @@ from taskman.commands.search import search as _search
 from taskman.commands.show import show as _show
 from taskman.commands.ui import ui as _ui
 from taskman.commands.validate import validate as _validate
-from taskman.commands.worktree_status import worktree_status as _worktree_status
 from taskman.commands.context import activity, assign, comment, context, update, depend, discard, label, unassign
 from taskman.model.locking import mutating
 from taskman.storage.settings import load_env_file
@@ -34,7 +32,7 @@ from taskman.storage.settings import storage_settings
 from taskman.storage.store import StorageConfigError, begin_command
 from taskman.commands.install import install
 from taskman.commands.db import db_app
-from taskman.commands.collection import browse, edit, consolidate, history, reorder
+from taskman.commands.collection import browse, edit, reorder
 
 app = typer.Typer(
     name="taskman",
@@ -100,19 +98,15 @@ app.command("discard")(_storage_errors(mutating(discard)))
 app.command("install")(install)
 app.command("browse")(_storage_errors(browse))
 app.command("edit")(_storage_errors(mutating(edit)))
-app.command("consolidate")(_storage_errors(mutating(consolidate)))
-app.command("history")(_storage_errors(history))
 app.command("reorder")(_storage_errors(mutating(reorder)))
 app.command("validate")(_storage_errors(_validate))
 app.command("ready")(_storage_errors(_ready))
 app.command("waiting-on")(_storage_errors(_waiting_on))
 app.command("search")(_storage_errors(_search))
-app.command("worktree-status")(_storage_errors(_worktree_status))
 app.command("ui")(_storage_errors(_ui))
 app.command("help")(_help)
 # --- auxiliary or temporary commands ---
 app.command("convert")(_storage_errors(mutating(_convert)))
-app.command("migrate")(_storage_errors(_migrate))
 app.add_typer(db_app, name="db")
 
 @app.command()

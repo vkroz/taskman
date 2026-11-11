@@ -9,15 +9,11 @@ from __future__ import annotations
 import copy
 import re
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from taskman.model.graph import find_cycles, unknown_references
 from taskman.storage.store import Item, Store
 
-_SLUGIFY_NON_CHARSET = re.compile(r"[^a-z0-9_]+")
-_SLUGIFY_COLLAPSE = re.compile(r"_+")
-_VALID_SLUG = re.compile(r"^[a-z0-9_]+$")
 _PROJECT_KEY = re.compile(r"^[A-Z][A-Z0-9]{1,9}$")
 _LABEL = re.compile(r"^[a-z0-9_-]{1,50}$")
 
@@ -43,30 +39,8 @@ class NoChange(Exception):
         self.message = message
 
 
-def slugify(title: str) -> str:
-    """Derive a slug from a human title.
-
-    Lowercases, replaces any run of non-charset chars with ``_``, collapses
-    consecutive underscores, strips leading/trailing ``_``. Raises
-    :class:`LifecycleError` if the result is empty or fails validation.
-    """
-    slug = _SLUGIFY_NON_CHARSET.sub("_", title.lower())
-    slug = _SLUGIFY_COLLAPSE.sub("_", slug)
-    slug = slug.strip("_")
-    if not slug:
-        raise LifecycleError(f"could not derive slug from title: {title!r}")
-    if not _VALID_SLUG.match(slug):
-        raise LifecycleError(f"derived slug invalid: {slug!r}")
-    return slug
-
-
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _name(item: Item) -> str:
-    """How messages name an item: its key on a SQL backend (``sqlite:TM-2``), its file name otherwise."""
-    return item.id if item.location.endswith(f":{item.id}") else Path(item.location).name
 
 
 def _revision(item: Item) -> int:
@@ -149,7 +123,6 @@ def create(
     project: str | None = None,
 ) -> Item:
     """Create a backlog draft. A child belongs to its parent's project."""
-    slug = slugify(title)
     if project is not None and not _PROJECT_KEY.match(project):
         raise LifecycleError(
             "a project key has 2-10 uppercase letters and digits and starts with a letter", usage=True
@@ -172,7 +145,6 @@ def create(
         title=title,
         body=f"# {title}\n" if body is None else body,
         parent_id=parent_id,
-        slug=slug,
         status="backlog",
         draft=True,
         project=project,
@@ -314,7 +286,7 @@ def convert(store: Store, item_id: str, target_type: str) -> Item:
     if target_type == "task":
         children = [other for other in store.items() if other.parent_id == item_id]
         if children:
-            names = ", ".join(sorted(_name(child) for child in children))
+            names = ", ".join(sorted(child.id for child in children))
             raise LifecycleError(f"cannot convert {item_id} to task — has children: {names}")
     store.set_type(item_id, target_type)
     item = store.get(item_id)
@@ -333,7 +305,7 @@ def close(store: Store, item_id: str) -> Item:
     unfinished = [other for other in _descendants(items, item_id) if other.status != "done"]
     if unfinished:
         lines = [f"cannot close {item_id} — descendants not in done:"]
-        lines += [f"  {_name(other)}" for other in unfinished]
+        lines += [f"  {other.id}" for other in unfinished]
         raise LifecycleError("\n".join(lines))
     _readable(item, usage=False)
     if item.draft:

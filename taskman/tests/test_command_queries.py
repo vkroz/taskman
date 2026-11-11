@@ -2,17 +2,11 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from typer.testing import CliRunner
 
-from taskman.cli import app
 from taskman.storage.sql_store import open_sql_store
 from tests import sql_helpers as sql
-from tests.workflow_helpers import prepare
-from taskman.model.layout import find_item_by_id
-from taskman.model.names import parse_name, special_file_name
-from taskman.model.yaml_io import read_file, write_file
 
 runner = CliRunner()
 
@@ -145,49 +139,3 @@ def test_waiting_on_excludes_done_deps(sqlite_env) -> None:
 
 def test_waiting_on_missing_target(sqlite_env) -> None:
     assert "not found" in sql.run("waiting-on", "TM-99", code=1)
-
-
-# ---- file backend: layout only; removed with 261110001 ----
-# A SQL store rejects dependencies on unknown keys, so only hand-edited
-# files can hold them.
-
-
-def _env(tasks_dir: Path) -> dict[str, str]:
-    return {"TASKMAN_BACKEND": "file", "TASKMAN_TASKS_DIR": str(tasks_dir)}
-
-
-def _new(tmp_path: Path, title: str) -> str:
-    r = runner.invoke(app, ["new", "--title", title], env=_env(tmp_path))
-    assert r.exit_code == 0, r.output
-    item_id = parse_name(Path(r.output.strip()).name).item_id
-    prepare(tmp_path, item_id)
-    return item_id
-
-
-def _set_depends(tmp_path: Path, item_id: str, deps: list[str]) -> None:
-    path = find_item_by_id(tmp_path, item_id)
-    body_file = (
-        path / special_file_name(item_id) if path.is_dir() else path
-    )
-    data, body = read_file(body_file)
-    data["depends_on"] = deps
-    write_file(body_file, data, body)
-
-
-def test_ready_excludes_items_with_unknown_deps(tmp_path: Path) -> None:
-    """Unknown dep treated as blocking — the item is waiting on something that doesn't exist."""
-    a = _new(tmp_path, "A")
-    _set_depends(tmp_path, a, ["999999999"])
-    data = json.loads(runner.invoke(app, ["ready", "--json"], env=_env(tmp_path)).output)
-    ids = [d["id"] for d in data]
-    assert a not in ids
-
-
-def test_waiting_on_reports_unknown_dep_refs(tmp_path: Path) -> None:
-    """Missing dependencies cannot be mistaken for an unblocked item."""
-    a = _new(tmp_path, "A")
-    _set_depends(tmp_path, a, ["999999999"])
-    r = runner.invoke(app, ["waiting-on", a, "--json"], env=_env(tmp_path))
-    assert r.exit_code != 0
-    assert "missing dependencies" in r.output
-    assert "999999999" in r.output

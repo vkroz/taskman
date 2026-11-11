@@ -18,7 +18,8 @@ from pathlib import Path
 from taskman.storage.store import StorageConfigError
 
 ENV_FILE = ".env"
-BACKENDS = ("file", "sqlite", "postgres")
+BACKENDS = ("sqlite", "postgres")
+_SQL_SETTINGS = "Set TASKMAN_BACKEND=sqlite (the default) or postgres; see `taskman help`."
 _SOCKET_SETTINGS = ("TASKMAN_DB_SOCKET", "TASKMAN_DB_NAME", "TASKMAN_DB_USER")
 
 
@@ -112,7 +113,16 @@ def default_sqlite_path() -> Path:
 
 def backend_name(environ: Mapping[str, str] = os.environ) -> str:
     """The backend named by ``TASKMAN_BACKEND``. Defaults to ``sqlite`` (decision D7)."""
+    if environ.get("TASKMAN_TASKS_DIR", "").strip():
+        raise StorageConfigError(
+            "TASKMAN_TASKS_DIR is no longer used: Taskman stores work items in SQLite or Postgres, "
+            f"not in tasks/ files. Unset it. {_SQL_SETTINGS}"
+        )
     name = environ.get("TASKMAN_BACKEND", "").strip() or "sqlite"
+    if name == "file":
+        raise StorageConfigError(
+            f"The file backend was removed; Taskman does not read tasks/ files. {_SQL_SETTINGS}"
+        )
     if name not in BACKENDS:
         raise StorageConfigError(
             f"Unknown storage backend {name!r} in TASKMAN_BACKEND. Supported: {', '.join(BACKENDS)}."
@@ -126,9 +136,7 @@ def storage_settings(environ: Mapping[str, str] = os.environ) -> StorageSettings
     url = environ.get("TASKMAN_DATABASE_URL", "").strip()
     if backend == "sqlite":
         return StorageSettings(backend, sqlite_path=_sqlite_path(url))
-    if backend == "postgres":
-        return StorageSettings(backend, postgres=_postgres(url, environ))
-    return StorageSettings(backend)
+    return StorageSettings(backend, postgres=_postgres(url, environ))
 
 
 def _sqlite_path(url: str) -> Path:

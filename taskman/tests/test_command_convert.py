@@ -2,32 +2,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from typer.testing import CliRunner
 
-from taskman.cli import app
 from tests import sql_helpers as sql
-from tests.workflow_helpers import prepare
-from taskman.model.names import parse_name
-from taskman.model.yaml_io import read_file
 
 runner = CliRunner()
-
-
-def _env(tasks_dir: Path) -> dict[str, str]:
-    return {"TASKMAN_BACKEND": "file", "TASKMAN_TASKS_DIR": str(tasks_dir)}
-
-
-def _new(tmp_path: Path, title: str, item_type: str, parent: str | None = None) -> str:
-    args = ["new", "--title", title, "--type", item_type]
-    if parent is not None:
-        args += ["--parent", parent]
-    r = runner.invoke(app, args, env=_env(tmp_path))
-    assert r.exit_code == 0, r.output
-    item_id = parse_name(Path(r.output.strip()).name).item_id
-    prepare(tmp_path, item_id)
-    return item_id
 
 
 def _new_sql(title: str, item_type: str, parent: str | None = None) -> str:
@@ -99,21 +79,3 @@ def test_convert_preserves_status_and_priority(sqlite_env) -> None:
     assert row["status"] == "active"
     assert row["priority"] == "00"
     assert row["type"] == "feat"
-
-
-# ---- file backend: layout only; removed with 261110001 ----
-
-
-def test_convert_epic_to_feat_on_dir_form_succeeds(tmp_path: Path) -> None:
-    """epic↔feat on a directory item is allowed — only →task is constrained."""
-    epic_id = _new(tmp_path, "E", "epic")
-    _new(tmp_path, "Child", "task", parent=epic_id)
-    r = runner.invoke(app, ["convert", epic_id, "feat"], env=_env(tmp_path))
-    assert r.exit_code == 0, r.output
-    new_path = Path(r.output.strip())
-    assert new_path.is_dir()
-    wi = parse_name(new_path.name)
-    assert wi.item_type == "feat"
-    # Special file body still readable, type updated.
-    data, _ = read_file(new_path / f"_{epic_id}.md")
-    assert data["type"] == "feat"

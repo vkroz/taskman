@@ -1,4 +1,4 @@
-"""Integrity checks that apply to every storage backend."""
+"""Integrity checks of the dependency graph."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -47,5 +47,5 @@ def check_dependencies(items: list[Item]) -> list[Finding]:
 
 
 def check(store: Store) -> list[Finding]:
-    """The backend's own checks, then the dependency checks."""
-    return store.check_layout() + check_dependencies(store.items())
+    """Unknown dependencies and dependency cycles of all items."""
+    return check_dependencies(store.items())
