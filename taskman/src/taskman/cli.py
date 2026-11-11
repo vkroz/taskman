@@ -22,12 +22,15 @@ from taskman.commands.queries import dependents as _dependents
 from taskman.commands.queries import ready as _ready
 from taskman.commands.queries import waiting_on as _waiting_on
 from taskman.commands.search import search as _search
+from taskman.commands.serve import serve as _serve
+from taskman.commands.serve import token_app
 from taskman.commands.show import show as _show
 from taskman.commands.ui import ui as _ui
 from taskman.commands.validate import validate as _validate
 from taskman.commands.context import activity, assign, comment, context, update, depend, discard, label, unassign
 from taskman.model.locking import mutating
 from taskman.storage.settings import load_env_file
+from taskman.storage.remote import remote_settings, server_url
 from taskman.storage.settings import storage_settings
 from taskman.storage.store import StorageConfigError, begin_command
 from taskman.commands.install import install
@@ -42,7 +45,8 @@ app = typer.Typer(
 
 
 # Commands that work without storage settings, so a wrong setting can be fixed.
-_NO_STORAGE = {"help", "version", "install", "db"}
+# `serve` and `token` open the server's database themselves and report their own errors.
+_NO_STORAGE = {"help", "version", "install", "db", "serve", "token"}
 
 
 @app.callback()
@@ -55,7 +59,10 @@ def _root(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand in _NO_STORAGE:
         return
     try:
-        storage_settings()
+        if server_url():
+            remote_settings()
+        else:
+            storage_settings()
     except StorageConfigError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(2) from None
@@ -108,6 +115,8 @@ app.command("help")(_help)
 # --- auxiliary or temporary commands ---
 app.command("convert")(_storage_errors(mutating(_convert)))
 app.add_typer(db_app, name="db")
+app.command("serve")(_serve)
+app.add_typer(token_app, name="token")
 
 @app.command()
 def version() -> None:

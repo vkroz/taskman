@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from taskman.model.graph import find_cycles, unknown_references
-from taskman.storage.store import Item, Store, key_order
+from taskman.storage.store import Item, Store, key_order, served
 
 _PROJECT_KEY = re.compile(r"^[A-Z][A-Z0-9]{1,9}$")
 _LABEL = re.compile(r"^[a-z0-9_-]{1,50}$")
@@ -114,6 +114,7 @@ def invalidate_ancestors(store: Store, item_id: str) -> None:
         parent_id = ancestor.parent_id
 
 
+@served
 def create(
     store: Store,
     title: str,
@@ -153,6 +154,7 @@ def create(
     return item
 
 
+@served
 def finalize(store: Store, item_id: str) -> Item:
     item = _readable(_require(store, item_id, usage=False), usage=False)
     if item.metadata.get("status") == "done":
@@ -164,6 +166,7 @@ def finalize(store: Store, item_id: str) -> Item:
     return store.save(item_id, metadata, item.body)
 
 
+@served
 def update_body(store: Store, item_id: str, body: str) -> Item:
     item = _require(store, item_id, usage=True)
     _open(item)
@@ -186,6 +189,7 @@ def check_entry(kind: str, actor: str, result: str | None) -> None:
         raise LifecycleError("verification requires --result pass|fail|blocked; other entries omit it", usage=True)
 
 
+@served
 def record(store: Store, item_id: str, kind: str, actor: str, text: str, result: str | None = None) -> Item:
     check_entry(kind, actor, result)
     item = _require(store, item_id, usage=True)
@@ -212,6 +216,7 @@ def record(store: Store, item_id: str, kind: str, actor: str, text: str, result:
     return item
 
 
+@served
 def set_dependencies(store: Store, item_id: str, depends_on: list[str]) -> Item:
     item = _require(store, item_id, usage=True)
     _open(item)
@@ -254,6 +259,7 @@ def discard_blocker(item: Item, items: dict[str, Item]) -> str | None:
     return None
 
 
+@served
 def discard(store: Store, item_id: str) -> None:
     items = {item.id: item for item in store.items()}
     if item_id not in items:
@@ -268,6 +274,7 @@ def discard(store: Store, item_id: str) -> None:
     store.delete(item_id)
 
 
+@served
 def move(store: Store, item_id: str, target_status: str) -> Item:
     item = _require(store, item_id, usage=False)
     if target_status == "done":
@@ -292,6 +299,7 @@ def move(store: Store, item_id: str, target_status: str) -> Item:
     return moved
 
 
+@served
 def convert(store: Store, item_id: str, target_type: str) -> Item:
     item = _require(store, item_id, usage=False)
     if item.status == "done":
@@ -377,6 +385,7 @@ def close_gates(item: Item, items: dict[str, Item]) -> list[dict[str, Any]]:
     return gates
 
 
+@served
 def close(store: Store, item_id: str) -> Item:
     item = _require(store, item_id, usage=False)
     if item.status == "done":
@@ -401,6 +410,7 @@ def close(store: Store, item_id: str) -> Item:
     return closed
 
 
+@served
 def edit(store: Store, item_id: str, title: Any, body: Any, reason: Any) -> Item:
     item = _require(store, item_id, usage=True)
     if item.metadata.get("status") == "done":
@@ -429,6 +439,7 @@ def edit(store: Store, item_id: str, title: Any, body: Any, reason: Any) -> Item
     return item
 
 
+@served
 def assign(store: Store, item_id: str, assignee: str | None) -> Item:
     """Set or clear the assignee. The revision does not change."""
     item = _require(store, item_id, usage=True)
@@ -444,6 +455,7 @@ def assign(store: Store, item_id: str, assignee: str | None) -> Item:
     return store.save(item_id, metadata, item.body)
 
 
+@served
 def label(store: Store, item_id: str, add: list[str], remove: list[str]) -> Item:
     """Add and remove labels. The revision does not change."""
     item = _require(store, item_id, usage=True)

@@ -125,6 +125,18 @@ ENVIRONMENT
 
   The postgres backend needs the `postgres` extra.
 
+  TASKMAN_SERVER_URL   The address of a Taskman server, for example
+                       https://taskman.example.com. When set, every command
+                       works through the server and opens no database.
+                       https:// is required unless the server runs on this
+                       computer.
+  TASKMAN_TOKEN        The token for that server, from `taskman token create`.
+  PORT                 `taskman serve` only: the port to listen on.
+                       Default: 8080.
+
+  Taskman reads TASKMAN_SERVER_URL and TASKMAN_TOKEN from the environment
+  only, never from .env: a repository file must not send a token to a host.
+
   Examples (.env):
 
     # SQLite, one shared file for all repositories (no settings needed)

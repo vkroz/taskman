@@ -5,12 +5,14 @@ how items persist; lifecycle rules do not belong to a backend.
 """
 from __future__ import annotations
 
+import inspect
 import re
 
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from functools import wraps
 from typing import Any, Protocol
 
 class StorageConfigError(ValueError):
@@ -56,6 +58,33 @@ class Item:
     @property
     def draft(self) -> bool:
         return bool(self.metadata.get("draft"))
+
+
+def item_data(item: Item) -> dict[str, Any]:
+    """An item as plain data, for the server API."""
+    return asdict(item)
+
+
+def item_from_data(data: dict[str, Any]) -> Item:
+    return Item(**data)
+
+
+def served(operation: Callable) -> Callable:
+    """Run an operation on the Taskman server when the store is a remote one.
+
+    A remote store has ``forward``. The server then runs the same operation
+    against its own database, so the rules are checked where the data is.
+    """
+    parameters = list(inspect.signature(operation).parameters)[1:]
+
+    @wraps(operation)
+    def wrapped(store, *args, **kwargs):
+        forward = getattr(store, "forward", None)
+        if forward is None:
+            return operation(store, *args, **kwargs)
+        return forward(operation.__name__, dict(zip(parameters, args)) | kwargs)
+
+    return wrapped
 
 
 class Store(Protocol):
@@ -185,7 +214,11 @@ def open_store() -> Store:
 
 
 def _new_store() -> Store:
+    from taskman.storage.remote import open_remote_store, server_url
     from taskman.storage.settings import storage_settings
+
+    if server_url():
+        return open_remote_store()
 
     from taskman.storage.sql_store import open_sql_store
 

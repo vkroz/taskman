@@ -134,6 +134,30 @@ TASKMAN_DB_USER=taskman_app
 TASKMAN_DB_PASSWORD_FILE=/secrets/taskman-db-password
 ```
 
+## Use a Taskman server
+
+A Taskman server lets agents and people on different computers share the same work items. The server alone opens the database. The CLI on each computer calls the server and does not know which database it uses.
+
+On the machine of the server, with the storage settings above:
+
+```bash
+taskman db upgrade                          # create or upgrade the schema
+taskman token create --person "Ada"         # prints a token one time; it expires after 90 days
+taskman serve                               # listens on 127.0.0.1 and the port in PORT, or 8080
+```
+
+`taskman serve --host 0.0.0.0` accepts calls from other machines. `taskman token list` shows the tokens without their secrets, and `taskman token revoke ID` stops one.
+
+On each computer that uses the server:
+
+```bash
+export TASKMAN_SERVER_URL=https://taskman.example.com
+export TASKMAN_TOKEN=...                    # the token from `taskman token create`
+taskman list
+```
+
+Every command then works through the server. The person of the token is the author of each change. With `--actor claude`, the author is `claude for Ada`. Taskman reads `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` from the environment only, never from a `.env` file. The address must start with `https://`, unless the server runs on the same computer.
+
 ## Develop Taskman
 
 ```sh

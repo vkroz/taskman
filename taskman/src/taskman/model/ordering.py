@@ -6,7 +6,7 @@ their project, under the group key ``root:<PROJECT>``.
 
 from __future__ import annotations
 
-from taskman.storage.store import Store, key_order
+from taskman.storage.store import Store, key_order, served
 
 
 def sibling_group(row: dict) -> str:
@@ -48,6 +48,7 @@ def ordered_siblings(store: Store, item_id: str) -> list[dict]:
     )
 
 
+@served
 def reorder_item(store: Store, item_id: str, position: int) -> list[str]:
     """Move an item to a one-based position among its siblings; a top-level item stays in its project."""
     siblings = ordered_siblings(store, item_id)
