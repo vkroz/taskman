@@ -174,11 +174,6 @@
         padding: 9px 10px;
         min-width: 0;
       }
-      input[type="checkbox"] {
-        accent-color: var(--accent);
-        width: 16px;
-        height: 16px;
-      }
       .search {
         flex: 1;
         min-width: 180px;
@@ -434,18 +429,6 @@
       .message:empty {
         display: none;
       }
-      .bulk {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        flex-wrap: wrap;
-        padding: 10px 16px;
-        background: #f5f3ff;
-        border-bottom: 1px solid var(--line);
-      }
-      .bulk[hidden] {
-        display: none;
-      }
       dialog {
         border: 1px solid var(--line);
         border-radius: 14px;
@@ -622,10 +605,6 @@
                 <button id="clear">Clear filters</button>
               </div>
             </div>
-            <div class="bulk" id="bulk" hidden>
-              <span id="selection-count"></span
-              ><button id="clear-selection">Clear selection</button>
-            </div>
             <div id="tree"></div>
           </section>
           <aside
@@ -760,7 +739,6 @@
         all = [],
         fields = [],
         collapsed = new Set(),
-        selected = new Set(),
         selectedId = null,
         filters = [],
         appliedFilters = [],
@@ -851,11 +829,6 @@
             .map((f) => `<option value="${esc(f)}">${esc(f)}</option>`)
             .join("");
           $("#sort").value = sort;
-          selected = new Set(
-            [...selected].filter((id) =>
-              all.some((r) => r.id === id),
-            ),
-          );
           render();
           $("#connection").textContent = "Up to date";
           $("#tree").setAttribute("aria-busy", "false");
@@ -884,14 +857,12 @@
           if (hidden(r)) continue;
           let m = r.metadata,
             hasChildren = rows.some((x) => x.parent_id === r.id);
-          html += `<div class="row ${r.context ? "context" : ""} ${r.id === selectedId ? "selected" : ""}" data-id="${r.id}"><div class="row-title" style="--depth:${r.depth}"><span class="drag-handle" draggable="${$("#sort").value === "priority" && m.status !== "done"}" data-drag="${r.id}" role="button" aria-label="Drag ${esc(m.title)} to change priority">⋮⋮</span><button class="toggle" data-toggle="${r.id}" aria-label="${collapsed.has(r.id) ? "Expand" : "Collapse"} ${esc(m.title)}" ${hasChildren ? 'aria-expanded="' + !collapsed.has(r.id) + '"' : "disabled"}>${hasChildren ? (collapsed.has(r.id) ? "▸" : "▾") : "·"}</button><input type="checkbox" aria-label="Select ${esc(m.title)}" data-select="${r.id}" ${selected.has(r.id) ? "checked" : ""}><div><button class="title-button" data-open="${r.id}">${esc(m.title || r.id)}</button>${m.draft ? '<span class="draft">Draft</span>' : ""}${r.context ? '<div class="context-label">Parent context</div>' : ""}</div></div><span class="badge ${esc(m.status)}">${esc(m.status)}</span><span class="type type-col">${esc(m.type)}</span><span class="muted priority-col">${r.order + 1}</span></div>`;
+          html += `<div class="row ${r.context ? "context" : ""} ${r.id === selectedId ? "selected" : ""}" data-id="${r.id}"><div class="row-title" style="--depth:${r.depth}"><span class="drag-handle" draggable="${$("#sort").value === "priority" && m.status !== "done"}" data-drag="${r.id}" role="button" aria-label="Drag ${esc(m.title)} to change priority">⋮⋮</span><button class="toggle" data-toggle="${r.id}" aria-label="${collapsed.has(r.id) ? "Expand" : "Collapse"} ${esc(m.title)}" ${hasChildren ? 'aria-expanded="' + !collapsed.has(r.id) + '"' : "disabled"}>${hasChildren ? (collapsed.has(r.id) ? "▸" : "▾") : "·"}</button><div><button class="title-button" data-open="${r.id}">${esc(m.title || r.id)}</button>${m.draft ? '<span class="draft">Draft</span>' : ""}${r.context ? '<div class="context-label">Parent context</div>' : ""}</div></div><span class="badge ${esc(m.status)}">${esc(m.status)}</span><span class="type type-col">${esc(m.type)}</span><span class="muted priority-col">${r.order + 1}</span></div>`;
         }
         if (!rows.length)
           html =
             '<div class="empty"><strong>No matching work</strong><p>Try another search or clear your filters.</p><button data-clear>Clear filters</button></div>';
         $("#tree").innerHTML = html;
-        $("#bulk").hidden = !selected.size;
-        $("#selection-count").textContent = `${selected.size} selected`;
       }
       async function detail(id, open = true) {
         try {
@@ -1047,7 +1018,6 @@
           await api("/api/discard", { id: operation.id });
           $("#confirm").close();
           closeDetails();
-          selected.clear();
           message("Draft deleted.");
           await refresh();
         } catch (err) {
@@ -1118,10 +1088,6 @@
       }
       $("#clear").onclick = clear;
       $("#new").onclick = () => openEditor();
-      $("#clear-selection").onclick = () => {
-        selected.clear();
-        render();
-      };
       $("#expand").onclick = () => {
         collapsed.clear();
         render();
@@ -1161,30 +1127,6 @@
         }
         if (b.hasAttribute("data-clear")) clear();
         if (b.dataset.close) $("#" + b.dataset.close).close();
-      };
-      $("#tree").onchange = (e) => {
-        if (e.target.dataset.select) {
-          let id = e.target.dataset.select;
-          if (e.target.checked) {
-            // Use the full collection so collapsed and filtered children participate.
-            const children = new Map();
-            for (const item of all) {
-              if (!children.has(item.parent_id)) children.set(item.parent_id, []);
-              children.get(item.parent_id).push(item.id);
-            }
-            const pending = [id], visited = new Set();
-            while (pending.length) {
-              const next = pending.pop();
-              if (visited.has(next)) continue;
-              visited.add(next);
-              selected.add(next);
-              pending.push(...(children.get(next) || []));
-            }
-          } else {
-            selected.delete(id);
-          }
-          render();
-        }
       };
       $("#tree").ondragstart = (e) => {
         const handle = e.target.closest("[data-drag]");
