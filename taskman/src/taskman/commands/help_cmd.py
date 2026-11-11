@@ -145,7 +145,8 @@ ENVIRONMENT
 
   Browser login on the server needs TASKMAN_GOOGLE_CLIENT_ID,
   TASKMAN_GOOGLE_CLIENT_SECRET (or _FILE), TASKMAN_PUBLIC_URL, and
-  TASKMAN_ALLOWED_EMAILS or TASKMAN_ALLOWED_DOMAINS.
+  TASKMAN_ALLOWED_EMAILS (addresses) or TASKMAN_ALLOWED_DOMAINS (Google
+  Workspace organizations: every member may sign in).
 
   Examples (.env):
 

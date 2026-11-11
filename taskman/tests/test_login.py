@@ -145,10 +145,19 @@ def test_cli_login_returns_a_token_for_the_verified_email(login_server, google):
     assert status == 400 and "already used" in again["error"]["message"]
 
 
-def test_an_allowed_domain_signs_in(login_server, google):
+def test_a_member_of_an_allowed_workspace_signs_in(login_server, google):
     authorize = start_cli_login(login_server)
-    status, _, _ = callback(login_server, google.sign_in(authorize, email="Bob@Team.example"))
+    status, _, _ = callback(login_server, google.sign_in(authorize, email="Bob@Team.example", hd="Team.example"))
     assert status == 302
+
+
+def test_an_address_in_the_domain_without_workspace_membership_is_refused(login_server, google):
+    authorize = start_cli_login(login_server)
+    status, _, body = callback(login_server, google.sign_in(authorize, email="bob@team.example"))
+    assert status == 403 and "may not use this Taskman server" in body
+    authorize = start_cli_login(login_server)
+    status, _, _ = callback(login_server, google.sign_in(authorize, email="bob@team.example", hd="other.example"))
+    assert status == 403
 
 
 def test_the_exchange_needs_the_verifier_of_the_cli_that_started(login_server, google):

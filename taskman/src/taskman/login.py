@@ -58,8 +58,9 @@ class LoginSettings:
     domains: frozenset[str] = frozenset()
     provider: Provider = Provider()
 
-    def allows(self, email: str) -> bool:
-        return email in self.emails or email.rpartition("@")[2] in self.domains
+    def allows(self, email: str, workspace_domain: str) -> bool:
+        """A listed email address, or a member of a listed Google Workspace organization."""
+        return email in self.emails or workspace_domain in self.domains
 
 
 def _names(value: str) -> frozenset[str]:
@@ -247,7 +248,10 @@ class Logins:
         email = str(claims.get("email") or "").strip().lower()
         if not email or claims.get("email_verified") not in (True, "true"):
             raise LoginError(403, "Google did not confirm an email address for this account.")
-        if not self.settings.allows(email):
+        # Google sets "hd" only for an account that a Google Workspace organization manages.
+        # An email address alone does not prove membership: a personal Google account can use any address.
+        workspace_domain = str(claims.get("hd") or "").strip().lower()
+        if not self.settings.allows(email, workspace_domain):
             raise LoginError(403, f"{email} may not use this Taskman server. Ask its operator to add the address.")
         return email
 
