@@ -169,6 +169,11 @@ class SqlStore:
             ).fetchall()
         return [{"field": f, "old": old, "new": new, "author": a, "at": at} for f, old, new, a, at in rows]
 
+    def projects(self) -> list[dict[str, str]]:
+        with self._read():
+            rows = self._q("SELECT key, name FROM projects ORDER BY created_at, key").fetchall()
+        return [{"key": key, "name": name} for key, name in rows]
+
     def sibling_order(self) -> dict[str, list[str]]:
         with self._read():
             rows = self._q(
@@ -177,7 +182,7 @@ class SqlStore:
             ).fetchall()
         order: dict[str, list[str]] = {}
         for project, number, parent_project, parent_number in rows:
-            parent = f"{parent_project}-{parent_number}" if parent_project else "root"
+            parent = f"{parent_project}-{parent_number}" if parent_project else f"root:{project}"
             order.setdefault(parent, []).append(f"{project}-{number}")
         return order
 

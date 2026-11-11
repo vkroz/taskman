@@ -97,9 +97,11 @@ def test_ui_create_to_nested_plan_execution_and_fresh_agent_context(sqlite_env):
         complete(story)
         complete(epic)
         cli("validate")
-        page = get(url + "/api/page")
-        assert page["sections"].index(epic) < page["sections"].index(story) < page["sections"].index(first)
-        assert '<ul><li>' in page["sections"]
+        request = Request(url + "/api/query", json.dumps({"view": "done"}).encode(),
+                          headers={"Content-Type": "application/json", "X-Taskman": "1"})
+        with urlopen(request, timeout=3) as response:
+            rows = json.load(response)["rows"]
+        assert [(row["id"], row["depth"]) for row in rows] == [(epic, 0), (story, 1), (first, 2), (second, 2)]
         shown = get(url + "/api/show/" + second)["frontmatter"]
         assert shown["status"] == "done"
         assert shown["draft"] is False
