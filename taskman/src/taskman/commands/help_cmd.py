@@ -130,12 +130,22 @@ ENVIRONMENT
                        works through the server and opens no database.
                        https:// is required unless the server runs on this
                        computer.
-  TASKMAN_TOKEN        The token for that server, from `taskman token create`.
+  TASKMAN_TOKEN        The token for that server. Without it, Taskman uses the
+                       token of `taskman auth login`.
   PORT                 `taskman serve` only: the port to listen on.
                        Default: 8080.
 
   Taskman reads TASKMAN_SERVER_URL and TASKMAN_TOKEN from the environment
   only, never from .env: a repository file must not send a token to a host.
+
+  `taskman auth login --server URL` signs in through a browser and saves the
+  server and a token in ~/.config/taskman/credentials.json. Later commands
+  use that server. `--with-token` reads a personal access token from stdin
+  instead. `taskman auth status` and `taskman auth logout` manage the login.
+
+  Browser login on the server needs TASKMAN_GOOGLE_CLIENT_ID,
+  TASKMAN_GOOGLE_CLIENT_SECRET (or _FILE), TASKMAN_PUBLIC_URL, and
+  TASKMAN_ALLOWED_EMAILS or TASKMAN_ALLOWED_DOMAINS.
 
   Examples (.env):
 

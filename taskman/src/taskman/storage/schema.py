@@ -133,6 +133,30 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
+    Migration(
+        3,
+        "browser logins",
+        (
+            """
+            CREATE TABLE logins (
+                id {pk},
+                state_hash TEXT NOT NULL UNIQUE,
+                kind TEXT NOT NULL CHECK (kind IN ('cli', 'token')),
+                cli_port INTEGER,
+                cli_state TEXT,
+                code_challenge TEXT,
+                label TEXT NOT NULL DEFAULT '',
+                nonce TEXT NOT NULL,
+                verifier TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                finished_at TEXT,
+                person TEXT,
+                exchange_hash TEXT UNIQUE,
+                exchanged_at TEXT
+            )
+            """,
+        ),
+    ),
 )
 
 CURRENT_VERSION = MIGRATIONS[-1].version

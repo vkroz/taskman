@@ -50,10 +50,24 @@ Key numbers come from the project row in the same transaction, so two writers ne
 
 - Each call under `/api/v1/` needs a token in the `Authorization: Bearer` header. A call without a valid token gets status 401 and changes nothing. `/healthz` and `/readyz` need no token.
 - `taskman token create --person NAME` creates a token and shows it one time. `taskman token list` and `taskman token revoke ID` manage tokens. These commands run on the machine of the server. A token expires after 90 days unless `--days` sets another period.
-- The CLI uses a server when `TASKMAN_SERVER_URL` is set. It sends the token from `TASKMAN_TOKEN`. Taskman reads these two variables from the environment only, never from a `.env` file, so a repository cannot send the token to another host.
+- The CLI uses a server when `TASKMAN_SERVER_URL` is set, or after `taskman auth login`. It sends the token from `TASKMAN_TOKEN`, or the token of the saved login. Taskman reads these two variables from the environment only, never from a `.env` file, so a repository cannot send the token to another host.
+- The saved login is `~/.config/taskman/credentials.json`, with mode 0600 in a directory with mode 0700. No command prints a token.
 - The CLI sends a token over HTTPS, or over HTTP to the same machine. It does not follow redirects.
 - A change is one operation, for example `close`. The server has no call that writes a field directly, so no caller can skip a lifecycle rule.
 - The server stops cleanly on SIGTERM.
+
+## Browser login
+
+`taskman auth login` signs a person in with Google and gives this computer its own token. The server must have a Google OAuth client (`TASKMAN_GOOGLE_CLIENT_ID`).
+
+1. The CLI starts a listener on `127.0.0.1` and opens `/auth/cli` in the browser. It sends a random state and the hash of a secret of its own (PKCE, RFC 7636).
+2. The server records the login and sends the browser to Google.
+3. Google returns the browser to `/auth/callback` with a code. The server trades the code with Google for the person's ID token over HTTPS. It checks the issuer, the audience, the expiry, the nonce and a verified email address. The email address must be in `TASKMAN_ALLOWED_EMAILS` or `TASKMAN_ALLOWED_DOMAINS`.
+4. The server sends the browser to the CLI's listener with a one-time code. The CLI trades that code and its secret at `/auth/exchange` for a token.
+
+Each sign-in works one time and for 10 minutes. The one-time code works for 2 minutes. The person's email address is the person name. The server keeps the login steps in the `logins` table, so any server instance can serve any step.
+
+`/auth/token` signs a person in the same way and shows a personal access token on the page. A machine without a browser uses it with `taskman auth login --with-token`. A copy of a token works on any machine; the owner accepted this risk for machines without a browser.
 
 ## Workspace UI
 
@@ -61,7 +75,8 @@ Key numbers come from the project row in the same transaction, so two writers ne
 
 ## Limits
 
-- The server has no sign-in page and no browser login. An operator creates each token on the machine of the server.
+- Browser login supports Google only.
+- The server has no page to list or revoke tokens. An operator does this with `taskman token list` and `taskman token revoke` on the machine of the server.
 - The server does not serve the workspace page. `taskman ui` serves it on the computer of the user.
 - The server uses one database connection for all calls.
 - Taskman does not read `tasks/` Markdown files from earlier versions, and imports nothing from them (decision D4).

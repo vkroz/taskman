@@ -205,7 +205,7 @@ def _command_names() -> list[str]:
     from typer.main import get_command
 
     group = get_command(app)
-    return sorted(name for name in group.commands if name not in ("help", "version", "install", "db", "token"))
+    return sorted(name for name in group.commands if name not in ("help", "version", "install", "db", "token", "auth"))
 
 
 @pytest.mark.parametrize(

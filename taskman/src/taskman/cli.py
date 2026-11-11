@@ -24,6 +24,7 @@ from taskman.commands.queries import waiting_on as _waiting_on
 from taskman.commands.search import search as _search
 from taskman.commands.serve import serve as _serve
 from taskman.commands.serve import token_app
+from taskman.commands.auth import auth_app
 from taskman.commands.show import show as _show
 from taskman.commands.ui import ui as _ui
 from taskman.commands.validate import validate as _validate
@@ -46,7 +47,7 @@ app = typer.Typer(
 
 # Commands that work without storage settings, so a wrong setting can be fixed.
 # `serve` and `token` open the server's database themselves and report their own errors.
-_NO_STORAGE = {"help", "version", "install", "db", "serve", "token"}
+_NO_STORAGE = {"help", "version", "install", "db", "serve", "token", "auth"}
 
 
 @app.callback()
@@ -117,6 +118,7 @@ app.command("convert")(_storage_errors(mutating(_convert)))
 app.add_typer(db_app, name="db")
 app.command("serve")(_serve)
 app.add_typer(token_app, name="token")
+app.add_typer(auth_app, name="auth")
 
 @app.command()
 def version() -> None:
