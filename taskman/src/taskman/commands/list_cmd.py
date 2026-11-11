@@ -20,7 +20,6 @@ def list_items(
 ) -> None:
     """List work items in the tree, optionally filtered, optionally as JSON."""
     store = open_store()
-    archived = {id for h in store.histories() for id in h["ids"]}
     items = store.items()
     parents = {item.id: item.parent_id for item in items}
     if parent and parent not in parents:
@@ -39,8 +38,6 @@ def list_items(
     rows: list[dict[str, str]] = []
     for item in items:
         if parent and not under_parent(item.id):
-            continue
-        if item.id in archived:
             continue
         if status is not None and item.status != status:
             continue

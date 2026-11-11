@@ -1,7 +1,7 @@
 {
   "name": "tm",
   "description": "Taskman workflows for Codex and Claude Code: shared requirements, plans, decisions and verification through one CLI.",
-  "version": "0.2.0+codex.20260921024856",
+  "version": "0.3.0",
   "author": {
     "name": "Vladimir Kroz"
   },

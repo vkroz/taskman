@@ -9,7 +9,6 @@ import typer
 
 from taskman import lifecycle
 from taskman.commands.outcome import reported
-from taskman.storage.sql_store import default_actor
 from taskman.storage.store import open_store
 
 
@@ -40,7 +39,7 @@ def comment(
 ) -> None:
     """Add an attributed comment without replacing another agent's context. `record` is an alias."""
     store = open_store()
-    author = actor or getattr(store, "actor", None) or default_actor()
+    author = actor or store.actor
     with reported():
         lifecycle.check_entry(kind, author, result)
     text = read_body(body_file)
@@ -85,9 +84,6 @@ def activity(
 ) -> None:
     """Show the field changes of an item, oldest first."""
     store = open_store()
-    if not hasattr(store, "activity"):
-        typer.echo("Error: activity history needs the sqlite or postgres backend.", err=True)
-        raise typer.Exit(1)
     if store.get(item_id) is None:
         typer.echo(f"Error: item not found: {item_id}", err=True)
         raise typer.Exit(1)
@@ -123,10 +119,7 @@ def discard(item_id: str = typer.Argument(...)) -> None:
 
 
 def context(item_id: str = typer.Argument(...)) -> None:
-    """Emit task, ancestors, descendants, and dependencies as JSON for a fresh agent.
-
-    On a SQL backend the output also has the item's ``activity``.
-    """
+    """Emit task, ancestors, descendants, dependencies and the item's activity as JSON for a fresh agent."""
     store = open_store()
     items = {item.id: item for item in store.items()}
     if item_id not in items:
@@ -158,7 +151,6 @@ def context(item_id: str = typer.Argument(...)) -> None:
             pending.extend(value["frontmatter"].get("depends_on", []))
         else:
             dependencies.append({"id": dep, "missing": True})
-    result = {"item": item, "ancestors": ancestors, "descendants": descendants, "dependencies": dependencies}
-    if hasattr(store, "activity"):
-        result["activity"] = store.activity(item_id)
+    result = {"item": item, "ancestors": ancestors, "descendants": descendants, "dependencies": dependencies,
+              "activity": store.activity(item_id)}
     typer.echo(json.dumps(result, indent=2, default=str))

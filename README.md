@@ -1,6 +1,6 @@
 # Taskman
 
-Taskman keeps requirements, plans, dependencies, decisions and verification in a shared task tree. Codex and Claude Code use the same CLI and records, so one agent can implement a task and another can review it without a conversation handoff.
+Taskman keeps requirements, plans, dependencies, decisions and verification as shared work items in a SQL database. Codex and Claude Code use the same CLI and records, so one agent can implement a task and another can review it without a conversation handoff.
 
 The browser UI creates tasks and displays their hierarchy, status and evidence. Agents plan and execute through the CLI. Completion means the agreed acceptance criteria work locally; deployment is outside this workflow.
 
@@ -26,15 +26,21 @@ The CLI installs one shared plugin through host adapters. `taskman install --lis
 
 ## Work on a project
 
-Run Taskman inside the project. It finds the nearest ancestor `tasks/` directory, stopping at the repository root. Set `TASKMAN_TASKS_DIR` explicitly when multiple agents must share a particular tree across working directories.
+Taskman stores work items in SQLite by default, in one file for all repositories: `~/.local/share/taskman/taskman.db`. Create the database once:
 
 ```sh
-taskman new --type epic --title "Add conversation history" --body-file requirements.md --json
+taskman db upgrade
+```
+
+Items belong to projects and have keys such as `TM-42`. A new top-level item names its project with `--project`; Taskman creates the project on first use. A child uses the project of its parent.
+
+```sh
+taskman new --type epic --title "Add conversation history" --project TM --body-file requirements.md --json
 taskman new --type feat --title "Persist conversations" --parent EPIC_ID --body-file story.md --json
 taskman new --title "Save messages" --parent STORY_ID --body-file task.md --json
 ```
 
-Replace the uppercase placeholders with the IDs returned by `new`. New items are drafts. Finalize items once their scope is agreed; finalize their ancestors too before execution.
+Replace the uppercase placeholders with the keys returned by `new`. New items are drafts. Finalize items once their scope is agreed; finalize their ancestors too before execution.
 
 ```sh
 taskman finalize TASK_ID
@@ -56,11 +62,11 @@ taskman comment TASK_ID --kind verification --result pass --actor "Claude Code" 
 taskman close TASK_ID
 ```
 
-`record` is an alias of `comment`. Every command that changes an item accepts `--actor NAME`; without it, the author is your git `user.name`. Use `--body-file -` to read stdin. Journal significant choices, their reasons and changes to scope. The completion summary should explain what changed, why, and any limits. Verification records should name the checks, commands, results and source revision or relevant working-tree changes. Distinguish executed tests from source inspection and another agent's report.
+`record` is an alias of `comment`. Every command that changes an item accepts `--actor NAME`; without it, the author is your git `user.name`. Use `--body-file -` to read stdin. Comment on significant choices, their reasons and changes to scope. The completion summary should explain what changed, why, and any limits. Verification comments should name the checks, commands, results and source revision or relevant working-tree changes. Distinguish executed tests from source inspection and another agent's report.
 
-Open requirements may be refined to achieve the agreed outcome. Changes to the body, dependencies, type, implementation journal or children invalidate earlier completion evidence. Close requires a current summary, a current passing verification, and completed dependencies and descendants. A recorded pass is the agent's assertion: Taskman does not run tests or prove that assertion.
+Open requirements may be refined to achieve the agreed outcome. Changes to the description, dependencies, type or children, and new decision or progress comments, invalidate earlier completion evidence. Close requires a current summary, a current passing verification, and completed dependencies and descendants. A recorded pass is the agent's assertion: Taskman does not run tests or prove that assertion.
 
-Closed tasks are immutable. Further changes belong in a new task that references the original ID. Summaries supplement the journal; original entries remain available. `discard` removes only an unreferenced draft leaf.
+Closed tasks are immutable. Further changes belong in a new task that references the original key. Comments cannot change or be deleted; summaries supplement them. `discard` removes only an unreferenced draft leaf.
 
 ## View and check
 
@@ -71,7 +77,7 @@ taskman context TASK_ID
 taskman validate
 ```
 
-The UI refreshes as agents change tasks. `taskman validate` checks task-data integrity; acceptance testing is separate. Use `taskman help` for storage rules and `taskman COMMAND --help` for syntax.
+The UI refreshes as agents change tasks. `taskman validate` checks the dependency graph for unknown dependencies and cycles; acceptance testing is separate. Use `taskman help` for storage rules and `taskman COMMAND --help` for syntax.
 
 The plugin supplies define, design, plan, implement and validate skills, plus optional review, commenting, commit and documentation skills. Skills use the same task records on either platform.
 
@@ -81,8 +87,7 @@ Taskman reads its storage settings from environment variables and from a `.env` 
 
 | Variable | Backend | Meaning |
 | --- | --- | --- |
-| `TASKMAN_BACKEND` | all | `file` (default), `sqlite` or `postgres`. Run `taskman db upgrade` once before you use `sqlite` or `postgres`. |
-| `TASKMAN_TASKS_DIR` | file | The shared `tasks/` tree. Default: the nearest `tasks/` directory up to the repository root. |
+| `TASKMAN_BACKEND` | all | `sqlite` (default) or `postgres`. |
 | `TASKMAN_DATABASE_URL` | sqlite | `sqlite:///absolute/path.db` or `sqlite://~/path.db`. Default: `~/.local/share/taskman/taskman.db`, one file for all repositories. |
 | `TASKMAN_DATABASE_URL` | postgres | `postgresql://user@host:port/dbname`. |
 | `TASKMAN_DB_SOCKET`, `TASKMAN_DB_NAME`, `TASKMAN_DB_USER` | postgres | Use these instead of a URL to connect through a unix socket, for example Cloud SQL. All three are required. |
@@ -91,7 +96,7 @@ Taskman reads its storage settings from environment variables and from a `.env` 
 
 Error messages never show a password or a connection URL.
 
-With `sqlite` or `postgres`, items belong to projects and have keys such as `TM-42`. A new top-level item names its project, which Taskman creates on first use: `taskman new --title "Save messages" --project TM`. A child uses the project of its parent. `list`, `ready`, `search` and `browse` show all projects; `--project KEY` limits them to one. These backends add assignees, labels and an activity history of every field change:
+`list`, `ready`, `search` and `browse` show all projects; `--project KEY` limits them to one. Items have assignees, labels and an activity history of every field change:
 
 ```sh
 taskman assign TM-42 claude-code
@@ -101,7 +106,7 @@ taskman list --assignee claude-code --label backend
 taskman activity TM-42
 ```
 
-`context` includes the activity of the item. Consolidation and `history` are not available with these backends, and a done item keeps its position.
+`context` includes the activity of the item. A done item keeps its position among its siblings.
 
 `taskman db upgrade` creates the schema in a new database and upgrades an older one. It does nothing when the schema is current. The postgres backend needs the `postgres` extra: `uv tool install 'taskman[postgres] @ git+https://github.com/vkroz/taskman.git#subdirectory=taskman'`.
 
@@ -145,27 +150,23 @@ uv sync --extra dev --extra postgres
 TASKMAN_TEST_DATABASE_URL=postgresql://taskman:taskman@127.0.0.1:54329/taskman_test uv run pytest
 ```
 
-Python code is under `taskman/src/taskman/`; plugin sources are under `plugins/tm/`. Add a platform adapter to the installer to support another coding tool without changing task storage. The shell script under `plugins/tm/scripts/` is retained for legacy data; current workflows use the Python CLI.
+Python code is under `taskman/src/taskman/`; plugin sources are under `plugins/tm/`. Add a platform adapter to the installer to support another coding tool without changing task storage.
 
-### Workspace UI and history
+### Workspace UI
 
-Run `taskman ui` for the local workspace. The left navigation selects current, backlog, done or consolidated history. Search combines with epic scope and metadata filters; matching descendants retain labeled parent context. Sort orders siblings. Expand or collapse branches, and select a title to open details; Close returns the space to the list.
+Run `taskman ui` for the local workspace. The left navigation selects all, current, backlog or done work. Search combines with epic scope and metadata filters; matching descendants retain labeled parent context. Sort orders siblings; drag an open item to change its position. Expand or collapse branches, and select a title to open details; Close returns the space to the list.
 
-Create work with **New task**. Open task details offer title/description editing with a recorded reason. **Delete draft** is limited to draft leaves with no incoming dependencies; finalized and completed work cannot be deleted through this command.
-
-Select completed rows and choose **Consolidate completed work** to create a Markdown documentation summary. Selecting a parent includes its descendants. Originals remain immutable and retrievable in Consolidated history, while individual rows leave ordinary lists. The summary contains bounded excerpts and links to full requirements and evidence.
+Create work with **New task**; a top-level item needs a project key. Open task details offer title/description editing with a recorded reason, **Add comment** with a kind (and a result for a verification), and **Assignee and labels**. Details also show comments and the activity history. **Delete draft** is limited to draft leaves with no incoming dependencies; finalized and completed work cannot be deleted. Agents finalize, move and close items through the CLI.
 
 The same operations are available from the CLI:
 
 ```sh
 taskman browse --where status=active,backlog --sort title
-taskman browse --where status=done --epic EPIC_ID --keyword migration
+taskman browse --where status=done --epic EPIC_KEY --keyword migration
 taskman browse --contains journal=verification --exists depends_on
-taskman edit TASK_ID --title "Updated title" --body-file requirements.md --reason "Clarify table coverage"
-taskman discard DRAFT_ID
-taskman consolidate DONE_ID --title "Delivered database changes"
-taskman history
-taskman browse --include-archived
+taskman edit TASK_KEY --title "Updated title" --body-file requirements.md --reason "Clarify table coverage"
+taskman reorder TASK_KEY --position 1
+taskman discard DRAFT_KEY
 ```
 
-`browse` emits hierarchy-preserving JSON; contextual ancestors have `context: true` and do not match the query themselves. Use `show` or `context` with any retained ID for complete history. See [workspace design](docs/ui-design.md) for filtering and retention semantics.
+`browse` emits hierarchy-preserving JSON; contextual ancestors have `context: true` and do not match the query themselves. Use `show` or `context` with a key for the complete record. See [workspace design](docs/ui-design.md) for filtering semantics. In JSON, comments are in `frontmatter.journal`.

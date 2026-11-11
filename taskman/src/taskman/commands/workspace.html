@@ -174,11 +174,6 @@
         padding: 9px 10px;
         min-width: 0;
       }
-      input[type="checkbox"] {
-        accent-color: var(--accent);
-        width: 16px;
-        height: 16px;
-      }
       .search {
         flex: 1;
         min-width: 180px;
@@ -434,18 +429,6 @@
       .message:empty {
         display: none;
       }
-      .bulk {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        flex-wrap: wrap;
-        padding: 10px 16px;
-        background: #f5f3ff;
-        border-bottom: 1px solid var(--line);
-      }
-      .bulk[hidden] {
-        display: none;
-      }
       dialog {
         border: 1px solid var(--line);
         border-radius: 14px;
@@ -477,27 +460,6 @@
         font-size: 12px;
         color: var(--muted);
         margin: 0;
-      }
-      .history-card {
-        padding: 20px;
-        border-bottom: 1px solid var(--line);
-      }
-      .history-card h2 {
-        font-size: 17px;
-        margin: 0 0 8px;
-      }
-      .history-card summary {
-        cursor: pointer;
-        color: var(--accent);
-        margin: 12px 0;
-      }
-      .history-card pre {
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-        font: 13px/1.6 inherit;
-      }
-      .history-link {
-        font-size: 12px;
       }
       .muted {
         color: var(--muted);
@@ -584,8 +546,7 @@
             <button data-view="all" aria-current="true">All work</button
             ><button data-view="current">Current</button
             ><button data-view="backlog">Backlog</button
-            ><button data-view="done">Done</button
-            ><button data-view="history">Consolidated history</button>
+            ><button data-view="done">Done</button>
           </nav>
         </div>
         <footer>
@@ -644,11 +605,6 @@
                 <button id="clear">Clear filters</button>
               </div>
             </div>
-            <div class="bulk" id="bulk" hidden>
-              <span id="selection-count"></span
-              ><button id="consolidate">Consolidate completed work</button
-              ><button id="clear-selection">Clear selection</button>
-            </div>
             <div id="tree"></div>
           </section>
           <aside
@@ -704,9 +660,6 @@
       <form id="confirm-form">
         <h2 id="confirm-title"></h2>
         <p id="confirm-description"></p>
-        <label id="summary-label"
-          >Summary title<input id="summary-title" maxlength="200"
-        /></label>
         <div id="confirm-error" class="message error" role="alert"></div>
         <footer>
           <button type="button" data-close="confirm">Cancel</button
@@ -781,14 +734,11 @@
                 "'": "&#39;",
               })[c],
           );
-      let openSummaries = new Set();
       let view = "all",
         rows = [],
         all = [],
         fields = [],
-        histories = [],
         collapsed = new Set(),
-        selected = new Set(),
         selectedId = null,
         filters = [],
         appliedFilters = [],
@@ -797,7 +747,6 @@
         editing = null,
         operation = null,
         target = null,
-        caps = { consolidation: true, reorder_done: true },
         serial = 0;
       // Polling pauses while any dialog is open, so typed text is kept.
       const dialogOpen = () => !!document.querySelector("dialog[open]");
@@ -855,16 +804,11 @@
           rows = result.rows;
           all = result.all;
           fields = result.fields;
-          histories = result.history;
-          caps = result.capabilities || caps;
-          // Decision D8: SQL backends do not offer consolidation.
-          $('[data-view="history"]').hidden = !caps.consolidation;
-          $("#consolidate").hidden = !caps.consolidation;
           let epic = $("#epic").value;
           $("#epic").innerHTML =
             '<option value="">All epics</option>' +
             all
-              .filter((r) => r.metadata.type === "epic" && !r.archived)
+              .filter((r) => r.metadata.type === "epic")
               .map(
                 (r) =>
                   `<option value="${esc(r.id)}">${esc(r.metadata.title)}</option>`,
@@ -885,11 +829,6 @@
             .map((f) => `<option value="${esc(f)}">${esc(f)}</option>`)
             .join("");
           $("#sort").value = sort;
-          selected = new Set(
-            [...selected].filter((id) =>
-              all.some((r) => r.id === id && !r.archived),
-            ),
-          );
           render();
           $("#connection").textContent = "Up to date";
           $("#tree").setAttribute("aria-busy", "false");
@@ -901,12 +840,6 @@
         }
       }
       function render() {
-        if (view === "history") {
-          renderHistory();
-          return;
-        }
-        $("#controls").hidden = false;
-        $("#expand").hidden = $("#collapse").hidden = false;
         $("#count").textContent =
           `${rows.filter((r) => !r.context).length} work items`;
         let byId = Object.fromEntries(rows.map((r) => [r.id, r]));
@@ -924,28 +857,12 @@
           if (hidden(r)) continue;
           let m = r.metadata,
             hasChildren = rows.some((x) => x.parent_id === r.id);
-          html += `<div class="row ${r.context ? "context" : ""} ${r.id === selectedId ? "selected" : ""}" data-id="${r.id}"><div class="row-title" style="--depth:${r.depth}"><span class="drag-handle" draggable="${$("#sort").value === "priority" && (caps.reorder_done || m.status !== "done")}" data-drag="${r.id}" role="button" aria-label="Drag ${esc(m.title)} to change priority">⋮⋮</span><button class="toggle" data-toggle="${r.id}" aria-label="${collapsed.has(r.id) ? "Expand" : "Collapse"} ${esc(m.title)}" ${hasChildren ? 'aria-expanded="' + !collapsed.has(r.id) + '"' : "disabled"}>${hasChildren ? (collapsed.has(r.id) ? "▸" : "▾") : "·"}</button><input type="checkbox" aria-label="Select ${esc(m.title)}" data-select="${r.id}" ${selected.has(r.id) ? "checked" : ""}><div><button class="title-button" data-open="${r.id}">${esc(m.title || r.id)}</button>${m.draft ? '<span class="draft">Draft</span>' : ""}${r.context ? '<div class="context-label">Parent context</div>' : ""}</div></div><span class="badge ${esc(m.status)}">${esc(m.status)}</span><span class="type type-col">${esc(m.type)}</span><span class="muted priority-col">${r.order + 1}</span></div>`;
+          html += `<div class="row ${r.context ? "context" : ""} ${r.id === selectedId ? "selected" : ""}" data-id="${r.id}"><div class="row-title" style="--depth:${r.depth}"><span class="drag-handle" draggable="${$("#sort").value === "priority" && m.status !== "done"}" data-drag="${r.id}" role="button" aria-label="Drag ${esc(m.title)} to change priority">⋮⋮</span><button class="toggle" data-toggle="${r.id}" aria-label="${collapsed.has(r.id) ? "Expand" : "Collapse"} ${esc(m.title)}" ${hasChildren ? 'aria-expanded="' + !collapsed.has(r.id) + '"' : "disabled"}>${hasChildren ? (collapsed.has(r.id) ? "▸" : "▾") : "·"}</button><div><button class="title-button" data-open="${r.id}">${esc(m.title || r.id)}</button>${m.draft ? '<span class="draft">Draft</span>' : ""}${r.context ? '<div class="context-label">Parent context</div>' : ""}</div></div><span class="badge ${esc(m.status)}">${esc(m.status)}</span><span class="type type-col">${esc(m.type)}</span><span class="muted priority-col">${r.order + 1}</span></div>`;
         }
         if (!rows.length)
           html =
             '<div class="empty"><strong>No matching work</strong><p>Try another search or clear your filters.</p><button data-clear>Clear filters</button></div>';
         $("#tree").innerHTML = html;
-        $("#bulk").hidden = !selected.size;
-        $("#selection-count").textContent = `${selected.size} selected`;
-      }
-      function renderHistory() {
-        $("#controls").hidden = true;
-        $("#bulk").hidden = true;
-        $("#expand").hidden = $("#collapse").hidden = true;
-        $("#count").textContent = `${histories.length} summaries`;
-        $("#tree").innerHTML = histories.length
-          ? histories
-              .map(
-                (h) =>
-                  `<article class="history-card"><h2>${esc(h.title)}</h2><span class="muted">${h.ids.length} retained records</span><details data-history="${esc(h.key)}" ${openSummaries.has(h.key) ? "open" : ""}><summary>Read documentation summary</summary><pre>${esc(h.summary)}</pre></details><a class="history-link" href="/api/history/${esc(h.key)}" download>Download Markdown</a><p>${h.ids.map((id) => `<button data-open="${id}">${esc(all.find((r) => r.id === id)?.metadata.title || id)}</button>`).join(" ")}</p></article>`,
-              )
-              .join("")
-          : '<div class="empty"><strong>No consolidated work yet</strong><p>Select completed work to create a documentation summary.</p></div>';
       }
       async function detail(id, open = true) {
         try {
@@ -1091,41 +1008,17 @@
         $("#confirm-title").textContent = "Delete this draft?";
         $("#confirm-description").textContent =
           "Only an unreferenced draft without children can be deleted. Finalized and completed records are retained.";
-        $("#summary-label").hidden = true;
-        $("#summary-title").required = false;
         $("#confirm-error").textContent = "";
         $("#confirm-submit").textContent = "Delete draft";
         $("#confirm").showModal();
       }
-      $("#consolidate").onclick = () => {
-        operation = { kind: "consolidate", ids: [...selected] };
-        $("#confirm-title").textContent = "Consolidate completed work";
-        $("#confirm-description").textContent =
-          "Create a documentation summary for the selection and its descendants. All must be done. Original records remain available in Consolidated history; individual items leave the ordinary list.";
-        $("#summary-label").hidden = false;
-        $("#summary-title").required = true;
-        $("#summary-title").value = "Completed work summary";
-        $("#confirm-error").textContent = "";
-        $("#confirm-submit").textContent = "Create summary";
-        $("#confirm").showModal();
-      };
       $("#confirm-form").onsubmit = async (e) => {
         e.preventDefault();
         try {
-          await api(
-            operation.kind === "delete" ? "/api/discard" : "/api/consolidate",
-            operation.kind === "delete"
-              ? { id: operation.id }
-              : { ids: operation.ids, title: $("#summary-title").value },
-          );
+          await api("/api/discard", { id: operation.id });
           $("#confirm").close();
           closeDetails();
-          selected.clear();
-          message(
-            operation.kind === "delete"
-              ? "Draft deleted."
-              : "Summary saved in project documentation. Originals are available in Consolidated history.",
-          );
+          message("Draft deleted.");
           await refresh();
         } catch (err) {
           $("#confirm-error").textContent = err.message;
@@ -1195,10 +1088,6 @@
       }
       $("#clear").onclick = clear;
       $("#new").onclick = () => openEditor();
-      $("#clear-selection").onclick = () => {
-        selected.clear();
-        render();
-      };
       $("#expand").onclick = () => {
         collapsed.clear();
         render();
@@ -1239,31 +1128,6 @@
         if (b.hasAttribute("data-clear")) clear();
         if (b.dataset.close) $("#" + b.dataset.close).close();
       };
-      $("#tree").onchange = (e) => {
-        if (e.target.dataset.select) {
-          let id = e.target.dataset.select;
-          if (e.target.checked) {
-            // Use the full collection so collapsed and filtered children participate.
-            const children = new Map();
-            for (const item of all) {
-              if (item.archived) continue;
-              if (!children.has(item.parent_id)) children.set(item.parent_id, []);
-              children.get(item.parent_id).push(item.id);
-            }
-            const pending = [id], visited = new Set();
-            while (pending.length) {
-              const next = pending.pop();
-              if (visited.has(next)) continue;
-              visited.add(next);
-              selected.add(next);
-              pending.push(...(children.get(next) || []));
-            }
-          } else {
-            selected.delete(id);
-          }
-          render();
-        }
-      };
       $("#tree").ondragstart = (e) => {
         const handle = e.target.closest("[data-drag]");
         if (!handle || $("#sort").value !== "priority") return;
@@ -1297,7 +1161,7 @@
         const after = row.classList.contains("drop-after");
         const siblings = all
           .filter(
-            (item) => !item.archived && item.parent_id === source.parent_id && item.id !== draggedId,
+            (item) => item.parent_id === source.parent_id && item.id !== draggedId,
           )
           .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
         const targetIndex = siblings.findIndex((item) => item.id === target.id);
@@ -1322,16 +1186,6 @@
           .querySelectorAll(".drop-before,.drop-after")
           .forEach((item) => item.classList.remove("drop-before", "drop-after"));
       };
-      document.addEventListener(
-        "toggle",
-        (e) => {
-          if (e.target.dataset?.history) {
-            let key = e.target.dataset.history;
-            e.target.open ? openSummaries.add(key) : openSummaries.delete(key);
-          }
-        },
-        true,
-      );
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape" && !dialogOpen()) closeDetails();
       });

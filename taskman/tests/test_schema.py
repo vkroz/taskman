@@ -167,7 +167,7 @@ def test_db_upgrade_command(tmp_path, monkeypatch):
 
 def test_db_upgrade_refuses_the_file_backend(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("TASKMAN_BACKEND", raising=False)
+    monkeypatch.setenv("TASKMAN_BACKEND", "file")
     result = runner.invoke(app, ["db", "upgrade"])
     assert result.exit_code == 2
-    assert "The file backend has no database" in result.output
+    assert "The file backend was removed" in result.output

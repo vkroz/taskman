@@ -11,7 +11,6 @@ import pytest
 
 from taskman import lifecycle
 from taskman.commands.ui import _make_handler
-from taskman.storage.file import FileStore
 from taskman.storage.schema import upgrade
 from taskman.storage.settings import StorageSettings
 from taskman.storage.sql import connect
@@ -108,11 +107,10 @@ def test_show_includes_activity(api):
     assert (activity[2]["old"], activity[2]["new"]) == ("Item", "Renamed")
 
 
-def test_sql_capabilities_hide_consolidation_and_done_reorder(api, tmp_path):
+def test_done_items_cannot_be_reordered_or_changed(api, tmp_path):
     _create(api, "Done", project="TM")
     _create(api, "Open", project="TM")
-    result = api("/api/query", {})
-    assert result["capabilities"] == {"consolidation": False, "reorder_done": False}
+    assert "capabilities" not in api("/api/query", {})
     store = open_sql_store(StorageSettings("sqlite", sqlite_path=tmp_path / "taskman.db"), actor="agent")
     try:
         lifecycle.finalize(store, "TM-1")
@@ -124,19 +122,6 @@ def test_sql_capabilities_hide_consolidation_and_done_reorder(api, tmp_path):
     assert "immutable" in api("/api/reorder", {"id": "TM-1", "position": 2}, status=400)["error"]
     assert "immutable" in api("/api/comment", {"id": "TM-1", "kind": "decision", "text": "late"}, status=400)["error"]
     assert "immutable" in api("/api/assign", {"id": "TM-1", "assignee": "codex"}, status=400)["error"]
-    assert "D8" in api("/api/consolidate", {"ids": ["TM-1"], "title": "Summary"}, status=400)["error"]
+    assert "Unknown endpoint" in api("/api/consolidate", {"ids": ["TM-1"], "title": "Summary"}, status=404)["error"]
     api("/api/reorder", {"id": "TM-2", "position": 1})
     assert [row["id"] for row in api("/api/query", {})["rows"]] == ["TM-2", "TM-1"]
-
-
-def test_file_backend_keeps_consolidation_and_has_no_activity(tmp_path):
-    (tmp_path / "backlog").mkdir()
-    store = FileStore(tmp_path)
-    item = lifecycle.create(store, "Item", "task", None)
-    server, call = _serve(store)
-    try:
-        assert call("/api/query", {})["capabilities"] == {"consolidation": True, "reorder_done": True}
-        assert "activity" not in call(f"/api/show/{item.id}")
-    finally:
-        server.shutdown()
-        server.server_close()

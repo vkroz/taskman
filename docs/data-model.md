@@ -2,7 +2,7 @@
 
 This document defines how Taskman stores work items in SQLite and Postgres. It applies decisions D5 to D8 of epic 261108000. The lifecycle rules in [the specification](specification.md) do not change. This document shows how each rule applies to the SQL model.
 
-The file backend (`tasks/` Markdown files) does not use this model. Feature 261109005 removes the file backend after the SQL backends are complete.
+Taskman has no other storage. Feature 261109005 removed the file backend. Markdown files under `tasks/` from earlier versions are historical text; Taskman does not read them.
 
 ## Entities
 
@@ -100,11 +100,11 @@ Key numbers come from the project's next number in the same transaction. Two wri
 | Today | SQL backends |
 | --- | --- |
 | `new`, `finalize`, `update`, `edit`, `depend`, `move`, `convert`, `close`, `discard`, `reorder`, `list`, `show`, `context`, `ready`, `dependents`, `waiting-on`, `search`, `browse`, `ui` | Same commands. They accept and print keys such as `TM-42`. `new` without `--parent` needs `--project KEY`. Listing commands accept `--project KEY`. |
-| `record` | `comment` adds a comment with the same options (`--kind`, `--actor`, `--result`, `--body-file`). `record` stays as an alias until feature 261109005 updates the plugin skills. |
+| `record` | `comment` adds a comment with the same options (`--kind`, `--actor`, `--result`, `--body-file`). `record` remains an alias for older plugin installs; the plugin skills use `comment`. |
 | none | `assign KEY NAME`, `unassign KEY`, `label KEY --add L --remove L`, `activity KEY`. `list`, `browse` and the UI filter by assignee and label. |
-| `validate` | Checks dependency links and the schema version. File layout checks do not apply. |
-| `consolidate`, `history` | Not available (D8). The command stops with a message. |
-| `migrate`, `worktree-status` | File backend only. On a SQL backend the command stops with the message "This command works only with the file backend." |
+| `validate` | Checks dependency links for unknown keys and cycles. |
+| `consolidate`, `history` | Removed (D8, feature 261109005). |
+| `migrate`, `worktree-status` | Removed with the file backend (feature 261109005). |
 
 The UI shows comments, activity, assignee and labels in the item details. The UI can set the assignee and labels and add comments.
 
@@ -119,7 +119,7 @@ The JSON output of `show --json` and `context` keeps today's shape, so the plugi
 
 `context` also gives `activity` for the item.
 
-The location of an item is `<backend>:<key>`, for example `sqlite:TM-42`. Commands that print a path today print this location. Error messages that list child file names list child keys.
+The location of an item is `<backend>:<key>`, for example `sqlite:TM-42`. Commands that printed a file path print this location. Error messages that list children list their keys.
 
 `show` without `--json` prints the item as Markdown: a frontmatter block with the fields, then the description.
 
@@ -132,11 +132,11 @@ The location of an item is `<backend>:<key>`, for example `sqlite:TM-42`. Comman
 | Input | Answer |
 | --- | --- |
 | Locking across one lifecycle operation | One transaction for each operation. See "Transactions and locking". |
-| Checks that assume 9-digit IDs | Removed. Keys follow the key rule above. Task 261109011 removes the checks in the UI and the help text. |
+| Checks that assume 9-digit IDs | Removed in task 261109011. Keys follow the key rule above. |
 | Location | `<backend>:<key>`. |
-| `worktree-status` | File backend only. Feature 261109005 removes it. |
+| `worktree-status` | Removed in feature 261109005. |
 | Last change time | The `changed` field. The contract suite checks it. |
-| `migrate` | File backend only. Feature 261109005 removes it. |
+| `migrate` | Removed in feature 261109005. |
 
 ## Out of scope
 
@@ -150,6 +150,6 @@ The location of an item is `<backend>:<key>`, for example `sqlite:TM-42`. Comman
 
 - **M1 Author of a change (agreed Nov 9, 2026).** Every command that changes an item accepts an optional `--actor NAME`. Without it, the author is the git `user.name`. The author goes into the activity entry and into comments.
 - **M2 Done items (agreed Nov 9, 2026).** The change of status to `done` is the last change to an item. After it, nothing changes: not fields, links, labels, assignee, rank or comments. Today the UI can still reorder done items; that stops.
-- **M3 `record` becomes `comment` (agreed Nov 9, 2026).** The new name matches the model. `record` stays as an alias until feature 261109005 updates the plugin skills.
-- **M4 JSON shape (agreed Nov 9, 2026).** `show --json` and `context` keep today's keys, with comments in `frontmatter.journal`. A Jira-like shape (for example `fields` and `comments`) can come with feature 261109005, together with the plugin updates.
+- **M3 `record` becomes `comment` (agreed Nov 9, 2026).** The new name matches the model. Feature 261109005 moved the plugin skills to `comment` and kept `record` as an alias for older plugin installs.
+- **M4 JSON shape (agreed Nov 9, 2026).** `show --json` and `context` keep today's keys, with comments in `frontmatter.journal`. A Jira-like shape (for example `fields` and `comments`) is not planned; feature 261109005 kept this shape.
 - **M5 Project selection (agreed Nov 9, 2026).** A repository does not select a project. The item key identifies the item and its project. A new top-level item names its project with `--project KEY`; listings show all projects unless `--project` limits them.

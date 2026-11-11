@@ -16,8 +16,6 @@ def upgrade() -> None:
     """Create the schema in a new database, or upgrade an older one. Safe to run again."""
     try:
         settings = storage_settings()
-        if settings.backend == "file":
-            raise StorageConfigError("The file backend has no database. Set TASKMAN_BACKEND to sqlite or postgres.")
         conn, dialect = connect(settings)
         try:
             applied = upgrade_schema(conn, dialect)

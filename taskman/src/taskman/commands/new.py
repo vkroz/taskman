@@ -14,9 +14,6 @@ import typer
 
 from taskman import lifecycle
 from taskman.commands.outcome import reported
-from taskman.lifecycle import LifecycleError as NewCommandError  # noqa: F401 — kept for existing callers
-from taskman.lifecycle import slugify  # noqa: F401 — kept for existing callers
-from taskman.storage.file import get_tasks_dir  # noqa: F401 — kept for existing callers
 from taskman.storage.store import open_store
 
 

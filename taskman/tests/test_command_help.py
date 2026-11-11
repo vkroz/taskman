@@ -8,37 +8,32 @@ from taskman.cli import app
 runner = CliRunner()
 
 
-def test_help_subcommand_exits_zero() -> None:
-    r = runner.invoke(app, ["help"])
-    assert r.exit_code == 0
+def _help() -> str:
+    result = runner.invoke(app, ["help"])
+    assert result.exit_code == 0
+    return result.output
 
 
-def test_help_documents_storage_layout() -> None:
-    r = runner.invoke(app, ["help"])
-    assert "STORAGE LAYOUT" in r.output
-    assert "tasks/" in r.output
-    assert "backlog/" in r.output
-
-
-def test_help_documents_name_grammar() -> None:
-    r = runner.invoke(app, ["help"])
-    assert "NAME GRAMMAR" in r.output
-    assert "<priority>.<type>-<id>.<status>.<slug>" in r.output
-    assert "_<id>.md" in r.output
-
-
-def test_help_documents_id_scheme() -> None:
-    r = runner.invoke(app, ["help"])
-    assert "ID GENERATION" in r.output
-    assert "YYMMDDnnn" in r.output
+def test_help_documents_sql_storage_and_keys() -> None:
+    text = _help()
+    assert "STORAGE" in text and "taskman db upgrade" in text
+    assert "TM-42" in text and "--project KEY" in text
 
 
 def test_help_documents_invariants() -> None:
-    r = runner.invoke(app, ["help"])
-    assert "task = leaf" in r.output
-    assert "Free type ladder" in r.output
+    text = _help()
+    assert "task = leaf" in text
+    assert "Free type ladder" in text
 
 
-def test_help_documents_env_var() -> None:
-    r = runner.invoke(app, ["help"])
-    assert "TASKMAN_TASKS_DIR" in r.output
+def test_help_documents_every_storage_setting() -> None:
+    text = _help()
+    for name in ("TASKMAN_BACKEND", "TASKMAN_DATABASE_URL", "TASKMAN_DB_SOCKET", "TASKMAN_DB_NAME",
+                 "TASKMAN_DB_USER", "TASKMAN_DB_PASSWORD", "TASKMAN_DB_PASSWORD_FILE"):
+        assert name in text
+
+
+def test_help_describes_only_the_sql_model() -> None:
+    text = _help()
+    for removed in ("TASKMAN_TASKS_DIR", "file backend", "YYMMDD", "consolidat", "_<id>.md", "backlog/"):
+        assert removed not in text

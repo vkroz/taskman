@@ -88,14 +88,15 @@ def test_env_file_tracked_by_git_is_ignored(tmp_path, capsys):
 # ---- backend and SQLite ------------------------------------------------
 
 
-def test_backend_defaults_to_file():
-    assert storage_settings({}) == StorageSettings("file")
+def test_backend_defaults_to_sqlite(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert storage_settings({}) == StorageSettings("sqlite", sqlite_path=tmp_path / ".local/share/taskman/taskman.db")
 
 
 def test_unknown_backend_names_the_supported_ones():
     message = _error({"TASKMAN_BACKEND": "mysql"})
     assert "Unknown storage backend 'mysql'" in message
-    assert "file, sqlite, postgres" in message
+    assert "sqlite, postgres" in message
 
 
 def test_sqlite_without_url_uses_the_shared_user_file(monkeypatch, tmp_path):
@@ -198,3 +199,27 @@ def test_help_works_with_wrong_settings(tmp_path, monkeypatch):
     result = runner.invoke(app, ["help"])
     assert result.exit_code == 0
     assert "TASKMAN_BACKEND" in result.output
+
+
+def _command_names() -> list[str]:
+    from typer.main import get_command
+
+    group = get_command(app)
+    return sorted(name for name in group.commands if name not in ("help", "version", "install", "db"))
+
+
+@pytest.mark.parametrize(
+    "variable, value, expected",
+    [("TASKMAN_BACKEND", "file", "The file backend was removed"), ("TASKMAN_TASKS_DIR", "/tmp/tasks", "TASKMAN_TASKS_DIR is no longer used")],
+)
+def test_every_command_refuses_the_file_backend_settings(tmp_path, monkeypatch, variable, value, expected):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(variable, value)
+    names = _command_names()
+    assert {"list", "new", "close", "ui", "comment"} <= set(names)
+    for args in [[name] for name in names] + [["db", "upgrade"]]:
+        result = runner.invoke(app, args)
+        assert result.exit_code == 2, (args, result.output)
+        assert expected in result.output and "TASKMAN_BACKEND=sqlite" in result.output, (args, result.output)
+    for args in (["help"], ["version"], ["--help"]):
+        assert runner.invoke(app, args).exit_code == 0, args
