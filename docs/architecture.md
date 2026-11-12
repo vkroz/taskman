@@ -30,7 +30,7 @@ With a server, the CLI does none of these steps itself. It sends the operation a
 ## Storage technology
 
 - **SQLite.** One database file. The default is `~/.local/share/taskman/taskman.db`, shared by all repositories of the user.
-- **Postgres 16.** The driver is psycopg 3, installed with the `postgres` extra. Taskman connects with a URL, or through a unix socket directory, for example the Cloud SQL socket `/cloudsql/<instance>` on Cloud Run. The password comes from an environment variable or a mounted secret file. No error message shows a password or a URL.
+- **Postgres 16.** The driver is psycopg 3, installed with the `postgres` extra. Taskman connects with a URL, or through a unix socket directory, for example the Cloud SQL socket `/cloudsql/<connection name>` on Cloud Run. The password comes from an environment variable or a mounted secret file. No error message shows a password or a URL.
 - **Schema versions.** `taskman db upgrade` applies the missing schema versions in order, in one transaction, and records each version. A store refuses a database with an older or a newer schema version.
 
 ## Concurrency
@@ -76,10 +76,11 @@ Each sign-in works one time and for 10 minutes. The one-time code works for 2 mi
 - On Google Cloud, the server runs on Cloud Run, and the database is Cloud SQL for PostgreSQL. Cloud Run opens the Cloud SQL unix socket in `/cloudsql/<connection name>` and mounts each secret as a file.
 - A Cloud Run job runs `taskman db upgrade` before a new image serves traffic. The server does not start with an older schema, so a deploy without the upgrade fails and the previous revision continues to serve.
 - The service accepts calls from any address, and Cloud Run does not check the caller's Google identity. Taskman checks the token of each call. Thus agent machines need no cloud credentials.
+- The GitHub Actions workflow `CI` (continuous integration) tests each pull request to `staging`. After each push to `staging`, it builds the image, runs the upgrade job and deploys the service. It gets access to Google Cloud through Workload Identity Federation, with no stored key. Project IDs, service account addresses and other names of an organization are repository variables, not text in the repository.
 - The local Docker Compose stack has the same layout. Postgres shares its unix socket through a volume at `/cloudsql/local`, and the password comes from a secret file.
-- Another cloud needs a container service with environment variables and secret files, PostgreSQL 16, a one-time task for `db upgrade`, and HTTPS in front of the server.
+- Another cloud needs a container service with environment variables, PostgreSQL 16, a one-time task for `db upgrade`, and HTTPS in front of the server. Secrets can come as files or as environment variables.
 
-[Run the Taskman server on Google Cloud](deploy-gcp.md) gives the steps and the equivalent AWS (Amazon Web Services) services.
+[Run the Taskman server on Google Cloud](deploy-gcp.md) gives the steps and the equivalent AWS (Amazon Web Services) services. The Taskman maintainers have not tested the AWS path.
 
 ## Workspace UI
 
@@ -91,5 +92,6 @@ Each sign-in works one time and for 10 minutes. The one-time code works for 2 mi
 - The server has no page to list or revoke tokens. An operator does this with `taskman token list` and `taskman token revoke` on a machine that reaches the database.
 - The server does not serve the workspace page. `taskman ui` serves it on the computer of the user.
 - The server uses one database connection for all calls and does not connect again after the connection breaks. After a database restart, `/readyz` answers 503 until the server process restarts. On Cloud Run, a liveness probe on `/readyz` replaces such an instance.
+- With browser login on, anyone can open `/auth/token` and `/auth/cli` without a token. Each request adds a row to the `logins` table and deletes old rows, under the database write lock. Taskman does not limit the rate of these requests.
 - Taskman does not read `tasks/` Markdown files from earlier versions, and imports nothing from them (decision D4).
 - There is no consolidation of completed work (decision D8).

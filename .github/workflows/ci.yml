@@ -1,0 +1,235 @@
+# Tests each pull request to staging and each push to staging.
+# After the tests pass on staging, the deploy job deploys the server to Cloud Run.
+# docs/deploy-gcp.md describes the setup.
+#
+# The deploy job is skipped until the repository variables exist
+# (Settings > Secrets and variables > Actions > Variables).
+# Required: GCP_PROJECT_ID, GCP_REGION, GCP_WIF_PROVIDER, GCP_DEPLOYER_SA,
+#   GCP_RUNTIME_SA, GCP_CLOUDSQL_INSTANCE.
+# Optional: GCP_ARTIFACT_REPO, TASKMAN_SERVICE, TASKMAN_DB_NAME, TASKMAN_DB_USER,
+#   TASKMAN_DB_PASSWORD_SECRET (defaults in the deploy job's env).
+# Browser login, on when TASKMAN_GOOGLE_CLIENT_ID is set: TASKMAN_GOOGLE_CLIENT_ID,
+#   TASKMAN_GOOGLE_CLIENT_SECRET_SECRET, TASKMAN_PUBLIC_URL,
+#   TASKMAN_ALLOWED_DOMAINS and/or TASKMAN_ALLOWED_EMAILS.
+#
+# Actions are pinned to full commit SHAs, because the deploy job can get Google Cloud credentials.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [staging]
+  push:
+    branches: [staging]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Runs of one branch go one at a time, in push order, so an older commit cannot deploy after a newer one.
+# A new run cancels a running one only on a pull request. Of the runs that wait, only the newest stays.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: taskman_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      TASKMAN_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/taskman_test
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        run: |
+          set -euo pipefail
+          python3 -m pip install uv==0.11.32
+
+      - name: Install dependencies
+        working-directory: taskman
+        run: |
+          set -euo pipefail
+          uv sync --frozen --extra dev --extra postgres
+
+      - name: Run tests
+        working-directory: taskman
+        run: |
+          set -euo pipefail
+          uv run pytest -q -rs
+
+      - name: Build image
+        run: |
+          set -euo pipefail
+          docker build taskman
+
+  deploy:
+    needs: test
+    if: >-
+      github.ref == 'refs/heads/staging'
+      && github.event_name != 'pull_request'
+      && vars.GCP_PROJECT_ID != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+      GCP_DEPLOYER_SA: ${{ vars.GCP_DEPLOYER_SA }}
+      GCP_RUNTIME_SA: ${{ vars.GCP_RUNTIME_SA }}
+      GCP_CLOUDSQL_INSTANCE: ${{ vars.GCP_CLOUDSQL_INSTANCE }}
+      IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.GCP_ARTIFACT_REPO || 'taskman' }}/taskman:${{ github.sha }}
+      TASKMAN_SERVICE: ${{ vars.TASKMAN_SERVICE || 'taskman' }}
+      TASKMAN_DB_NAME: ${{ vars.TASKMAN_DB_NAME || 'taskman' }}
+      TASKMAN_DB_USER: ${{ vars.TASKMAN_DB_USER || 'taskman' }}
+      TASKMAN_DB_PASSWORD_SECRET: ${{ vars.TASKMAN_DB_PASSWORD_SECRET || 'taskman-db-password' }}
+      TASKMAN_GOOGLE_CLIENT_ID: ${{ vars.TASKMAN_GOOGLE_CLIENT_ID }}
+      TASKMAN_GOOGLE_CLIENT_SECRET_SECRET: ${{ vars.TASKMAN_GOOGLE_CLIENT_SECRET_SECRET || 'taskman-google-client-secret' }}
+      TASKMAN_PUBLIC_URL: ${{ vars.TASKMAN_PUBLIC_URL }}
+      TASKMAN_ALLOWED_DOMAINS: ${{ vars.TASKMAN_ALLOWED_DOMAINS }}
+      TASKMAN_ALLOWED_EMAILS: ${{ vars.TASKMAN_ALLOWED_EMAILS }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOYER_SA }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: '570.0.0'
+
+      - name: Build and push image
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+          docker build --platform linux/amd64 -t "$IMAGE" taskman
+          docker push "$IMAGE"
+
+      # JSON strings are valid YAML strings, so commas and quotes in values survive.
+      - name: Write env files
+        run: |
+          set -euo pipefail
+          python3 - <<'EOF'
+          import json, os
+
+          env = os.environ
+          job = {
+              "TASKMAN_BACKEND": "postgres",
+              "TASKMAN_DB_SOCKET": "/cloudsql/" + env["GCP_CLOUDSQL_INSTANCE"],
+              "TASKMAN_DB_NAME": env["TASKMAN_DB_NAME"],
+              "TASKMAN_DB_USER": env["TASKMAN_DB_USER"],
+              "TASKMAN_DB_PASSWORD_FILE": "/secrets/db/password",
+          }
+          service = dict(job)
+          if env.get("TASKMAN_GOOGLE_CLIENT_ID"):
+              if not env.get("TASKMAN_PUBLIC_URL"):
+                  raise SystemExit("Browser login needs the TASKMAN_PUBLIC_URL variable.")
+              if not (env.get("TASKMAN_ALLOWED_DOMAINS") or env.get("TASKMAN_ALLOWED_EMAILS")):
+                  raise SystemExit("Browser login needs TASKMAN_ALLOWED_DOMAINS or TASKMAN_ALLOWED_EMAILS.")
+              service.update({
+                  "TASKMAN_GOOGLE_CLIENT_ID": env["TASKMAN_GOOGLE_CLIENT_ID"],
+                  "TASKMAN_GOOGLE_CLIENT_SECRET_FILE": "/secrets/google/client-secret",
+                  "TASKMAN_PUBLIC_URL": env["TASKMAN_PUBLIC_URL"],
+                  "TASKMAN_ALLOWED_DOMAINS": env.get("TASKMAN_ALLOWED_DOMAINS", ""),
+                  "TASKMAN_ALLOWED_EMAILS": env.get("TASKMAN_ALLOWED_EMAILS", ""),
+              })
+          for name, values in (("job-env.yaml", job), ("service-env.yaml", service)):
+              with open(os.path.join(env["RUNNER_TEMP"], name), "w", encoding="utf-8") as file:
+                  file.writelines(f"{key}: {json.dumps(value)}\n" for key, value in values.items() if value)
+          EOF
+
+      - name: Upgrade database schema
+        run: |
+          set -euo pipefail
+          job="$TASKMAN_SERVICE-db-upgrade"
+          gcloud run jobs deploy "$job" \
+            --image="$IMAGE" \
+            --args=db,upgrade \
+            --region="$GCP_REGION" \
+            --service-account="$GCP_RUNTIME_SA" \
+            --set-cloudsql-instances="$GCP_CLOUDSQL_INSTANCE" \
+            --env-vars-file="$RUNNER_TEMP/job-env.yaml" \
+            --set-secrets="/secrets/db/password=$TASKMAN_DB_PASSWORD_SECRET:latest" \
+            --max-retries=0 \
+            --tasks=1 \
+            --quiet
+          gcloud run jobs execute "$job" --region="$GCP_REGION" --wait --quiet
+
+      - name: Deploy service
+        run: |
+          set -euo pipefail
+          secrets="/secrets/db/password=$TASKMAN_DB_PASSWORD_SECRET:latest"
+          if [ -n "${TASKMAN_GOOGLE_CLIENT_ID:-}" ]; then
+            secrets="$secrets,/secrets/google/client-secret=$TASKMAN_GOOGLE_CLIENT_SECRET_SECRET:latest"
+          fi
+          gcloud run deploy "$TASKMAN_SERVICE" \
+            --image="$IMAGE" \
+            --region="$GCP_REGION" \
+            --service-account="$GCP_RUNTIME_SA" \
+            --set-cloudsql-instances="$GCP_CLOUDSQL_INSTANCE" \
+            --env-vars-file="$RUNNER_TEMP/service-env.yaml" \
+            --set-secrets="$secrets" \
+            --cpu=1 \
+            --memory=512Mi \
+            --max-instances=3 \
+            --liveness-probe=httpGet.path=/readyz,httpGet.port=8080,periodSeconds=30,timeoutSeconds=5,failureThreshold=3 \
+            --quiet
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          gcloud run services describe "$TASKMAN_SERVICE" --region="$GCP_REGION" --format=json > "$RUNNER_TEMP/service.json"
+          # After a roll back, the traffic stays on the earlier revision, and the new revision gets none.
+          python3 - "$RUNNER_TEMP/service.json" "$RUNNER_TEMP/url" <<'EOF'
+          import json, sys
+
+          with open(sys.argv[1], encoding="utf-8") as file:
+              status = json.load(file)["status"]
+          latest = status["latestReadyRevisionName"]
+          share = sum(t.get("percent", 0) for t in status.get("traffic", []) if t.get("revisionName") == latest)
+          if share != 100:
+              print(f"::error::The new revision {latest} gets {share}% of the traffic. "
+                    "To send all traffic to it, run: gcloud run services update-traffic SERVICE --to-latest")
+              sys.exit(1)
+          with open(sys.argv[2], "w", encoding="utf-8") as file:
+              file.write(status["url"])
+          EOF
+          url="$(cat "$RUNNER_TEMP/url")"
+          deadline=$((SECONDS + 120))
+          for path in /healthz /readyz; do
+            code=""
+            until code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$url$path")" && [ "$code" = 200 ]; do
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "::error::GET $path answered ${code:-nothing}, not 200, for 2 minutes."
+                exit 1
+              fi
+              sleep 5
+            done
+            echo "GET $path: 200"
+          done
