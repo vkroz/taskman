@@ -83,7 +83,7 @@ The plugin supplies define, design, plan, implement and validate skills, plus op
 
 ## Storage settings
 
-Taskman reads its storage settings from environment variables and from a `.env` file at the repository root. A variable already set in the environment wins over `.env`. Docker Compose (`env_file`) and Cloud Run (environment variables and mounted secrets) set the same variables. Taskman ignores a `.env` file that git tracks, because a committed file could send your database password to another host. Keep `.env` out of git.
+Taskman reads its storage settings from environment variables and from a `.env` file at the repository root. A variable already set in the environment wins over `.env`. Docker Compose and Cloud Run set the same variables, as environment variables and mounted secret files. Taskman ignores a `.env` file that git tracks, because a committed file could send your database password to another host. Keep `.env` out of git.
 
 | Variable | Backend | Meaning |
 | --- | --- | --- |
@@ -130,15 +130,15 @@ Cloud SQL through its unix socket, for example on Cloud Run:
 TASKMAN_BACKEND=postgres
 TASKMAN_DB_SOCKET=/cloudsql/project:region:instance
 TASKMAN_DB_NAME=taskman
-TASKMAN_DB_USER=taskman_app
-TASKMAN_DB_PASSWORD_FILE=/secrets/taskman-db-password
+TASKMAN_DB_USER=taskman
+TASKMAN_DB_PASSWORD_FILE=/secrets/db/password
 ```
 
 ## Use a Taskman server
 
 A Taskman server lets agents and people on different computers share the same work items. The server alone opens the database. The CLI on each computer calls the server and does not know which database it uses.
 
-On the machine of the server, with the storage settings above:
+On a machine that reaches the database, with the storage settings above:
 
 ```bash
 taskman db upgrade                          # create or upgrade the schema
@@ -162,7 +162,9 @@ export TASKMAN_SERVER_URL=http://127.0.0.1:8080 TASKMAN_TOKEN=<printed token>
 
 Replace `<printed token>` with the token that `token create` printed. Git ignores `taskman/.secrets/`. The server accepts calls only from this computer, on `127.0.0.1:8080`. After you get a new version, run `docker compose up -d --build` again: the stack upgrades the schema before the server starts. `docker compose down` stops the stack and keeps the data.
 
-To run the same image on Google Cloud Run with Cloud SQL, follow [docs/deploy-gcp.md](docs/deploy-gcp.md).
+On Linux with umask 077, the container user cannot read the password file: run `chmod 644 .secrets/db_password`. The server does not connect again after Postgres restarts: run `docker compose restart server`. To change the password, change it in Postgres or delete all local data with `docker compose down -v`: Postgres reads the file only when it creates its data volume.
+
+To run the same image on Google Cloud Run with Cloud SQL, follow [docs/deploy-gcp.md](docs/deploy-gcp.md). It describes the GitHub Actions workflow that deploys the `staging` branch, and the steps to deploy by hand.
 
 ### Log in
 
@@ -185,7 +187,7 @@ The person of the token is the author of each change. With `--actor claude`, the
 
 ### Turn on browser login
 
-Browser login needs a Google OAuth client of type "Web application". Create it in the Google Cloud console, under APIs & Services, Credentials. Add `<public address>/auth/callback` as an authorized redirect URI. Then start the server with:
+Browser login needs a Google OAuth (Open Authorization) client of type "Web application". Create it on the Clients page of Google Auth Platform in the Google Cloud console, as [Turn on browser login](docs/deploy-gcp.md#turn-on-browser-login) shows. Add `<public address>/auth/callback` as an authorized redirect URI (Uniform Resource Identifier). Then start the server with:
 
 | Variable | Value |
 | --- | --- |
