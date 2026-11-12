@@ -148,6 +148,22 @@ taskman serve                               # listens on 127.0.0.1 and the port 
 
 `taskman serve --host 0.0.0.0` accepts calls from other machines. `taskman token list` shows the tokens without their secrets, and `taskman token revoke ID` stops one.
 
+### Run the server in a container
+
+`taskman/` holds a `Dockerfile` and a Docker Compose file. The Compose stack runs Postgres 16, the schema upgrade and the server. The server connects to Postgres through a unix socket, as on Cloud Run. On a computer with Docker, for example a MacBook:
+
+```sh
+cd taskman
+mkdir -p .secrets && python3 -c "import secrets; print(secrets.token_urlsafe(24))" > .secrets/db_password
+docker compose up -d --build
+docker compose run --rm server token create --person "you@example.com"
+export TASKMAN_SERVER_URL=http://127.0.0.1:8080 TASKMAN_TOKEN=<printed token>
+```
+
+Replace `<printed token>` with the token that `token create` printed. Git ignores `taskman/.secrets/`. The server accepts calls only from this computer, on `127.0.0.1:8080`. After you get a new version, run `docker compose up -d --build` again: the stack upgrades the schema before the server starts. `docker compose down` stops the stack and keeps the data.
+
+To run the same image on Google Cloud Run with Cloud SQL, follow [docs/deploy-gcp.md](docs/deploy-gcp.md).
+
 ### Log in
 
 On a computer with a browser:

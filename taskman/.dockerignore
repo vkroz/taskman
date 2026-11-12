@@ -1,0 +1,9 @@
+# Send only the files that the image needs. Everything else stays out,
+# for example .venv, tests, caches, .env and .secrets.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!src/
+**/__pycache__
+**/*.py[cod]
