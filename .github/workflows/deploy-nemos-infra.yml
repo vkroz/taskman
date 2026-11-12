@@ -1,0 +1,111 @@
+# Deploy the Taskman server to Google Cloud project nemos-infra whenever a change
+# lands on the staging branch (a merged pull request or a push).
+#
+# The workflow runs the CI checks, builds the image, pushes it to Artifact Registry,
+# and runs deploy/gcp/deploy.sh: the schema job first, then the service. It signs in
+# with Workload Identity Federation as the deployer service account;
+# deploy/gcp/bootstrap.sh creates both and prints the two variables of the GitHub
+# environment nemos-infra. docs/deploy-gcp.md, "Set up the environment once",
+# describes the setup.
+name: Deploy to nemos-infra
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One staging deployment at a time, in order; a running deployment is never
+# cancelled. A manual run from another branch only runs the checks, in its own group.
+concurrency:
+  group: deploy-nemos-infra-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Build and deploy
+    needs: checks
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: nemos-infra
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Read the environment configuration
+        id: config
+        run: |
+          source deploy/gcp/nemos-infra.env
+          registry="$REGION-docker.pkg.dev"
+          {
+            echo "project=$PROJECT_ID"
+            echo "registry=$registry"
+            echo "image=$registry/$PROJECT_ID/$REPOSITORY/$IMAGE_NAME"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check the one-time setup
+        # bootstrap.sh prints both values; they are variables of the GitHub
+        # environment nemos-infra. Without them, the sign-in fails with an unclear error.
+        env:
+          PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          DEPLOYER: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+        run: |
+          missing=()
+          [[ -n $PROVIDER ]] || missing+=(GCP_WORKLOAD_IDENTITY_PROVIDER)
+          [[ -n $DEPLOYER ]] || missing+=(GCP_DEPLOYER_SERVICE_ACCOUNT)
+          if (( ${#missing[@]} )); then
+            echo "::error title=Google Cloud setup missing::Set ${missing[*]} on the GitHub environment nemos-infra. A nemos-infra owner runs deploy/gcp/bootstrap.sh once; it creates the resources and prints both values. See docs/deploy-gcp.md, 'Set up the environment once'."
+            exit 1
+          fi
+
+      - name: Sign in to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          project_id: ${{ steps.config.outputs.project }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker "${{ steps.config.outputs.registry }}" --quiet
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build and push the image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: taskman
+          push: true
+          tags: |
+            ${{ steps.config.outputs.image }}:${{ github.sha }}
+            ${{ steps.config.outputs.image }}:staging
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Deploy
+        # By digest: the job and the service run exactly the image that this run built.
+        run: >-
+          deploy/gcp/deploy.sh deploy/gcp/nemos-infra.env
+          "${{ steps.config.outputs.image }}@${{ steps.build.outputs.digest }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Deployed to nemos-infra"
+            echo "Commit: \`${{ github.sha }}\`"
+            echo "Image: \`${{ steps.config.outputs.image }}@${{ steps.build.outputs.digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

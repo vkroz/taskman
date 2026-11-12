@@ -83,7 +83,7 @@ The plugin supplies define, design, plan, implement and validate skills, plus op
 
 ## Storage settings
 
-Taskman reads its storage settings from environment variables and from a `.env` file at the repository root. A variable already set in the environment wins over `.env`. Docker Compose and Cloud Run set the same variables, as environment variables and mounted secret files. Taskman ignores a `.env` file that git tracks, because a committed file could send your database password to another host. Keep `.env` out of git.
+Taskman reads its storage settings from environment variables and from a `.env` file at the repository root. A variable already set in the environment wins over `.env`. Docker Compose and Cloud Run set the same variables. Docker Compose reads the password from a mounted secret file; Cloud Run sets it as an environment variable from Secret Manager. Taskman ignores a `.env` file that git tracks, because a committed file could send your database password to another host. Keep `.env` out of git.
 
 | Variable | Backend | Meaning |
 | --- | --- | --- |
@@ -124,14 +124,14 @@ TASKMAN_DATABASE_URL=postgresql://taskman@localhost:5432/taskman
 TASKMAN_DB_PASSWORD=change-me
 ```
 
-Cloud SQL through its unix socket, for example on Cloud Run:
+Cloud SQL through its unix socket, for example on Cloud Run. Cloud Run sets `TASKMAN_DB_PASSWORD` from a Secret Manager secret:
 
 ```sh
 TASKMAN_BACKEND=postgres
 TASKMAN_DB_SOCKET=/cloudsql/project:region:instance
 TASKMAN_DB_NAME=taskman
 TASKMAN_DB_USER=taskman
-TASKMAN_DB_PASSWORD_FILE=/secrets/db/password
+TASKMAN_DB_PASSWORD=<the value of the secret>
 ```
 
 ## Use a Taskman server
@@ -164,9 +164,15 @@ Replace `<printed token>` with the token that `token create` printed. Git ignore
 
 On Linux with umask 077, the container user cannot read the password file: run `chmod 644 .secrets/db_password`. The server does not connect again after Postgres restarts: run `docker compose restart server`. To change the password, change it in Postgres or delete all local data with `docker compose down -v`: Postgres reads the file only when it creates its data volume.
 
-To run the same image on Google Cloud Run with Cloud SQL, follow [docs/deploy-gcp.md](docs/deploy-gcp.md). It describes the GitHub Actions workflow that deploys the `staging` branch, and the steps to deploy by hand.
+To run the same image on Google Cloud Run with Cloud SQL, follow [docs/deploy-gcp.md](docs/deploy-gcp.md). `deploy/gcp/` holds the configuration file of each environment and the scripts that set up a project and deploy to it. The deploy workflow in `.github/workflows/` deploys each push to the `staging` branch.
 
 ### Log in
+
+The CLI on `main` has no `auth` command. Install the CLI from `staging`:
+
+```bash
+uv tool install --force 'git+https://github.com/vkroz/taskman.git@staging#subdirectory=taskman'
+```
 
 On a computer with a browser:
 

@@ -58,7 +58,7 @@ Key numbers come from the project row in the same transaction, so two writers ne
 
 ## Browser login
 
-`taskman auth login` signs a person in with Google and gives this computer its own token. The server must have a Google OAuth client (`TASKMAN_GOOGLE_CLIENT_ID`).
+`taskman auth login` signs a person in with Google and gives this computer its own token. The server must have a Google OAuth (Open Authorization) client (`TASKMAN_GOOGLE_CLIENT_ID`).
 
 1. The CLI starts a listener on `127.0.0.1` and opens `/auth/cli` in the browser. It sends a random state and the hash of a secret of its own (PKCE, RFC 7636).
 2. The server records the login and sends the browser to Google.
@@ -73,10 +73,12 @@ Each sign-in works one time and for 10 minutes. The one-time code works for 2 mi
 
 - One container image runs the server. The entry point is `taskman`, and the default command is `serve --host 0.0.0.0`. Other arguments run another command with the same image, for example `db upgrade`.
 - The image holds no settings. All settings come from environment variables and secret files, so the same variables work for the CLI, Docker Compose and Cloud Run.
-- On Google Cloud, the server runs on Cloud Run, and the database is Cloud SQL for PostgreSQL. Cloud Run opens the Cloud SQL unix socket in `/cloudsql/<connection name>` and mounts each secret as a file.
+- On Google Cloud, the server runs on Cloud Run, and the database is Cloud SQL for PostgreSQL. Cloud Run opens the Cloud SQL unix socket in `/cloudsql/<connection name>`. It sets the database password, and the OAuth client secret of browser login, as environment variables from Secret Manager.
 - A Cloud Run job runs `taskman db upgrade` before a new image serves traffic. The server does not start with an older schema, so a deploy without the upgrade fails and the previous revision continues to serve.
 - The service accepts calls from any address, and Cloud Run does not check the caller's Google identity. Taskman checks the token of each call. Thus agent machines need no cloud credentials.
-- The GitHub Actions workflow `CI` (continuous integration) tests each pull request to `staging`. After each push to `staging`, it builds the image, runs the upgrade job and deploys the service. It gets access to Google Cloud through Workload Identity Federation, with no stored key. Project IDs, service account addresses and other names of an organization are repository variables, not text in the repository.
+- [`deploy/gcp/bootstrap.sh`](../deploy/gcp/bootstrap.sh) sets up a Google Cloud project once: the database and its user, the secrets, the service accounts and their roles, Workload Identity Federation, and the public service. [`deploy/gcp/deploy.sh`](../deploy/gcp/deploy.sh) runs the upgrade job with one image, then deploys the service with the same image.
+- The GitHub Actions workflow `ci.yml` (continuous integration) tests each pull request. The workflow `deploy-nemos-infra.yml` runs the same checks on each push to `staging`, builds and pushes the image, and runs `deploy.sh` with the image digest. It gets access to Google Cloud through Workload Identity Federation, with no stored key.
+- The Taskman code and tests hold no organization names. The scripts and the workflow read them from `deploy/gcp/<environment>.env` ([ADR (Architecture Decision Record) 0001](adrs/0001-deploy-the-server-to-google-cloud.md)).
 - The local Docker Compose stack has the same layout. Postgres shares its unix socket through a volume at `/cloudsql/local`, and the password comes from a secret file.
 - Another cloud needs a container service with environment variables, PostgreSQL 16, a one-time task for `db upgrade`, and HTTPS in front of the server. Secrets can come as files or as environment variables.
 
