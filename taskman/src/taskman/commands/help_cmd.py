@@ -162,8 +162,8 @@ ENVIRONMENT
     TASKMAN_BACKEND=postgres
     TASKMAN_DB_SOCKET=/cloudsql/project:region:instance
     TASKMAN_DB_NAME=taskman
-    TASKMAN_DB_USER=taskman_app
-    TASKMAN_DB_PASSWORD_FILE=/secrets/taskman-db-password
+    TASKMAN_DB_USER=taskman
+    TASKMAN_DB_PASSWORD=<Cloud Run sets it from Secret Manager>
 """
 
 
