@@ -49,7 +49,7 @@ Key numbers come from the project row in the same transaction, so two writers ne
 `taskman serve` listens on `127.0.0.1` and on the port in the `PORT` variable, or 8080. `--host 0.0.0.0` makes it reachable from other machines, for example in a container.
 
 - Each call under `/api/v1/` needs a token in the `Authorization: Bearer` header. A call without a valid token gets status 401 and changes nothing. `/healthz` and `/readyz` need no token.
-- `taskman token create --person NAME` creates a token and shows it one time. `taskman token list` and `taskman token revoke ID` manage tokens. These commands run on the machine of the server. A token expires after 90 days unless `--days` sets another period.
+- `taskman token create --person NAME` creates a token and shows it one time. `taskman token list` and `taskman token revoke ID` manage tokens. These commands open the database directly, so they run on a machine that reaches the database, for example through the Cloud SQL Auth Proxy. A token expires after 90 days unless `--days` sets another period.
 - The CLI uses a server when `TASKMAN_SERVER_URL` is set, or after `taskman auth login`. It sends the token from `TASKMAN_TOKEN`, or the token of the saved login. Taskman reads these two variables from the environment only, never from a `.env` file, so a repository cannot send the token to another host.
 - The saved login is `~/.config/taskman/credentials.json`, with mode 0600 in a directory with mode 0700. No command prints a token.
 - The CLI sends a token over HTTPS, or over HTTP to the same machine. It does not follow redirects.
@@ -69,6 +69,18 @@ Each sign-in works one time and for 10 minutes. The one-time code works for 2 mi
 
 `/auth/token` signs a person in the same way and shows a personal access token on the page. A machine without a browser uses it with `taskman auth login --with-token`. A copy of a token works on any machine; the owner accepted this risk for machines without a browser.
 
+## Deployment
+
+- One container image runs the server. The entry point is `taskman`, and the default command is `serve --host 0.0.0.0`. Other arguments run another command with the same image, for example `db upgrade`.
+- The image holds no settings. All settings come from environment variables and secret files, so the same variables work for the CLI, Docker Compose and Cloud Run.
+- On Google Cloud, the server runs on Cloud Run, and the database is Cloud SQL for PostgreSQL. Cloud Run opens the Cloud SQL unix socket in `/cloudsql/<connection name>` and mounts each secret as a file.
+- A Cloud Run job runs `taskman db upgrade` before a new image serves traffic. The server does not start with an older schema, so a deploy without the upgrade fails and the previous revision continues to serve.
+- The service accepts calls from any address, and Cloud Run does not check the caller's Google identity. Taskman checks the token of each call. Thus agent machines need no cloud credentials.
+- The local Docker Compose stack has the same layout. Postgres shares its unix socket through a volume at `/cloudsql/local`, and the password comes from a secret file.
+- Another cloud needs a container service with environment variables and secret files, PostgreSQL 16, a one-time task for `db upgrade`, and HTTPS in front of the server.
+
+[Run the Taskman server on Google Cloud](deploy-gcp.md) gives the steps and the equivalent AWS (Amazon Web Services) services.
+
 ## Workspace UI
 
 `taskman ui` serves the page at `127.0.0.1`. The server accepts only requests with a local `Host` header. Requests that change data must also send the `X-Taskman` header. The page polls the server every 5 seconds. All server threads share one store, and the store serializes access to its connection.
@@ -76,8 +88,8 @@ Each sign-in works one time and for 10 minutes. The one-time code works for 2 mi
 ## Limits
 
 - Browser login supports Google only.
-- The server has no page to list or revoke tokens. An operator does this with `taskman token list` and `taskman token revoke` on the machine of the server.
+- The server has no page to list or revoke tokens. An operator does this with `taskman token list` and `taskman token revoke` on a machine that reaches the database.
 - The server does not serve the workspace page. `taskman ui` serves it on the computer of the user.
-- The server uses one database connection for all calls.
+- The server uses one database connection for all calls and does not connect again after the connection breaks. After a database restart, `/readyz` answers 503 until the server process restarts. On Cloud Run, a liveness probe on `/readyz` replaces such an instance.
 - Taskman does not read `tasks/` Markdown files from earlier versions, and imports nothing from them (decision D4).
 - There is no consolidation of completed work (decision D8).
