@@ -40,6 +40,8 @@ Add pytest coverage beside every `taskman` behavior change, including success an
 
 ## Commit & Pull Request Guidelines
 
+Name each branch by change type: `feat/<slug>` for new functionality, `bugfix/<slug>` for bug fixes, and `chore/<slug>` for maintenance that does not change functionality.
+
 Recent commits use concise, imperative subjects such as `Ship ...`, `Enable ...`, `Remove ...`, and `Update ...`; several append the closed task or feature. Keep each commit scoped to one outcome. Pull requests should state the affected plugin or CLI behavior, link the work item when applicable, list verification performed, and update user-facing documentation when commands or workflows change.
 
 Change work items only through the `taskman` CLI or UI, so lifecycle rules, revisions and activity stay consistent. Do not edit files under `tasks/` or treat them as current state.
