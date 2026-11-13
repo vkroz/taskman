@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 
 import pytest
@@ -26,7 +27,8 @@ def _env(monkeypatch, tmp_path, name="taskman.db") -> None:
 def run(*args, input=None, code=0):
     result = runner.invoke(app, [str(a) for a in args], input=input)
     assert result.exit_code == code, result.output
-    return result.output
+    # Typer colors its usage errors when GITHUB_ACTIONS or FORCE_COLOR is set.
+    return re.sub(r"\x1b\[[0-9;]*m", "", result.output)
 
 
 @pytest.fixture
