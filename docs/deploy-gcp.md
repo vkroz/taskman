@@ -113,13 +113,7 @@ Each deployment is a run of the workflow **Deploy to nemos-infra** in the [Actio
 gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="taskman-db-upgrade"' --project nemos-infra --limit 50 --format 'value(textPayload)'
 ```
 
-If the deploy step fails with a permission error for `run.services.setIamPolicy`, Cloud Run requires this permission to deploy a service without the invoker check. Nobody has tested this case. Give the deployer Cloud Run Admin on this service only, then select "Re-run all jobs":
-
-```bash
-gcloud run services add-iam-policy-binding taskman --project nemos-infra --region us-central1 --member serviceAccount:taskman-deployer@nemos-infra.iam.gserviceaccount.com --role roles/run.admin
-```
-
-The [Cloud Run page](https://console.cloud.google.com/run?project=nemos-infra) shows the image of the job and of the service. `curl -fsS <service address>/readyz` prints `{"ok":true}` when the server can query the database. `/healthz` and `/readyz` need no token.
+The [Cloud Run page](https://console.cloud.google.com/run?project=nemos-infra) shows the image of the job and of the service. `curl -fsS <service address>/readyz` prints `{"ok":true}` when the server can query the database. `/readyz` needs no token. Do not use `/healthz` on Cloud Run: Google's front end reserves some paths that end in `z`, and it answers `/healthz` with its own 404 page. The request does not reach Taskman.
 
 ## Deploy by hand or roll back
 
