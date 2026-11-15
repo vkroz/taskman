@@ -26,6 +26,8 @@ def test_install_two_hosts_uses_same_local_source_without_shell(monkeypatch, tmp
     assert ["codex", "plugin", "add", "tm@taskman"] in calls
     assert ["claude", "plugin", "install", "tm@taskman", "--scope", "user"] in calls
     assert ["claude", "plugin", "update", "tm@taskman", "--scope", "user"] in calls
+    assert "To use a Taskman server, run `taskman auth login --server URL`, or set TASKMAN_SERVER_URL and TASKMAN_TOKEN." in result.output
+    assert "To create a local database, run `taskman db upgrade`." in result.output
 
 
 def test_missing_host_fails_before_installing_anything(monkeypatch):
@@ -56,3 +58,4 @@ def test_install_failure_is_not_reported_as_success(monkeypatch):
     result = CliRunner().invoke(app, ["install", "--platform", "codex"])
     assert result.exit_code != 0
     assert "Installed Taskman" not in result.output
+    assert "taskman auth login" not in result.output

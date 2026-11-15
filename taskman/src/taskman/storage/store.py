@@ -19,6 +19,13 @@ class StorageConfigError(ValueError):
     """The configured storage backend is not supported."""
 
 
+# The two ways to start: connect to a server, or create a local database.
+SETUP_HINT = (
+    "To use a Taskman server, run `taskman auth login --server URL`, or set TASKMAN_SERVER_URL and TASKMAN_TOKEN. "
+    "To create a local database, run `taskman db upgrade`."
+)
+
+
 class StorageError(ValueError):
     """A backend could not persist a change, for example a name collision."""
 
@@ -224,4 +231,9 @@ def _new_store() -> Store:
 
     from taskman.storage.sql_store import open_sql_store
 
-    return open_sql_store(storage_settings())
+    settings = storage_settings()
+    if settings.backend == "sqlite" and not settings.sqlite_path.is_file():
+        raise StorageConfigError(
+            f"No Taskman server is set, and there is no local database at {settings.sqlite_path}. {SETUP_HINT}"
+        )
+    return open_sql_store(settings)

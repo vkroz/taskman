@@ -4,7 +4,9 @@ Taskman is the source of truth for work shared by Codex, Claude Code and other a
 
 ## Context and scope
 
-Taskman stores work items in SQLite (the default, one file for all repositories) or Postgres, as the user's settings select. If a command reports that there is no database or that the schema is old, run `taskman db upgrade`.
+Before work, run `taskman auth status`. When the project instructions or the user name a Taskman server, continue only when it prints `Logged in to` that server. Otherwise stop and report the output. Never create items in a local database for shared work.
+
+When no server is named, the local database is correct. Taskman stores work items in SQLite (the default, one file for all repositories) or Postgres, as the user's settings select. If a command reports that there is no database or that the schema is old, run `taskman db upgrade`.
 
 Items have keys such as `TM-42`: the project key, then a number. A key identifies the item and its project. Read `taskman context KEY` before work: it includes requirements, ancestors, descendants, dependencies, comments and activity. Resolve a missing key with `taskman list --json` (add `--project KEY` to narrow it); ask only if the target remains ambiguous.
 
@@ -24,7 +26,7 @@ taskman finalize TASK_KEY
 
 A top-level item needs `--project` with the project key (2-10 uppercase letters or digits); Taskman creates the project on first use. A child gets the project of its parent, and dependencies stay inside one project. Replace placeholders with returned keys. `depend` replaces the dependency list; repeat `--on` to retain multiple dependencies. `--clear` removes it. Use parent relationships for decomposition and dependencies for execution order. Independent tasks may run in parallel if the host supports it and shared files remain coordinated.
 
-Items begin as drafts. Finalize when the scope is agreed, including through existing user authorization. Leave unresolved drafts open; `discard` removes only an unreferenced draft leaf. Finalize ancestors before executing children.
+Items begin as drafts. Finalize a draft only when the user agrees to its scope in this conversation. A request to work on "the first task" does not approve a draft. Leave unresolved drafts open; `discard` removes only an unreferenced draft leaf. Finalize ancestors before executing children.
 
 ## Execute and comment
 
@@ -34,9 +36,10 @@ taskman move TASK_KEY active --actor ACTOR
 taskman assign TASK_KEY ACTOR
 taskman update TASK_KEY --body-file refined-requirements.md
 taskman comment TASK_KEY --kind decision --actor ACTOR --body-file decision.md
+taskman comment TASK_KEY --kind progress --actor ACTOR --body "Parser done; tests next."
 ```
 
-Every command that changes an item accepts `--actor`; without it, the author is the git `user.name`. Each field change is recorded in the item's activity (`taskman activity TASK_KEY`). Use `assign` and `label` to show who works on an item and how it is grouped.
+Every command that changes an item accepts `--actor` to name the agent. Without it, the author is the person of the token on a server, or the git `user.name` with a local database. Each field change is recorded in the item's activity (`taskman activity TASK_KEY`). Use `assign` and `label` to show who works on an item and how it is grouped.
 
 Open requirements may be refined to reach the agreed outcome. Comment on significant choices, reasons, scope refinements and implementation progress. Use a `handoff` comment for the next agent's entry point and remaining work. These are concise engineering rationales, not a transcript of internal deliberation. Do not relax acceptance criteria merely to make a failing result pass. Ask about material changes to the user's intended outcome; routine implementation choices remain within authorized work.
 
@@ -50,7 +53,7 @@ taskman comment TASK_KEY --kind verification --result pass --actor ACTOR --body-
 taskman close TASK_KEY
 ```
 
-`--body-file -` reads stdin. Summarize what changed, why, and any limits without copying every comment. Comments cannot change or be deleted, so earlier decisions stay available. Evidence should identify commands, exit codes, observed results, relevant source revision or working-tree state, and acceptance coverage. Distinguish tests you ran, source inspection, and another agent's report.
+`comment` takes its text from exactly one of `--body TEXT` (a short note) and `--body-file FILE` (`-` reads stdin). Summarize what changed, why, and any limits without copying every comment. Comments cannot change or be deleted, so earlier decisions stay available. Evidence should identify commands, exit codes, observed results, relevant source revision or working-tree state, and acceptance coverage. Distinguish tests you ran, source inspection, and another agent's report.
 
 Use `--result fail` or `blocked` when appropriate and leave the item open. A passing verification is an agent assertion, not a test runner. `taskman validate` checks the dependency graph, not product correctness.
 

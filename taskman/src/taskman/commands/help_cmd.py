@@ -25,6 +25,10 @@ STORAGE
   Postgres. Run `taskman db upgrade` once to create the schema, and again
   after you upgrade Taskman. It does nothing when the schema is current.
 
+  With TASKMAN_SERVER_URL set, or after `taskman auth login`, commands work
+  through a Taskman server and open no database. `taskman auth status`
+  shows which one applies.
+
   Taskman does not read `tasks/` Markdown files. Such files are historical
   text from earlier versions.
 
@@ -60,7 +64,7 @@ LIFECYCLE
 ================================================================================
 
   new       Create a draft work item (top-level with --project, or nested
-            with --parent).
+            with --parent). Give the title as TITLE or with --title.
   finalize  Clear the draft marker after the user reviews.
   move      Change status. Children keep their own status.
   convert   Change an item's type. An item with children cannot become a task.
@@ -69,11 +73,20 @@ LIFECYCLE
             verification.
   list      List items in the order set in the UI or with `reorder`; --json
             for agents.
+  ready     List the items that can start: open and finalized, with
+            finalized ancestors and no unfinished dependency.
+  search    Find items by key, slug, title or description text.
+  browse    Query items by field and emit JSON that keeps the hierarchy.
   show      Print an item's fields and description.
   context   Read item, ancestors, descendants, dependencies and activity as
             JSON.
   update    Replace an open item's description using --body-file.
+  edit      Change an open item's title and description, with a reason.
   depend    Replace dependencies with repeated --on keys, or --clear.
+  waiting-on
+            List the unfinished dependencies of an item and its ancestors.
+  dependents
+            List the open items that depend on an item.
   comment   Add a decision, progress, handoff, summary or verification
             comment. `record` is an alias.
   assign    Set the assignee of an open item; `unassign` removes it.
@@ -132,7 +145,9 @@ ENVIRONMENT
                        https:// is required unless the server runs on this
                        computer.
   TASKMAN_TOKEN        The token for that server. Without it, Taskman uses the
-                       token of `taskman auth login`.
+                       token of `taskman auth login`. Where a network proxy
+                       adds the token to each request to the server, set
+                       TASKMAN_TOKEN=proxy-injected. The proxy replaces it.
   PORT                 `taskman serve` only: the port to listen on.
                        Default: 8080.
 

@@ -41,3 +41,17 @@ def test_help_describes_only_the_sql_model() -> None:
 
 def test_help_says_how_list_orders_items() -> None:
     assert "List items in the order set in the UI or with `reorder`" in " ".join(_help().split())
+
+
+def test_help_documents_server_mode_and_the_proxy_token() -> None:
+    text = _help()
+    storage = text.split("ITEMS AND KEYS")[0]
+    assert "With TASKMAN_SERVER_URL set, or after `taskman auth login`" in storage
+    assert "open no database" in storage and "`taskman auth status`" in storage
+    assert "TASKMAN_TOKEN=proxy-injected" in text
+
+
+def test_help_lists_the_query_and_edit_commands() -> None:
+    lifecycle = _help().split("LIFECYCLE")[1].split("INVARIANTS")[0]
+    for name in ("ready", "edit", "browse", "search", "waiting-on", "dependents"):
+        assert f"\n  {name} " in lifecycle or f"\n  {name}\n" in lifecycle, name

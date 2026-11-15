@@ -15,6 +15,14 @@ taskman install --platform codex --platform claude-code
 
 Choose either platform or repeat `--platform` for both. `taskman` and `tm` are equivalent commands. Start a fresh coding session after installing the plugin.
 
+A Taskman server deploys from the `staging` branch. People and agents who use a server install the CLI from `staging`, so that the CLI matches the server:
+
+```sh
+uv tool install --force 'git+https://github.com/vkroz/taskman.git@staging#subdirectory=taskman'
+```
+
+`taskman install` installs the plugin of the default branch.
+
 For a local checkout under development:
 
 ```sh
@@ -40,7 +48,7 @@ taskman new --type feat --title "Persist conversations" --parent EPIC_ID --body-
 taskman new --title "Save messages" --parent STORY_ID --body-file task.md --json
 ```
 
-Replace the uppercase placeholders with the keys returned by `new`. New items are drafts. Finalize items once their scope is agreed; finalize their ancestors too before execution.
+Replace the uppercase placeholders with the keys returned by `new`. `new` also takes the title as an argument, for example `taskman new "Save messages" --parent STORY_ID`. New items are drafts. Finalize items once their scope is agreed; finalize their ancestors too before execution.
 
 ```sh
 taskman finalize TASK_ID
@@ -66,7 +74,7 @@ taskman comment TASK_ID --kind verification --result pass --actor "Claude Code" 
 taskman close TASK_ID
 ```
 
-`record` is an alias of `comment`. Every command that changes an item accepts `--actor NAME`; without it, the author is your git `user.name`. Use `--body-file -` to read stdin. Comment on significant choices, their reasons and changes to scope. The completion summary should explain what changed, why, and any limits. Verification comments should name the checks, commands, results and source revision or relevant working-tree changes. Distinguish executed tests from source inspection and another agent's report.
+`record` is an alias of `comment`. Every command that changes an item accepts `--actor NAME`; without it, the author is your git `user.name`. `comment` takes its text from `--body TEXT` or from `--body-file FILE`; `--body-file -` reads stdin. Comment on significant choices, their reasons and changes to scope. The completion summary should explain what changed, why, and any limits. Verification comments should name the checks, commands, results and source revision or relevant working-tree changes. Distinguish executed tests from source inspection and another agent's report.
 
 Open requirements may be refined to achieve the agreed outcome. Changes to the description, dependencies, type or children, and new decision or progress comments, invalidate earlier completion evidence. Close requires a current summary, a current passing verification, and completed dependencies and descendants. A recorded pass is the agent's assertion: Taskman does not run tests or prove that assertion.
 
@@ -172,11 +180,7 @@ To run the same image on Google Cloud Run with Cloud SQL, follow [docs/deploy-gc
 
 ### Log in
 
-The CLI on `main` has no `auth` command. Install the CLI from `staging`:
-
-```bash
-uv tool install --force 'git+https://github.com/vkroz/taskman.git@staging#subdirectory=taskman'
-```
+Install the CLI from `staging`, as [Install](#install) shows. The CLI on `main` has no `auth` command.
 
 On a computer with a browser:
 
@@ -191,9 +195,32 @@ On a machine without a browser, for example a cloud virtual machine:
 1. On any computer, open `https://taskman.example.com/auth/token` and sign in. The page shows a personal access token one time.
 2. On the machine, run `taskman auth login --server https://taskman.example.com --with-token` and paste the token.
 
-An agent sandbox that accepts only environment variables can set `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` instead. `TASKMAN_TOKEN` wins over a saved login.
+An agent cloud environment sets `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` instead, as [Connect an agent cloud environment](#connect-an-agent-cloud-environment) shows. `TASKMAN_TOKEN` wins over a saved login.
 
 The person of the token is the author of each change. With `--actor claude`, the author is `claude for ada@example.com`. Taskman reads `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` from the environment only, never from a `.env` file. The address must start with `https://`, unless the server runs on the same computer. The CLI keeps its login in `~/.config/taskman/credentials.json`, which only you can read. A token expires after 90 days.
+
+### Connect an agent cloud environment
+
+A cloud agent session starts without the CLI, the server address and a token. Set these items one time in the settings of the cloud environment, never in the repository:
+
+1. Network access: allow the exact host of the server, for example `taskman.example.com`. Do not allow a wildcard such as `*.run.app`, because it opens every service in that domain. Allow all HTTP methods: the CLI sends each change as a POST request.
+2. Setup step: install the CLI from the branch that the server deploys from. Use the `staging` command in [Install](#install).
+3. `TASKMAN_SERVER_URL`: set the server address as a plain variable, for example `https://taskman.example.com`. The address is not a secret.
+4. Token: on your computer, open `https://taskman.example.com/auth/token` and sign in. The page shows a token one time. Give it to the environment in one of two ways:
+   - The platform proxy adds the token to each request: save the token as a network secret for the host. For a Claude Code network secret, use the header `Authorization` and the prefix `Bearer`. Then set the plain variable `TASKMAN_TOKEN=proxy-injected`. The proxy replaces this placeholder.
+   - The platform has no such proxy: save the token in the secret store of the platform as `TASKMAN_TOKEN`.
+5. Check: in a new session, run `taskman auth status`. It must print `Logged in to https://taskman.example.com as <person>`. Any other output means that a setting is missing or wrong.
+
+Never paste a token into a conversation with an agent.
+
+A token belongs to one Taskman person. When all sessions of an environment share one token, all of them write as that person. Use `--actor` to name the agent, for example `--actor "Claude Code"`. The author is then `Claude Code for <person>`.
+
+The lines below give the mechanism of each platform on Nov 15, 2026. They are not yet verified end to end. The team verifies them during acceptance testing.
+
+- Claude Code on the web: set "Limited" network access and add the host to the allowed domains. Add a setup script. Set the variables `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN=proxy-injected`. Add a network secret for the host.
+- OpenAI Codex cloud: turn on agent internet access to the host for all HTTP methods. Add an install script. Set the variable `TASKMAN_SERVER_URL`. Add a network secret `TASKMAN_TOKEN` for the host. The agent sees only a placeholder.
+- GitHub Copilot cloud agent: add the host to the Copilot internet access allowlist of the repository. Save `TASKMAN_TOKEN` and `TASKMAN_SERVER_URL` as secrets under "Secrets and variables" > "Agents". The default cloud sandbox gets no variables, so the address is a secret here. On the Actions runtime, install the CLI in `.github/workflows/copilot-setup-steps.yml`. This one repository file holds no address and no token. The agent can read the token.
+- Grok: no hosted agent environment found as of Nov 15, 2026.
 
 ### Turn on browser login
 

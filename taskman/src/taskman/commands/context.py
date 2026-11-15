@@ -33,16 +33,19 @@ def update(
 def comment(
     item_id: str = typer.Argument(...),
     kind: str = typer.Option(..., "--kind", help="decision, progress, handoff, summary, or verification."),
-    body_file: str = typer.Option(..., "--body-file", help="Evidence or context; - reads stdin."),
+    body: str | None = typer.Option(None, "--body", help="The comment text. Give this or --body-file."),
+    body_file: str | None = typer.Option(None, "--body-file", help="Evidence or context; - reads stdin."),
     result: str | None = typer.Option(None, "--result", help="Verification only: pass, fail, or blocked."),
-    actor: str | None = typer.Option(None, "--actor", help="Author of the comment. Default: git user.name."),
+    actor: str | None = typer.Option(None, "--actor", help="Author of the comment. Default: the person of the token on a server, the git user.name with a local database."),
 ) -> None:
     """Add an attributed comment without replacing another agent's context. `record` is an alias."""
+    if (body is None) == (body_file is None):
+        raise typer.BadParameter("give exactly one of --body and --body-file")
     store = open_store()
     author = actor or store.actor
     with reported():
         lifecycle.check_entry(kind, author, result)
-    text = read_body(body_file)
+    text = body if body is not None else read_body(body_file)
     with reported():
         lifecycle.record(store, item_id, kind, author, text, result)
     typer.echo(f"Recorded {kind}: {item_id}")
