@@ -276,7 +276,9 @@ The deployment workflow reads two variables of the GitHub environment `nemos-inf
 
    Result: the two variables show under **Environment variables**.
 
-5. Start the first deployment. Merge a change to `staging`. If a run of **Deploy to nemos-infra** stopped at "Check the one-time setup" before the setup, open that run and select "Re-run all jobs". On Nov 14, 2026, the run of an earlier merge started again this way.
+5. Start the first deployment. Since Nov 15, 2026, `deploy/gcp/nemos-infra.env` sets `GOOGLE_CLIENT_ID`. A deployment with a client ID fails while the secret `taskman-google-client-secret` has no value. Thus first create the client and store its secret, with steps 1 to 4 of [Google sign-in client and secret](#google-sign-in-client-and-secret). On Nov 14, 2026, `GOOGLE_CLIENT_ID` was empty, and the first deployment ran before these steps.
+
+   Merge a change to `staging`. If a run of **Deploy to nemos-infra** stopped at "Check the one-time setup" before the setup, open that run and select "Re-run all jobs". On Nov 14, 2026, the run of an earlier merge started again this way.
 
    Result: every job of the run passes. The schema job creates the tables, and the service replaces the placeholder.
 
@@ -313,6 +315,8 @@ Browser login lets each person get a Taskman token with a Google account. You cr
    Output: `length 35 | starts with GOCSPX-: True | spaces or newlines at ends: False`.
 
 5. Turn on browser login. In `deploy/gcp/nemos-infra.env`, set `GOOGLE_CLIENT_ID` to the client ID, and set [who may sign in](#who-may-sign-in). `PUBLIC_URL` must hold the service address. Merge the change to `staging`. On Nov 15, 2026, the file got `GOOGLE_CLIENT_ID=1037430670088-pl9k3458ngrm78nlpr6lseqrmc9a436m.apps.googleusercontent.com` and `ALLOWED_DOMAINS=reservoirco.io`.
+
+   When the file already has these values, there is no change to merge. If no deployment started after you stored the client secret, re-run the last deployment, as [Store the client secret](#store-the-client-secret) shows.
 
    Result: the run of **Deploy to nemos-infra** passes, and browser login is on.
 
