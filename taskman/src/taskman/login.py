@@ -318,4 +318,9 @@ def token_page(email: str, token: str) -> str:
 
 
 def error_page(message: str) -> str:
-    return page("Taskman login failed", f"<h1>Login failed</h1><p>{html.escape(message)}</p>")
+    # The CLI listens on 127.0.0.1 and gets no answer when the login fails on the server.
+    return page("Taskman login failed", (
+        f"<h1>Login failed</h1><p>{html.escape(message)}</p>"
+        "<p>A <b>taskman auth login</b> command that waits in a terminal does not stop by itself. "
+        "Press Ctrl+C in that terminal, then run the command again.</p>"
+    ))
