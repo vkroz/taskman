@@ -80,8 +80,9 @@ def ready(
     """List open items that are ready to start.
 
     An item is ready when it is not done, and the item and all its ancestors are
-    finalized, not done, and have no unfinished dependency. Text output ends with
-    one line on stderr that names the open items that are not ready, and why.
+    finalized, not done, and have no unfinished dependency. When open items are
+    not ready, text output ends with one line on stderr that names them and gives
+    the reason.
     """
     items = _load_graph(open_store())
     out: list[Item] = []

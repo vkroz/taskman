@@ -147,6 +147,7 @@ def test_ready_prints_no_note_when_it_leaves_nothing_out(sqlite_env) -> None:
 def test_ready_help_says_what_ready_means(sqlite_env) -> None:
     text = " ".join(runner.invoke(app, ["ready", "--help"]).output.split())
     assert "the item and all its ancestors are finalized, not done, and have no unfinished dependency" in text
+    assert "When open items are not ready, text output ends with one line on stderr that names them" in text
 
 
 # ---- dependents ----
