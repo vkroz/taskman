@@ -2,7 +2,8 @@
 
 Each test drives Chromium through Playwright. A session server serves read-only
 checks; tests that change data get their own server on a copy of the seed. The
-tests are marked ``ui`` and skip when Playwright or its browser is missing.
+tests are marked ``ui`` and skip when Playwright or its browser is missing. With
+``TASKMAN_TEST_REQUIRE_BROWSER=1``, as in CI, they fail instead.
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
@@ -26,7 +28,20 @@ from taskman.storage.sql import connect
 from taskman.storage.sql_store import open_sql_store
 from tests.ui_seed import seed
 
-sync_api = pytest.importorskip("playwright.sync_api")
+REQUIRE_BROWSER = os.environ.get("TASKMAN_TEST_REQUIRE_BROWSER", "").strip() == "1"
+
+
+def _unavailable(reason: str) -> NoReturn:
+    """Skips the tests, or fails them when ``TASKMAN_TEST_REQUIRE_BROWSER=1``."""
+    if REQUIRE_BROWSER:
+        pytest.fail(f"{reason} (TASKMAN_TEST_REQUIRE_BROWSER=1)", pytrace=False)
+    pytest.skip(reason, allow_module_level=True)
+
+
+try:
+    import playwright.sync_api as sync_api
+except ImportError as exc:
+    _unavailable(f"could not import 'playwright.sync_api': {exc}")
 expect = sync_api.expect
 
 pytestmark = pytest.mark.ui
@@ -127,12 +142,12 @@ def chromium():
     try:
         playwright = sync_api.sync_playwright().start()
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"Playwright cannot start: {str(exc).splitlines()[0]}")
+        _unavailable(f"Playwright cannot start: {str(exc).splitlines()[0]}")
     try:
         browser = playwright.chromium.launch()
     except Exception as exc:  # noqa: BLE001
         playwright.stop()
-        pytest.skip(f"Chromium cannot launch: {str(exc).splitlines()[0]}")
+        _unavailable(f"Chromium cannot launch: {str(exc).splitlines()[0]}")
     yield browser
     browser.close()
     playwright.stop()

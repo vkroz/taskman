@@ -21,9 +21,11 @@ This repository ships the `taskman` marketplace for Codex and Claude Code and it
 Run Python commands from `taskman/`:
 
 ```bash
-uv sync --extra dev --extra postgres   # create/update the development environment
+uv sync --extra dev --extra postgres --extra ui   # create/update the development environment
+uv run playwright install chromium   # install the browser of the browser tests; CI adds --with-deps for its system libraries
 uv run pytest                   # run the full test suite; Postgres tests skip without a test database
 TASKMAN_TEST_DATABASE_URL=postgresql://user:pass@host:5432/taskman_test uv run pytest   # include Postgres; the name must end in _test
+TASKMAN_TEST_REQUIRE_BROWSER=1 uv run pytest   # as in CI: browser tests fail, not skip, without Playwright or Chromium
 uv run pytest tests/test_model_names.py -q
 uv run taskman --help           # exercise the local CLI entry point
 ```
