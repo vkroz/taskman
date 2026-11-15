@@ -26,7 +26,7 @@ taskman finalize TASK_KEY
 
 A top-level item needs `--project` with the project key (2-10 uppercase letters or digits); Taskman creates the project on first use. A child gets the project of its parent, and dependencies stay inside one project. Replace placeholders with returned keys. `depend` replaces the dependency list; repeat `--on` to retain multiple dependencies. `--clear` removes it. Use parent relationships for decomposition and dependencies for execution order. Independent tasks may run in parallel if the host supports it and shared files remain coordinated.
 
-Items begin as drafts. Finalize when the scope is agreed, including through existing user authorization. Leave unresolved drafts open; `discard` removes only an unreferenced draft leaf. Finalize ancestors before executing children.
+Items begin as drafts. Finalize a draft only when the user agrees to its scope in this conversation. A request to work on "the first task" does not approve a draft. Leave unresolved drafts open; `discard` removes only an unreferenced draft leaf. Finalize ancestors before executing children.
 
 ## Execute and comment
 
