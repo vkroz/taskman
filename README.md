@@ -180,7 +180,7 @@ On a computer with a browser:
 taskman auth login --server https://taskman.example.com
 ```
 
-The command opens a browser. You sign in with your Google account, and the CLI saves its own token for this computer. Every later command works through the server. `taskman auth status` shows the server and your email address. `taskman auth logout` revokes the token and removes it.
+The command opens a browser. You sign in with your Google account, and the CLI saves its own token for this computer. Every later command works through the server. `taskman auth status` shows the server and your email address. Without a server, it shows the local database that Taskman uses. `taskman auth logout` revokes the token and removes it.
 
 On a machine without a browser, for example a cloud virtual machine:
 

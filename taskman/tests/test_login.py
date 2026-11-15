@@ -444,7 +444,23 @@ def test_auth_logout_revokes_the_token_on_the_server(server):
     assert list_tokens(server.store)[0]["revoked_at"]
     assert server.url not in json.dumps(load_credentials())
     assert "Not logged in." in run("auth", "logout")
-    assert "Not logged in." in run("auth", "status", code=1)
+    assert "No Taskman server is set." in run("auth", "status", code=1)
+
+
+def test_auth_status_without_a_server_names_the_local_database(sqlite_env, tmp_path, monkeypatch):
+    path = sqlite_env.sqlite_path
+    assert run("auth", "status", code=1) == f"No Taskman server is set. Taskman uses the SQLite database at {path}.\n"
+    missing = tmp_path / "none.db"
+    monkeypatch.setenv("TASKMAN_DATABASE_URL", f"sqlite://{missing}")
+    assert run("auth", "status", code=1) == (
+        f"No Taskman server is set. Taskman uses the SQLite database at {missing}. That file does not exist.\n")
+    url = "postgresql://taskman:secretpw@db.example.com/taskman"
+    monkeypatch.setenv("TASKMAN_BACKEND", "postgres")
+    monkeypatch.setenv("TASKMAN_DATABASE_URL", url)
+    output = run("auth", "status", code=1)
+    assert output == "No Taskman server is set. Taskman uses the Postgres database of the storage settings.\n"
+    monkeypatch.setenv("TASKMAN_BACKEND", "nosuch")
+    assert run("auth", "status", code=1).startswith("Error: Unknown storage backend 'nosuch'")
 
 
 def test_the_environment_token_wins_over_the_saved_login(server, monkeypatch):
