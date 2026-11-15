@@ -21,6 +21,7 @@ import typer
 from taskman.login import challenge_for, page
 from taskman.storage.credentials import credentials_path, forget_login, save_login, saved_token
 from taskman.storage.remote import RemoteStore, check_server_url, remote_settings, server_url
+from taskman.storage.settings import storage_settings
 from taskman.storage.store import StorageConfigError, StorageError
 
 auth_app = typer.Typer(help="Log in to a Taskman server.", no_args_is_help=True)
@@ -142,7 +143,15 @@ def status() -> None:
     except StorageConfigError as exc:
         _fail(str(exc))
     if not url:
-        typer.echo("Not logged in. Taskman uses the database on this computer.")
+        try:
+            settings = storage_settings()
+        except StorageConfigError as exc:
+            _fail(str(exc))
+        if settings.backend == "sqlite":
+            missing = "" if settings.sqlite_path.is_file() else " That file does not exist."
+            typer.echo(f"No Taskman server is set. Taskman uses the SQLite database at {settings.sqlite_path}.{missing}")
+        else:
+            typer.echo("No Taskman server is set. Taskman uses the Postgres database of the storage settings.")
         raise typer.Exit(1)
     source = "TASKMAN_TOKEN" if os.environ.get("TASKMAN_TOKEN", "").strip() else str(credentials_path())
     try:
