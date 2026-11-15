@@ -12,6 +12,8 @@ The CLI supports every operation available in the UI and installs the shared plu
 
 This repository ships the `taskman` marketplace for Codex and Claude Code and its `tm` software-development lifecycle plugin. Marketplace metadata lives in `.claude-plugin/marketplace.json`; plugin manifests, skills, agents, and rules live under `plugins/tm/`. Product documentation is in `docs/`. `tasks/` (earlier work items) and `docs/taskman-history/` (earlier consolidation summaries) are read-only history; Taskman does not read them.
 
+This repository's work items are project `TASKMAN` on the Taskman server that [docs/deploy-gcp.md](docs/deploy-gcp.md#use-the-server) names in "Use the server". Before work, run `taskman auth status`. Stop if it does not print `Logged in to` that server.
+
 `taskman/` is the Python 3.11+ CLI. `src/taskman/commands/` implements Typer commands. Commands use the storage interface in `src/taskman/storage/store.py` and check lifecycle rules through `src/taskman/lifecycle.py`. `src/taskman/storage/sql_store.py` is the SQL backend (SQLite and Postgres) for the model in `docs/data-model.md`; `settings.py`, `sql.py` and `schema.py` beside it hold the settings, connections and schema versions. `tests/` mirrors those behaviors with pytest; `tests/test_storage_contract.py` holds the cases every SQL backend must pass.
 
 `taskman/Dockerfile`, `.github/workflows/` and `deploy/gcp/` hold the image, the continuous integration (CI) and the deployment to Google Cloud; each push to `staging` deploys to `nemos-infra` (`docs/adrs/0001-deploy-the-server-to-google-cloud.md`).
