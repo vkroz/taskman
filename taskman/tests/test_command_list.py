@@ -25,6 +25,14 @@ def test_list_single_item(sqlite_env) -> None:
     assert "task" in out
 
 
+def test_list_text_marks_drafts_in_the_priority_column(sqlite_env) -> None:
+    finalized = _new("Finalized")
+    draft = sql.new("Draft")
+    lines = sql.run("list").splitlines()
+    assert f"  00 task  {finalized} finalized                      Finalized" in lines
+    assert f"  draft task  {draft} draft                          Draft" in lines
+
+
 def test_list_groups_by_status(sqlite_env) -> None:
     key = _new("A", "task")
     _new("B", "task")
