@@ -145,7 +145,7 @@ Schema upgrades go forward only. With an image that has an older schema version 
 
 ## Another project or cloud
 
-Another Google Cloud project needs its own environment file. Copy `deploy/gcp/nemos-infra.env`, change the names, and run `bootstrap.sh` with the new file. Set `PUBLIC_URL` to the service address that it prints. Add a workflow like `deploy-nemos-infra.yml` that reads the file.
+Another Google Cloud project needs its own environment file. Copy `deploy/gcp/nemos-infra.env` and change the names. Empty `PUBLIC_URL` in the copy: it holds the address of the `nemos-infra` service. When `PUBLIC_URL` has a value, `bootstrap.sh` prints that value. Run `bootstrap.sh` with the new file. Then set `PUBLIC_URL` to the service address that it prints. Add a workflow like `deploy-nemos-infra.yml` that reads the file.
 
 The same image runs on another platform that gives:
 
