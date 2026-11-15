@@ -307,6 +307,17 @@ def test_a_file_that_is_not_a_database_is_reported_in_one_line(sqlite_env, tmp_p
     assert run("list").strip() == "(no items)"
 
 
+def test_db_upgrade_reports_a_folder_it_cannot_make_in_one_line(sqlite_env, tmp_path, monkeypatch):
+    blocker = tmp_path / "plainfile"
+    blocker.write_text("x")
+    monkeypatch.setenv("TASKMAN_DATABASE_URL", f"sqlite://{blocker}/taskman.db")
+    assert run("db", "upgrade", code=2) == f"Error: Cannot open the Taskman database: File exists: {blocker}\n"
+    path = tmp_path / "new" / "folder" / "taskman.db"
+    monkeypatch.setenv("TASKMAN_DATABASE_URL", f"sqlite://{path}")
+    run("db", "upgrade")
+    assert path.is_file()
+
+
 @pytest.mark.parametrize("url, secrets", [
     ("postgresql://taskman:secretpw@127.0.0.1:1/unreachable_test", ["secretpw"]),
     ("postgresql://taskman:secret pw@127.0.0.1:1/unreachable_test", ["secret pw"]),
