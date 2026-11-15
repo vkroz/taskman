@@ -21,7 +21,7 @@ A Taskman server deploys from the `staging` branch. People and agents who use a 
 uv tool install --force 'git+https://github.com/vkroz/taskman.git@staging#subdirectory=taskman'
 ```
 
-`taskman install` installs the plugin of the default branch. For the plugin of another branch, use a checkout of that branch with `--source`, as the next example shows.
+`taskman install` installs the plugin of the default branch.
 
 For a local checkout under development:
 
