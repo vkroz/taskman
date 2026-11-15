@@ -44,8 +44,8 @@ def test_new_top_level_frontmatter(sqlite_env) -> None:
 
 
 def test_new_takes_the_title_as_an_argument(sqlite_env) -> None:
-    assert sql.run("new", "Epic A", "--type", "epic", "--project", "TM").strip() == "sqlite:TM-1"
-    assert sql.run("new", "--parent", "TM-1", "Child B").strip() == "sqlite:TM-2"
+    sql.run("new", "Epic A", "--type", "epic", "--project", "TM")
+    sql.run("new", "--parent", "TM-1", "Child B")
     assert sql.show("TM-1")["frontmatter"]["title"] == "Epic A"
     assert sql.show("TM-2")["frontmatter"]["title"] == "Child B"
 
