@@ -107,6 +107,13 @@ def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None
             if log:
                 super().log_message(format, *args)
 
+        def log_request(self, code: int | str = "-", size: int | str = "-") -> None:
+            # Google returns the sign-in code and the state in the query of an /auth/ path: log only the path.
+            url = urlsplit(getattr(self, "path", ""))
+            if url.path.startswith("/auth/") and url.query:
+                self.requestline = f"{self.command} {url.path} {self.request_version}"
+            super().log_request(code, size)
+
         def _send(self, status: int, data: dict[str, Any]) -> None:
             body = json.dumps(data, default=str, separators=(",", ":")).encode("utf-8")
             self.send_response(status)

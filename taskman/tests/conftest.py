@@ -78,7 +78,8 @@ def sql_settings(request, tmp_path) -> StorageSettings:
 class RunningServer:
     """A Taskman server on a free local port, for tests. ``token`` belongs to ``person``."""
 
-    def __init__(self, settings: StorageSettings, person: str = "Vlad", login=None, post_form=None) -> None:
+    def __init__(self, settings: StorageSettings, person: str = "Vlad", login=None, post_form=None,
+                 log: bool = False) -> None:
         import threading
 
         from taskman.server import make_server
@@ -93,7 +94,7 @@ class RunningServer:
 
             logins = Logins(self.store, login, post_form) if post_form else Logins(self.store, login)
         self.logins = logins
-        self._server = make_server("127.0.0.1", 0, self.store, log=False, logins=logins)
+        self._server = make_server("127.0.0.1", 0, self.store, log=log, logins=logins)
         self.url = f"http://127.0.0.1:{self._server.server_port}"
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
