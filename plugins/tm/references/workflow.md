@@ -34,6 +34,7 @@ taskman move TASK_KEY active --actor ACTOR
 taskman assign TASK_KEY ACTOR
 taskman update TASK_KEY --body-file refined-requirements.md
 taskman comment TASK_KEY --kind decision --actor ACTOR --body-file decision.md
+taskman comment TASK_KEY --kind progress --actor ACTOR --body "Parser done; tests next."
 ```
 
 Every command that changes an item accepts `--actor`; without it, the author is the git `user.name`. Each field change is recorded in the item's activity (`taskman activity TASK_KEY`). Use `assign` and `label` to show who works on an item and how it is grouped.
@@ -50,7 +51,7 @@ taskman comment TASK_KEY --kind verification --result pass --actor ACTOR --body-
 taskman close TASK_KEY
 ```
 
-`--body-file -` reads stdin. Summarize what changed, why, and any limits without copying every comment. Comments cannot change or be deleted, so earlier decisions stay available. Evidence should identify commands, exit codes, observed results, relevant source revision or working-tree state, and acceptance coverage. Distinguish tests you ran, source inspection, and another agent's report.
+`comment` takes its text from exactly one of `--body TEXT` (a short note) and `--body-file FILE` (`-` reads stdin). Summarize what changed, why, and any limits without copying every comment. Comments cannot change or be deleted, so earlier decisions stay available. Evidence should identify commands, exit codes, observed results, relevant source revision or working-tree state, and acceptance coverage. Distinguish tests you ran, source inspection, and another agent's report.
 
 Use `--result fail` or `blocked` when appropriate and leave the item open. A passing verification is an agent assertion, not a test runner. `taskman validate` checks the dependency graph, not product correctness.
 

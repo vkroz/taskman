@@ -138,6 +138,29 @@ def test_comment_record_alias_and_default_author(cli):
     assert [e["revision"] for e in journal] == [1, 2, 2]
 
 
+def test_comment_takes_the_text_inline_or_from_a_file(cli, tmp_path):
+    cli("new", "--title", "Item", "--project", "TM")
+    assert cli("comment", "TM-1", "--kind", "progress", "--body", "Short note").strip() == "Recorded progress: TM-1"
+    cli("record", "TM-1", "--kind", "decision", "--body", "Inline alias", "--actor", "alice")
+    (tmp_path / "note.md").write_text("From a file", encoding="utf-8")
+    cli("comment", "TM-1", "--kind", "progress", "--body-file", tmp_path / "note.md")
+    journal = _json("show", "TM-1", "--json")["frontmatter"]["journal"]
+    assert [(e["kind"], e["actor"], e["text"]) for e in journal] == [
+        ("progress", default_actor(), "Short note"),
+        ("decision", "alice", "Inline alias"),
+        ("progress", default_actor(), "From a file"),
+    ]
+
+
+@pytest.mark.parametrize("command", ["comment", "record"])
+@pytest.mark.parametrize("text", [[], ["--body", "x", "--body-file", "-"]], ids=["neither", "both"])
+def test_comment_needs_exactly_one_text_option(cli, command, text):
+    cli("new", "--title", "Item", "--project", "TM")
+    output = cli(command, "TM-1", "--kind", "progress", *text, input="y", code=2)
+    assert "exactly one of --body and --body-file" in output
+    assert _json("show", "TM-1", "--json")["frontmatter"]["journal"] == []
+
+
 # ---- assignee and labels ---------------------------------------------------
 
 
