@@ -293,6 +293,20 @@ def test_a_refused_code_exchange_shows_only_the_status_and_a_safe_error_code(sql
         assert hidden not in page
 
 
+def test_the_request_log_leaves_out_the_query_of_login_paths(sqlite_env, google, capsys):
+    running = RunningServer(sqlite_env, login=settings(), post_form=google.post_form, log=True)
+    try:
+        query = google.sign_in(start_cli_login(running))
+        assert callback(running, query)[0] == 302
+        assert get(f"{running.url}/readyz?probe=1")[0] == 200
+    finally:
+        running.stop()
+    log = capsys.readouterr().err
+    assert '"GET /auth/cli HTTP/1.1" 302' in log and '"GET /auth/callback HTTP/1.1" 302' in log
+    assert query["code"] not in log and query["state"] not in log and "challenge=" not in log
+    assert '"GET /readyz?probe=1 HTTP/1.1" 200' in log
+
+
 @pytest.mark.parametrize(
     "query",
     [
