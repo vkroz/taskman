@@ -39,7 +39,7 @@ taskman comment TASK_KEY --kind decision --actor ACTOR --body-file decision.md
 taskman comment TASK_KEY --kind progress --actor ACTOR --body "Parser done; tests next."
 ```
 
-Every command that changes an item accepts `--actor`; without it, the author is the git `user.name`. Each field change is recorded in the item's activity (`taskman activity TASK_KEY`). Use `assign` and `label` to show who works on an item and how it is grouped.
+Every command that changes an item accepts `--actor` to name the agent. Without it, the author is the person of the token on a server, or the git `user.name` with a local database. Each field change is recorded in the item's activity (`taskman activity TASK_KEY`). Use `assign` and `label` to show who works on an item and how it is grouped.
 
 Open requirements may be refined to reach the agreed outcome. Comment on significant choices, reasons, scope refinements and implementation progress. Use a `handoff` comment for the next agent's entry point and remaining work. These are concise engineering rationales, not a transcript of internal deliberation. Do not relax acceptance criteria merely to make a failing result pass. Ask about material changes to the user's intended outcome; routine implementation choices remain within authorized work.
 
