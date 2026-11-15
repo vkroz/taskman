@@ -307,16 +307,33 @@ def test_a_file_that_is_not_a_database_is_reported_in_one_line(sqlite_env, tmp_p
     assert run("list").strip() == "(no items)"
 
 
-@pytest.mark.parametrize("password", ["secretpw", "secret pw"])
-def test_a_postgres_database_that_cannot_be_opened_is_reported_without_the_url(sqlite_env, monkeypatch, password):
+@pytest.mark.parametrize("url, secrets", [
+    ("postgresql://taskman:secretpw@127.0.0.1:1/unreachable_test", ["secretpw"]),
+    ("postgresql://taskman:secret pw@127.0.0.1:1/unreachable_test", ["secret pw"]),
+    # libpq ends the user info at the first "@" or "/": the rest of the password goes into the host or database name.
+    ("postgresql://taskman:Tr0ub@dor3@127.0.0.1:1/unreachable_test", ["Tr0ub", "dor3"]),
+    ("postgresql://taskman:first@second/third@127.0.0.1:1/unreachable_test", ["first", "second", "third"]),
+    ("postgresql://taskman@127.0.0.1:1/unreachable_test?password=secret pw", ["secret pw"]),
+    ("postgresql://taskman@127.0.0.1:1/unreachable_test?sslmode=disable&password=secret%zzpw", ["secret"]),
+])
+def test_a_postgres_database_that_cannot_be_opened_is_reported_without_the_url(sqlite_env, monkeypatch, url, secrets):
     pytest.importorskip("psycopg")
-    url = f"postgresql://taskman:{password}@127.0.0.1:1/unreachable_test"
     monkeypatch.setenv("TASKMAN_BACKEND", "postgres")
     monkeypatch.setenv("TASKMAN_DATABASE_URL", url)
     for command in _DATABASE_COMMANDS:
         output = run(*command, code=2)
         assert output.startswith("Error: Cannot open the Taskman database: ") and output.count("\n") == 1
-        assert password not in output and url not in output and "Traceback" not in output
+        assert url not in output and "Traceback" not in output
+        assert [secret for secret in secrets if secret in output] == [], output
+
+
+def test_the_user_name_and_a_query_with_an_at_sign_do_not_hide_the_driver_reason(sqlite_env, monkeypatch):
+    pytest.importorskip("psycopg")
+    monkeypatch.setenv("TASKMAN_BACKEND", "postgres")
+    monkeypatch.setenv("TASKMAN_DATABASE_URL", "postgresql://u@127.0.0.1:1/unreachable_test?password=secret@pw")
+    output = run("list", code=2)
+    assert 'connection to server at "127.0.0.1", port 1 failed: Connection refused' in output
+    assert "secret" not in output
 
 
 def test_serve_reports_an_address_it_cannot_use(sqlite_env):
