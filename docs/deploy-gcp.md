@@ -49,10 +49,10 @@ Browser login lets each person get a token with a Google account. Create the OAu
 
 1. Under Branding, enter the app name and a support email address.
 2. Under Audience, select Internal only when each person signs in with an account of the Google Workspace organization of the project. For a personal Gmail account, or another account outside the organization, select External and add each person as a test user.
-3. Under Clients, create a client of type "Web application". Add `https://taskman-1037430670088.us-central1.run.app/auth/callback` as an authorized redirect URI. This is `PUBLIC_URL/auth/callback`, which `bootstrap.sh` printed.
-4. Copy the client ID and the client secret.
+3. Under Clients, create a client of type "Web application". Add `https://taskman-1037430670088.us-central1.run.app/auth/callback` as an authorized redirect URI. This is `PUBLIC_URL/auth/callback`, which `bootstrap.sh` printed. Google can take 5 minutes to a few hours to apply a new or changed redirect URI.
+4. Copy the client ID and the client secret. The client secret is one value that starts with `GOCSPX-`.
 
-Put the client secret into the secret `taskman-google-client-secret`, which `bootstrap.sh` created without a value. Do this before you set the client ID: a deployment with a client ID fails while this secret has no value. `read` waits for you to paste the client secret and press Enter. The terminal does not show it.
+Put only the value of the client secret into the secret `taskman-google-client-secret`, which `bootstrap.sh` created without a value. Do not put the downloaded file `client_secret_*.json` into it: Google then refuses each sign-in with `invalid_client`. Do this before you set the client ID: a deployment with a client ID fails while this secret has no value. `read` waits for you to paste the client secret and press Enter. The terminal does not show it.
 
 ```bash
 read -rs CLIENT_SECRET
@@ -60,11 +60,30 @@ printf %s "$CLIENT_SECRET" | gcloud secrets versions add taskman-google-client-s
 unset CLIENT_SECRET
 ```
 
+If you downloaded the client as a JSON file, this command takes the client secret from the file. It does not show the value. Replace `<downloaded file>` with the path of the file:
+
+```bash
+python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["web"]["client_secret"], end="")' <downloaded file> | gcloud secrets versions add taskman-google-client-secret --project nemos-infra --data-file -
+```
+
+After you add a new version of a secret, open the last deployment run in the Actions tab. Select "Re-run all jobs", so that the new instances read the new version. Then disable the old version:
+
+```bash
+gcloud secrets versions list taskman-google-client-secret --project nemos-infra
+gcloud secrets versions disable <old version> --secret taskman-google-client-secret --project nemos-infra
+```
+
 In `deploy/gcp/nemos-infra.env`, set `GOOGLE_CLIENT_ID` to the client ID. `PUBLIC_URL` must hold the service address. Also set `ALLOWED_DOMAINS`, `ALLOWED_EMAILS`, or both, as comma-separated lists without spaces. Merge the change to `staging`. The deployment turns on browser login.
 
 `ALLOWED_DOMAINS` admits the members of a Google Workspace organization. A personal Gmail account has no Workspace domain: put its address in `ALLOWED_EMAILS`. `deploy.sh` stops before it changes anything when `GOOGLE_CLIENT_ID` is set and `PUBLIC_URL` is empty, or both lists are empty. To turn browser login off, empty `GOOGLE_CLIENT_ID` and merge to `staging`.
 
 When browser login is on, anyone can open `/auth/token` and `/auth/cli` on the public service. Each request adds a row to the `logins` table under the database write lock, and Taskman does not limit the rate of these requests.
+
+When a login fails, the Taskman page or the Google page names an OAuth error code:
+
+- `invalid_client`: the client ID or the client secret is wrong. Compare `GOOGLE_CLIENT_ID` with the client in Google Auth Platform. Add the correct client secret as a new version, then re-run the last deployment.
+- `invalid_grant`: the sign-in code expired, or Taskman used it before. Start the login again.
+- `redirect_uri_mismatch`: `PUBLIC_URL/auth/callback` is not an authorized redirect URI of the client. Add it, and wait until Google applies the change.
 
 ## Use the server
 
