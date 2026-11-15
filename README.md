@@ -195,9 +195,32 @@ On a machine without a browser, for example a cloud virtual machine:
 1. On any computer, open `https://taskman.example.com/auth/token` and sign in. The page shows a personal access token one time.
 2. On the machine, run `taskman auth login --server https://taskman.example.com --with-token` and paste the token.
 
-An agent sandbox that accepts only environment variables can set `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` instead. `TASKMAN_TOKEN` wins over a saved login.
+An agent cloud environment sets `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` instead, as [Connect an agent cloud environment](#connect-an-agent-cloud-environment) shows. `TASKMAN_TOKEN` wins over a saved login.
 
 The person of the token is the author of each change. With `--actor claude`, the author is `claude for ada@example.com`. Taskman reads `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` from the environment only, never from a `.env` file. The address must start with `https://`, unless the server runs on the same computer. The CLI keeps its login in `~/.config/taskman/credentials.json`, which only you can read. A token expires after 90 days.
+
+### Connect an agent cloud environment
+
+A cloud agent session starts without the CLI, the server address and a token. Set these items one time in the settings of the cloud environment, never in the repository:
+
+1. Network access: allow the exact host of the server, for example `taskman.example.com`. Do not allow a wildcard such as `*.run.app`, because it opens every service in that domain. Allow all HTTP methods: the CLI sends each change as a POST request.
+2. Setup step: install the CLI from the branch that the server deploys from, for example `uv tool install --force 'git+https://github.com/vkroz/taskman.git@staging#subdirectory=taskman'`.
+3. `TASKMAN_SERVER_URL`: set the server address as a plain variable, for example `https://taskman.example.com`. The address is not a secret.
+4. Token: on your computer, open `https://taskman.example.com/auth/token` and sign in. The page shows a token one time. Give it to the environment in one of two ways:
+   - The network proxy of the platform adds the token to each request to the host: save the token as a network secret for the host. For a Claude Code network secret, use the header `Authorization` and the prefix `Bearer`. Then set the plain variable `TASKMAN_TOKEN=proxy-injected`. The proxy replaces this placeholder.
+   - The platform has no such proxy: save the token in the secret store of the platform as `TASKMAN_TOKEN`.
+5. Check: in a new session, run `taskman auth status`. It must print `Logged in to https://taskman.example.com as <person>`. Any other output means that a setting is missing or wrong.
+
+Never paste a token into a conversation with an agent.
+
+A token belongs to one Taskman person. When all sessions of an environment share one token, all of them write as that person. Use `--actor` to name the agent, for example `--actor "Claude Code"`. The author is then `Claude Code for <person>`.
+
+The lines below give the mechanism of each platform on Nov 15, 2026. They are not yet verified end to end. The team verifies them during acceptance testing.
+
+- Claude Code on the web: environment settings with "Limited" network access and the host in the allowed domains, a setup script, the variables `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN=proxy-injected`, and a network secret for the host.
+- OpenAI Codex cloud: environment settings with agent internet access to the host for all HTTP methods, an install script, `TASKMAN_SERVER_URL`, and a network secret `TASKMAN_TOKEN` for the host. The agent sees only a placeholder.
+- GitHub Copilot cloud agent: the host in the Copilot internet access allowlist of the repository, `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` as secrets under "Secrets and variables" > "Agents", and the CLI install in `.github/workflows/copilot-setup-steps.yml`. The agent can read the token.
+- Grok: no hosted agent environment found as of Nov 15, 2026.
 
 ### Turn on browser login
 
