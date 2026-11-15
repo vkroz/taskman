@@ -63,9 +63,11 @@ if [[ -n ${GOOGLE_CLIENT_ID:-} ]]; then
     echo "Browser login needs ALLOWED_DOMAINS or ALLOWED_EMAILS in $config." >&2
     exit 2
   fi
-  # bootstrap.sh created the service, so its URL is known before the first deployment.
-  url=$(gcloud run services describe "$SERVICE" "${common[@]}" --format 'value(status.url)')
-  service_env+=("TASKMAN_GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID" "TASKMAN_PUBLIC_URL=$url")
+  if [[ -z ${PUBLIC_URL:-} ]]; then
+    echo "Browser login needs PUBLIC_URL in $config: the service address that bootstrap.sh prints." >&2
+    exit 2
+  fi
+  service_env+=("TASKMAN_GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID" "TASKMAN_PUBLIC_URL=$PUBLIC_URL")
   if [[ -n ${ALLOWED_DOMAINS:-} ]]; then
     service_env+=("TASKMAN_ALLOWED_DOMAINS=$ALLOWED_DOMAINS")
   fi

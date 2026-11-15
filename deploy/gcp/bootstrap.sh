@@ -15,9 +15,9 @@
 # password yet but the database or the user already exists, these names belong to
 # something else: the script stops before it sets up any resource.
 #
-# It prints the two GitHub variables of the deployment workflow, the service URL, and
-# the OAuth redirect URI at the end. docs/deploy-gcp.md, "Set up the environment
-# once", gives the order of the setup steps.
+# It prints the two GitHub variables of the deployment workflow, the service address
+# for PUBLIC_URL, and the OAuth redirect URI at the end. docs/deploy-gcp.md, "Set up
+# the environment once", gives the order of the setup steps.
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
@@ -242,7 +242,10 @@ EOF
     fi
   fi
 fi
-url=$(gcloud run services describe "$SERVICE" "${common[@]}" --format 'value(status.url)')
+# The deterministic URL of Cloud Run. The service also has a URL with a hash
+# (status.url), which Taskman does not use: the OAuth redirect URI and each saved login
+# name one exact address.
+url=${PUBLIC_URL:-https://$SERVICE-$number.$REGION.run.app}
 
 cat <<EOF
 
@@ -252,7 +255,8 @@ deployment branches to $DEPLOY_BRANCH, and set these variables on it:
   GCP_WORKLOAD_IDENTITY_PROVIDER=$pool/providers/$WIF_PROVIDER
   GCP_DEPLOYER_SERVICE_ACCOUNT=$(account "$DEPLOYER_SA")
 
-Service URL: $url
+Service address: $url
+Set PUBLIC_URL=$url in $config.
 OAuth redirect URI of browser login: $url/auth/callback
 
 Check the providers of the pool $WIF_POOL above: each one that admits $GITHUB_REPOSITORY
