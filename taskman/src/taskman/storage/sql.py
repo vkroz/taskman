@@ -1,6 +1,7 @@
 """Connections and transactions for the sqlite and postgres backends."""
 from __future__ import annotations
 
+import re
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -68,17 +69,27 @@ def connect(settings: StorageSettings, *, create: bool = True) -> tuple[Any, Dia
             return psycopg.connect(url, autocommit=True, connect_timeout=10, **options), POSTGRES
         except psycopg.Error as exc:
             # A message about a malformed URL can quote the URL's password.
-            url_password = url.partition("://")[2].rpartition("@")[0].partition(":")[2]
-            raise _cannot_open(exc, url, options.get("password"), url_password, unquote(url_password)) from None
+            raise _cannot_open(exc, url, options.get("password"), *_url_secrets(url)) from None
     raise StorageConfigError(f"The {settings.backend} backend has no SQL database.")
+
+
+def _url_secrets(url: str) -> list[str]:
+    """Each text of a Postgres URL that can hold a password, raw and percent-decoded.
+
+    libpq ends the user info at the first ``@`` or ``/``. So a raw ``@`` or ``/``
+    in a password puts the rest of the password into the host or database name.
+    """
+    password = url.partition("://")[2].partition("?")[0].rpartition("@")[0].partition(":")[2]
+    texts = [password, *re.split("[@/]", password), *re.findall(r"[?&]password=([^&]*)", url)]
+    return [text for raw in texts for text in (raw, unquote(raw))]
 
 
 def _cannot_open(exc: Exception, *secrets: str | None) -> StorageConfigError:
     """The driver's reason on one line, with each secret replaced by ``***``."""
     reason = " ".join(str(exc).split())
-    for secret in secrets:
-        if secret:
-            reason = reason.replace(secret, "***")
+    # The longest first: a part of a password must not hide the rest of a longer one.
+    for secret in sorted(filter(None, set(secrets)), key=len, reverse=True):
+        reason = reason.replace(secret, "***")
     return StorageConfigError(f"Cannot open the Taskman database: {reason}")
 
 
