@@ -44,7 +44,7 @@ def remote_settings(environ: Mapping[str, str] = os.environ) -> tuple[str, str]:
     url = check_server_url(server_url(environ))
     token = environ.get("TASKMAN_TOKEN", "").strip() or saved_token(url, environ)
     if not token:
-        raise StorageConfigError(f"Not logged in to {url}. Run: taskman auth login")
+        raise StorageConfigError(f"Not logged in to {url}. Set TASKMAN_TOKEN, or run: taskman auth login --server {url}")
     return url, token
 
 
@@ -107,7 +107,10 @@ class RemoteStore:
             _raise_reported(exc.code, exc.read(), self.url)
         except (urllib.error.URLError, OSError) as exc:
             reason = getattr(exc, "reason", exc)
-            raise StorageConfigError(f"Cannot reach the Taskman server at {self.url}: {reason}") from None
+            message = f"Cannot reach the Taskman server at {self.url}: {reason}"
+            if "Tunnel connection failed: 403" in str(reason):
+                message += f". The network settings of this environment must allow {urlsplit(self.url).hostname}."
+            raise StorageConfigError(message) from None
         except ValueError:
             raise StorageConfigError(f"{self.url} did not answer as a Taskman server.") from None
 
@@ -187,7 +190,10 @@ def _raise_reported(status: int, body: bytes, url: str) -> None:
     except (ValueError, KeyError, TypeError):
         raise StorageConfigError(f"{url} answered with HTTP status {status}.") from None
     if status == 401:
-        raise StorageConfigError(f"The Taskman server at {url} refused the token: {message}")
+        raise StorageConfigError(
+            f"The Taskman server at {url} refused the token: it is unknown, expired or revoked. "
+            f"Set TASKMAN_TOKEN to a new token, or run: taskman auth login --server {url}"
+        )
     if kind == "lifecycle":
         raise LifecycleError(message, usage=bool(error.get("usage")))
     if kind == "missing":

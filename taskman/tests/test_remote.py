@@ -136,20 +136,51 @@ def test_two_processes_in_different_directories_share_one_project(remote_env, tm
 
 def test_a_missing_token_stops_the_command(remote_env, monkeypatch):
     monkeypatch.delenv("TASKMAN_TOKEN")
-    assert "Not logged in to" in run("list", code=2)
+    message = f"Error: Not logged in to {remote_env.url}. Set TASKMAN_TOKEN, or run: taskman auth login --server {remote_env.url}\n"
+    assert run("list", code=2) == message
+    assert run("auth", "status", code=1) == message
 
 
 def test_a_refused_token_stops_the_command(remote_env, monkeypatch):
     monkeypatch.setenv("TASKMAN_TOKEN", "tmn_wrong")
-    assert "refused the token" in run("list", code=2)
-    assert "refused the token" in run("new", "--title", "T", "--project", "TM", code=2)
+    message = (f"Error: The Taskman server at {remote_env.url} refused the token: it is unknown, expired or revoked. "
+               f"Set TASKMAN_TOKEN to a new token, or run: taskman auth login --server {remote_env.url}\n")
+    assert run("list", code=2) == message
+    assert run("new", "--title", "T", "--project", "TM", code=2) == message
     assert remote_env.store.items() == []
 
 
 def test_a_server_that_does_not_answer_stops_the_command(sqlite_env, monkeypatch):
     monkeypatch.setenv("TASKMAN_SERVER_URL", "http://127.0.0.1:1")
     monkeypatch.setenv("TASKMAN_TOKEN", "tmn_any")
-    assert "Cannot reach the Taskman server" in run("list", code=2)
+    output = run("list", code=2)
+    assert "Cannot reach the Taskman server" in output and "network settings" not in output
+
+
+def test_a_proxy_that_refuses_the_host_names_the_network_settings(sqlite_env, monkeypatch):
+    class RefusingProxy(BaseHTTPRequestHandler):
+        def do_CONNECT(self):  # noqa: N802
+            self.send_response(403)
+            self.end_headers()
+
+        def log_message(self, *args):
+            return
+
+    proxy = HTTPServer(("127.0.0.1", 0), RefusingProxy)
+    threading.Thread(target=proxy.serve_forever, daemon=True).start()
+    for name in ("https_proxy", "HTTPS_PROXY"):
+        monkeypatch.setenv(name, f"http://127.0.0.1:{proxy.server_port}")
+    for name in ("no_proxy", "NO_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("TASKMAN_SERVER_URL", "https://taskman.example.com")
+    monkeypatch.setenv("TASKMAN_TOKEN", "tmn_any")
+    try:
+        output = run("list", code=2)
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+    assert output == ("Error: Cannot reach the Taskman server at https://taskman.example.com: Tunnel connection failed: "
+                      "403 Forbidden. The network settings of this environment must allow taskman.example.com.\n")
 
 
 @pytest.mark.parametrize(
