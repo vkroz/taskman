@@ -417,8 +417,11 @@ def edit(store: Store, item_id: str, title: Any, body: Any, reason: Any) -> Item
         raise LifecycleError("Completed work is immutable; create a follow-up task", usage=True)
     if not isinstance(title, str) or not title.strip() or len(title) > 200:
         raise LifecycleError("Enter a title of 1–200 characters", usage=True)
+    # Without a description, the current one stays.
+    if body is None:
+        body = item.body
     # A draft may stay title-only (decision D2); finalized work keeps a description.
-    if not isinstance(body, str) or (not body.strip() and not item.draft):
+    elif not isinstance(body, str) or (not body.strip() and not item.draft):
         raise LifecycleError("Description must not be empty", usage=True)
     if not isinstance(reason, str) or not reason.strip():
         raise LifecycleError("Explain why the task changed", usage=True)

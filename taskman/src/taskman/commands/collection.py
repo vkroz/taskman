@@ -17,12 +17,15 @@ def edit_item(store, item_id, title, body, reason):
 def edit(
     item_id: str,
     title: str = typer.Option(...),
-    body_file: str = typer.Option(...),
+    body_file: str | None = typer.Option(
+        None, "--body-file", help="New Markdown description; - reads stdin. Without it, the description stays."
+    ),
     reason: str = typer.Option(...),
 ):
-    """Edit an open title and description and journal the reason."""
+    """Edit the title, and optionally the description, of an open item and journal the reason."""
+    body = read_body(body_file) if body_file is not None else None
     try:
-        edit_item(open_store(), item_id, title, read_body(body_file), reason)
+        edit_item(open_store(), item_id, title, body, reason)
     except ValueError as e:
         raise typer.BadParameter(str(e)) from e
     typer.echo(f"Updated: {item_id}")
