@@ -66,6 +66,16 @@ def test_list_json_output(sqlite_env) -> None:
     assert row["title"] == "Foo"
 
 
+def test_list_json_rows_have_draft_and_dependencies_like_ready_rows(sqlite_env) -> None:
+    finalized = _new("Finalized")
+    draft = sql.new("Draft")
+    sql.run("depend", draft, "--on", finalized)
+    rows = {row["id"]: row for row in json.loads(sql.run("list", "--json"))}
+    assert (rows[finalized]["draft"], rows[finalized]["depends_on"]) == (False, [])
+    assert (rows[draft]["draft"], rows[draft]["depends_on"]) == (True, [finalized])
+    assert json.loads(sql.run("ready", "--json")) == [rows[finalized]]
+
+
 def test_list_json_includes_all_items_in_nested_tree(sqlite_env) -> None:
     epic = _new("E", "epic")
     child = sql.new("Child", parent=epic)
