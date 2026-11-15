@@ -94,7 +94,7 @@ uv tool install --force 'git+https://github.com/vkroz/taskman.git@staging#subdir
 taskman auth login --server https://taskman-1037430670088.us-central1.run.app
 ```
 
-On a machine without a browser, open `https://taskman-1037430670088.us-central1.run.app/auth/token` on any computer and sign in. The page shows a personal access token one time. On the machine, run `taskman auth login --server https://taskman-1037430670088.us-central1.run.app --with-token` and paste the token. An agent sandbox can set `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` instead. Without browser login, an operator creates the token, as "Run operator commands" shows.
+On a machine without a browser, open `https://taskman-1037430670088.us-central1.run.app/auth/token` on any computer and sign in. The page shows a personal access token one time. On the machine, run `taskman auth login --server https://taskman-1037430670088.us-central1.run.app --with-token` and paste the token. To connect an agent cloud environment, follow [Connect an agent cloud environment](../README.md#connect-an-agent-cloud-environment) in the README. Without browser login, an operator creates the token, as "Run operator commands" shows.
 
 ## Run operator commands
 
