@@ -28,7 +28,14 @@ The service runs `taskman serve` on port 8080, with 1 CPU (central processing un
 
 You need the Owner role on `nemos-infra`, admin access to the GitHub repository `vkroz/taskman`, and a computer with a browser. Do the steps in this order. Paste each command alone, and wait until it stops.
 
-The setup reuses four resources that existed in `nemos-infra` before Nov 14, 2026: the Cloud SQL instance `nemos-pg`, the Artifact Registry repository `taskman`, the service account `taskman-deployer`, and the Workload Identity pool `github`. The steps only check them. The setup does not use or change the earlier resources: the services `taskman-staging` and `taskman-prod`, the databases `taskman_staging` and `taskman_prod`, their secrets, and the provider `github-actions`.
+The setup reuses four resources that existed in `nemos-infra` before Nov 14, 2026. The steps only check them:
+
+- the Cloud SQL instance `nemos-pg`
+- the Artifact Registry repository `taskman`
+- the service account `taskman-deployer`
+- the Workload Identity pool `github`
+
+The setup does not use or change the earlier services `taskman-staging` and `taskman-prod`, databases `taskman_staging` and `taskman_prod`, their secrets, or the provider `github-actions`.
 
 ### Google Cloud (Cloud Shell)
 
@@ -134,7 +141,7 @@ Cloud Shell is a terminal in the Google Cloud console. It has `gcloud` and `pyth
 
     Output: `Created user [taskman].`
 
-    On Nov 14, 2026, the command had no `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`. Thus the log files of `gcloud` in Cloud Shell got the password. `gcloud` deletes its log files after 30 days. To delete them now, run `rm -r ~/.config/gcloud/logs` in Cloud Shell.
+    On Nov 14, 2026, the command had no `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`. Thus the log files of `gcloud` in Cloud Shell received the password. `gcloud` deletes its log files after 30 days. To delete them now, run `rm -r ~/.config/gcloud/logs` in Cloud Shell.
 
     Cloud SQL gives the user `taskman` the `cloudsqlsuperuser` role, with `CREATEROLE` and `CREATEDB` on the whole instance ([About PostgreSQL users and roles](https://cloud.google.com/sql/docs/postgres/users)). Other applications share `nemos-pg`.
 
@@ -146,7 +153,7 @@ Cloud Shell is a terminal in the Google Cloud console. It has `gcloud` and `pyth
 
     Output: `Created secret [taskman-google-client-secret].`
 
-15. Let the server read the database password. If the command says that `taskman-server` does not exist, wait 1 minute and run it again: a new service account can take 1 minute to become usable.
+15. Let the server read the database password. If the command says that `taskman-server` does not exist, wait 1 minute and run it again. A new service account can take 1 minute to become usable.
 
     ```bash
     gcloud secrets add-iam-policy-binding taskman-db-password --member serviceAccount:taskman-server@nemos-infra.iam.gserviceaccount.com --role roles/secretmanager.secretAccessor
@@ -244,7 +251,7 @@ Cloud Shell is a terminal in the Google Cloud console. It has `gcloud` and `pyth
 
     Check that each condition admits only branches that you trust. On Nov 14, 2026, the two conditions admitted only `main` and `staging` of `vkroz/taskman`. `taskman-deployer` also keeps its earlier roles; `gcloud iam service-accounts get-iam-policy taskman-deployer@nemos-infra.iam.gserviceaccount.com --project nemos-infra` shows who can use it.
 
-26. Create the public service `taskman` with a placeholder image. The first deployment replaces the placeholder. This takes up to 2 minutes. Do this step only when the service `taskman` does not exist: on an existing service, the placeholder replaces the server until the next deployment. The service exists in `nemos-infra` since Nov 14, 2026.
+26. Create the public service `taskman` with a placeholder image. The first deployment replaces the placeholder. This takes up to 2 minutes. Do this step only when the service `taskman` does not exist. On an existing service, the placeholder replaces the server until the next deployment. The service exists in `nemos-infra` since Nov 14, 2026.
 
     ```bash
     gcloud run deploy taskman --region us-central1 --image us-docker.pkg.dev/cloudrun/container/hello --service-account taskman-server@nemos-infra.iam.gserviceaccount.com --no-invoker-iam-check --labels app=taskman
@@ -286,7 +293,7 @@ The deployment workflow reads two variables of the GitHub environment `nemos-inf
 
 ### Google sign-in client and secret
 
-Browser login lets each person get a Taskman token with a Google account. You create the OAuth (Open Authorization) client in Google Auth Platform, in the Google Cloud console of `nemos-infra`. You need the Owner role or OAuth Config Editor (`roles/oauthconfig.editor`).
+With browser login, each person signs in with a Google account and receives a Taskman token. You create the OAuth (Open Authorization) client in Google Auth Platform, in the Google Cloud console of `nemos-infra`. You need the Owner role or OAuth Config Editor (`roles/oauthconfig.editor`).
 
 1. Configure Google Auth Platform. Open https://console.cloud.google.com/auth/overview?project=nemos-infra and click **Get started**. Complete the four pages:
    - **App Information:** in **App name**, type `Taskman`. In **User support email**, select your address.
@@ -312,7 +319,7 @@ Browser login lets each person get a Taskman token with a Google account. You cr
 
    Output: `length 35 | starts with GOCSPX-: True | spaces or newlines at ends: False`.
 
-5. Turn on browser login. In `deploy/gcp/nemos-infra.env`, set `GOOGLE_CLIENT_ID` to the client ID, and set [who may sign in](#who-may-sign-in). `PUBLIC_URL` must hold the service address. Merge the change to `staging`. On Nov 15, 2026, the file got `GOOGLE_CLIENT_ID=1037430670088-pl9k3458ngrm78nlpr6lseqrmc9a436m.apps.googleusercontent.com` and `ALLOWED_DOMAINS=reservoirco.io`.
+5. Turn on browser login. In `deploy/gcp/nemos-infra.env`, set `GOOGLE_CLIENT_ID` to the client ID, and set [who may sign in](#who-may-sign-in). `PUBLIC_URL` must hold the service address. Merge the change to `staging`. On Nov 15, 2026, the change set `GOOGLE_CLIENT_ID=1037430670088-pl9k3458ngrm78nlpr6lseqrmc9a436m.apps.googleusercontent.com` and `ALLOWED_DOMAINS=reservoirco.io`.
 
    When the file already has these values, there is no change to merge. If no deployment started after you stored the client secret, re-run the last deployment, as [Store the client secret](#store-the-client-secret) shows.
 
@@ -383,7 +390,7 @@ The script differs from the Google Cloud steps in these points:
 
 - It gives `--project` to each command, and `--quiet` to the deployment of the placeholder. The steps select the project one time.
 - It stops at a taken database or user name only when the password secret has no value. Thus a repeated run continues.
-- It creates the resources that the steps only check, when they are missing: the instance `nemos-pg` (tier `SQL_TIER`), the repository `taskman`, the service account `taskman-deployer` and the pool `github`.
+- It creates the four reused resources when they are missing. A new instance `nemos-pg` has the tier `SQL_TIER`.
 - It creates the password secret and its first version with two commands. When the user `taskman` exists, it sets the password of the user from the secret.
 - It gives `taskman-server` the display name `Taskman taskman-server`.
 - It reads the project number for the deployer binding. The steps contain `1037430670088`.
@@ -419,7 +426,7 @@ If you downloaded the client as a JSON file, this command takes the client secre
 python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["web"]["client_secret"], end="")' <downloaded file> | gcloud secrets versions add taskman-google-client-secret --project nemos-infra --data-file -
 ```
 
-A server instance reads the secret only when it starts. When browser login is on, a new version thus needs a new deployment: open the last deployment run in the Actions tab, and select "Re-run all jobs". Then find the old version, and disable it:
+A server instance reads the secret only when it starts. When browser login is on, a new version thus needs a new deployment. Open the last deployment run in the Actions tab, and select "Re-run all jobs". Then find the old version, and disable it:
 
 ```bash
 gcloud secrets versions list taskman-google-client-secret --project nemos-infra
