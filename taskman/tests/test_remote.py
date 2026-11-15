@@ -17,7 +17,7 @@ import pytest
 
 from taskman.storage.remote import RemoteStore, remote_settings
 from taskman.storage.settings import load_env_file
-from taskman.storage.store import StorageConfigError, StorageError
+from taskman.storage.store import StorageConfigError, StorageError, item_data, item_from_data
 from tests.sql_helpers import comment, new, prepare, run, show
 
 SRC = str(Path(__file__).resolve().parents[1] / "src")
@@ -86,6 +86,26 @@ def test_a_read_command_still_reports_a_settings_error_with_exit_2(remote_env, m
     monkeypatch.setenv("TASKMAN_TOKEN", "tmn_wrong")
     output = run("show", "TM-1", code=2)
     assert output.startswith("Error: ") and "Traceback" not in output
+
+
+def test_a_newer_server_that_adds_item_fields_does_not_break_the_cli(remote_env, monkeypatch):
+    from taskman import server
+
+    public = server._public
+    monkeypatch.setattr(server, "_public", lambda item: public(item) | {"estimate": 3})
+    key = new("Task", body="Spec.\n")
+    run("finalize", key)
+    assert key in run("list") and key in run("ready")
+    assert show(key)["body"] == "Spec.\n"
+    assert json.loads(run("context", key))["item"]["id"] == key
+
+
+def test_an_item_without_a_known_field_is_still_refused(remote_env):
+    data = item_data(remote_env.store.get(new("Task")))
+    assert item_from_data(data | {"estimate": 3}) == item_from_data(data)
+    del data["body"]
+    with pytest.raises(TypeError):
+        item_from_data(data)
 
 
 def test_the_cli_opens_no_database_in_remote_mode(remote_env, monkeypatch):
