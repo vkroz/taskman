@@ -193,7 +193,7 @@ The person of the token is the author of each change. With `--actor claude`, the
 
 ### Turn on browser login
 
-Browser login needs a Google OAuth (Open Authorization) client of type "Web application". Create it on the Clients page of Google Auth Platform in the Google Cloud console, as [Turn on browser login](docs/deploy-gcp.md#turn-on-browser-login) shows. Add `<public address>/auth/callback` as an authorized redirect URI (Uniform Resource Identifier). Then start the server with:
+Browser login needs a Google OAuth (Open Authorization) client of type "Web application". Create it on the Clients page of Google Auth Platform in the Google Cloud console, as [Google sign-in client and secret](docs/deploy-gcp.md#google-sign-in-client-and-secret) shows. Add `<public address>/auth/callback` as an authorized redirect URI (Uniform Resource Identifier). Then start the server with:
 
 | Variable | Value |
 | --- | --- |
