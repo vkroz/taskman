@@ -40,6 +40,6 @@ The product owner decided on Nov 12, 2026: Taskman uses the same deployment stan
 - Each deployment sets the environment variables and the secrets of the job and the service from the environment file. It replaces changes that a person makes by hand in the console.
 - The user `taskman` can create roles and databases on the shared instance `nemos-pg`, next to those of other applications.
 - GitHub shows the "Run workflow" button only when the workflow file is on the default branch. The default branch `main` has no deployment files. Thus a deployment runs again only after a new push to `staging`, or with "Re-run all jobs" of an earlier run.
-- The first deployment needs the setup of the runbook, [Set up the environment once](../deploy-gcp.md#set-up-the-environment-once): `bootstrap.sh` and the GitHub environment `nemos-infra`. Another project needs its own environment file and workflow.
+- The first deployment needs the setup of the runbook, [Set up the environment once](../deploy-gcp.md#set-up-the-environment-once): the Google Cloud resources, by its steps or by `bootstrap.sh`, and the GitHub environment `nemos-infra`. Another project needs its own environment file and workflow.
 
 Open points: backup retention and recovery targets of the shared instance, a rate limit for the login pages, audit, and a production environment.

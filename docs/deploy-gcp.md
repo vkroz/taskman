@@ -2,6 +2,15 @@
 
 Each push to `staging`, including each merged pull request, deploys the Taskman server to Google Cloud project `nemos-infra` in region `us-central1`. [ADR (Architecture Decision Record) 0001](adrs/0001-deploy-the-server-to-google-cloud.md) gives the design. [`deploy/gcp/nemos-infra.env`](../deploy/gcp/nemos-infra.env) names every resource. Agents and people use the `taskman` command-line interface (CLI) with a Taskman token. They need no Google Cloud credentials.
 
+## Choose a setup path
+
+A project owner sets up `nemos-infra` one time, before the first deployment. Two paths create the same Google Cloud resources:
+
+- **The steps of [Set up the environment once](#set-up-the-environment-once).** A project owner did these steps for `nemos-infra` on Nov 14 and 15, 2026. Each command gives the output of that run. Use this path.
+- **The script [`bootstrap.sh`](#set-up-with-bootstrapsh).** It does the Google Cloud steps in one run. Nobody has run it against a real project yet.
+
+The GitHub steps, the sign-in steps and the first login are the same on the two paths.
+
 ## How a deployment runs
 
 The workflow [`deploy-nemos-infra.yml`](../.github/workflows/deploy-nemos-infra.yml):
@@ -19,44 +28,386 @@ The service runs `taskman serve` on port 8080, with 1 CPU (central processing un
 
 ## Set up the environment once
 
-A project owner of `nemos-infra` does these steps before the first deployment. You need the Google Cloud CLI (`gcloud`), signed in as an Owner, Python 3 (`python3`, which makes the database password), and a checkout that holds `deploy/gcp/`. Before the first deployment, this is the branch of the pull request that adds `deploy/gcp/`; after it, `staging`. Run the commands from the root of the checkout.
+You need the Owner role on `nemos-infra`, admin access to the GitHub repository `vkroz/taskman`, and a computer with a browser. Do the steps in this order. Paste each command alone, and wait until it stops.
 
-1. Create the resources. The script turns on the APIs (application programming interfaces) and creates the Artifact Registry repository, the service accounts and their roles, and the database and the user on the Cloud SQL instance `nemos-pg`. It also creates the secrets, Workload Identity Federation, and the public service with a placeholder image. It creates the instance too when it is missing. A repeated run creates only what is missing and never replaces a password.
+The setup reuses four resources that existed in `nemos-infra` before Nov 14, 2026: the Cloud SQL instance `nemos-pg`, the Artifact Registry repository `taskman`, the service account `taskman-deployer`, and the Workload Identity pool `github`. The steps only check them. The setup does not use or change the earlier resources: the services `taskman-staging` and `taskman-prod`, the databases `taskman_staging` and `taskman_prod`, their secrets, and the provider `github-actions`.
+
+### Google Cloud (Cloud Shell)
+
+Cloud Shell is a terminal in the Google Cloud console. It has `gcloud` and `python3`. The role commands change IAM (Identity and Access Management) policies. The checks of the database, user and secret names are necessary only before a first setup: since Nov 14, 2026, these names exist in `nemos-infra`.
+
+1. Open Cloud Shell. Open https://console.cloud.google.com/?project=nemos-infra, sign in, and click the Cloud Shell icon (`>_`) at the top right. If Cloud Shell asks you to authorize `gcloud`, click **Authorize**.
+
+   Result: a terminal opens at the bottom of the page. Its prompt shows `(nemos-infra)`.
+
+2. Select the project for the next commands.
 
    ```bash
-   deploy/gcp/bootstrap.sh deploy/gcp/nemos-infra.env
+   gcloud config set project nemos-infra
    ```
 
-   Cloud SQL gives the user `taskman` the `cloudsqlsuperuser` role, with `CREATEROLE` and `CREATEDB` on the whole instance ([About PostgreSQL users and roles](https://cloud.google.com/sql/docs/postgres/users)). Other applications share `nemos-pg`.
+   Output: `Updated property [core/project].`
 
-   When the secret `taskman-db-password` has no value but the database `taskman` or the user `taskman` exists on `nemos-pg`, the script stops. At that point, it has turned on the APIs and set up no resource. These names belong to another application: choose other `DB_NAME` and `DB_USER` values in the environment file, and run the script again.
+3. Check the project number.
 
-   The service accepts calls without a Google identity: Cloud Run does not check the invoker, and Taskman checks the token of each call. If an organization policy blocks this setting, the script prints what to ask of an organization administrator.
+   ```bash
+   gcloud projects describe nemos-infra --format 'value(projectNumber)'
+   ```
 
-   The script lists the providers of the pool `github`. The deployer trusts every provider of this pool that maps `attribute.repository`, also the earlier provider `github-actions`. Check that each listed condition admits only branches that you trust. `taskman-deployer` also keeps its earlier roles; `gcloud iam service-accounts get-iam-policy taskman-deployer@nemos-infra.iam.gserviceaccount.com --project nemos-infra` shows who can use it.
+   Output: `1037430670088`. If the number is different, stop.
 
-2. In GitHub, create the environment `nemos-infra` (Settings, Environments). Add the two variables that the script prints: `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_DEPLOYER_SERVICE_ACCOUNT`. Limit its deployment branches to `staging`.
+4. Check that no database has the name `taskman`.
 
-3. Merge to `staging`. The first deployment creates the schema and replaces the placeholder image. If the files reached `staging` before this setup, the first run fails at the check of the one-time setup: open that run and select "Re-run all jobs".
+   ```bash
+   gcloud sql databases list --instance nemos-pg
+   ```
 
-The script also prints the service address and the OAuth (Open Authorization) redirect URI (Uniform Resource Identifier) for browser login. The service address is `https://taskman-1037430670088.us-central1.run.app`. It is `PUBLIC_URL` in `deploy/gcp/nemos-infra.env`. People, agents and Google use only this address. Cloud Run also gives the service a second address, `https://taskman-<hash>-uc.a.run.app`. Do not use it: Google accepts only a registered redirect URI, and the CLI keeps each login for one exact address.
+   Output: the databases `postgres`, `taskman_staging` and `taskman_prod`. If the list has `taskman`, stop: the name belongs to another application.
 
-The setup does not use or change the earlier resources: the services `taskman-staging` and `taskman-prod`, the databases `taskman_staging` and `taskman_prod`, their secrets, and the provider `github-actions`.
+5. Check that no user has the name `taskman`.
 
-## Turn on browser login
+   ```bash
+   gcloud sql users list --instance nemos-pg
+   ```
 
-Browser login lets each person get a token with a Google account. Create the OAuth client in Google Auth Platform, in the Google Cloud console of `nemos-infra`. You need the Owner role or OAuth Config Editor (`roles/oauthconfig.editor`).
+   Output: the users `postgres`, `taskman_prod` and `taskman_staging`. If the list has `taskman`, stop.
 
-1. Under Branding, enter the app name and a support email address.
-2. Under Audience, select Internal only when each person signs in with an account of the Google Workspace organization of the project. For a personal Gmail account, or another account outside the organization, select External and add each person as a test user.
-3. Under Clients, create a client of type "Web application". Add `https://taskman-1037430670088.us-central1.run.app/auth/callback` as an authorized redirect URI. This is `PUBLIC_URL/auth/callback`, which `bootstrap.sh` printed. Google can take 5 minutes to a few hours to apply a new or changed redirect URI.
-4. Copy the client ID and the client secret. The client secret is one value that starts with `GOCSPX-`.
+6. Check that the two secret names are free.
 
-Put only the value of the client secret into the secret `taskman-google-client-secret`, which `bootstrap.sh` created without a value. Do not put the downloaded file `client_secret_*.json` into it: Google then refuses each sign-in with `invalid_client`. Do this before you set the client ID: a deployment with a client ID fails while this secret has no value. `read` waits for you to paste the client secret and press Enter. The terminal does not show it.
+   ```bash
+   gcloud secrets list
+   ```
+
+   Output: the secrets `nemos-pg-postgres-password`, `taskman-prod-api-token`, `taskman-prod-db-password`, `taskman-staging-api-token` and `taskman-staging-db-password`. If the list has `taskman-db-password` or `taskman-google-client-secret`, stop.
+
+7. Turn on the APIs (application programming interfaces) that Taskman uses. This takes up to 1 minute.
+
+   ```bash
+   gcloud services enable run.googleapis.com sqladmin.googleapis.com secretmanager.googleapis.com artifactregistry.googleapis.com iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com cloudresourcemanager.googleapis.com
+   ```
+
+   Output: `Operation "operations/acat.p2-1037430670088-…" finished successfully.`
+
+8. Create the service account `taskman-server`, which runs the schema job and the service.
+
+   ```bash
+   gcloud iam service-accounts create taskman-server --display-name "Taskman server"
+   ```
+
+   Output: `Created service account [taskman-server].`
+
+9. Check the deployer account. It exists from the earlier deployment, and the setup reuses it.
+
+   ```bash
+   gcloud iam service-accounts describe taskman-deployer@nemos-infra.iam.gserviceaccount.com
+   ```
+
+   Output: the details of the account, with `email: taskman-deployer@nemos-infra.iam.gserviceaccount.com`. If the output has `NOT_FOUND`, stop, and use [`bootstrap.sh`](#set-up-with-bootstrapsh): it creates missing resources.
+
+10. Check the image repository. It exists, and the setup reuses it.
+
+    ```bash
+    gcloud artifacts repositories describe taskman --location us-central1
+    ```
+
+    Output: the details of the repository, with `format: DOCKER` and `registryUri: us-central1-docker.pkg.dev/nemos-infra/taskman`. If the output has `NOT_FOUND`, stop, and use [`bootstrap.sh`](#set-up-with-bootstrapsh).
+
+11. Create the secret `taskman-db-password` with a random password. The password does not show.
+
+    ```bash
+    python3 -c 'import secrets; print(secrets.token_urlsafe(32), end="")' | gcloud secrets create taskman-db-password --replication-policy automatic --data-file -
+    ```
+
+    Output: `Created version [1] of the secret [taskman-db-password].`
+
+12. Create the database `taskman`. This takes up to 1 minute.
+
+    ```bash
+    gcloud sql databases create taskman --instance nemos-pg
+    ```
+
+    Output: `Created database [taskman].`
+
+13. Create the user `taskman` with the password of the secret. `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1` keeps the password out of the log files of `gcloud`, as in `bootstrap.sh`. This takes up to 1 minute.
+
+    ```bash
+    CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud sql users create taskman --instance nemos-pg --password="$(gcloud secrets versions access latest --secret taskman-db-password)"
+    ```
+
+    Output: `Created user [taskman].`
+
+    On Nov 14, 2026, the command had no `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`. Thus the log files of `gcloud` in Cloud Shell got the password. `gcloud` deletes its log files after 30 days. To delete them now, run `rm -r ~/.config/gcloud/logs` in Cloud Shell.
+
+    Cloud SQL gives the user `taskman` the `cloudsqlsuperuser` role, with `CREATEROLE` and `CREATEDB` on the whole instance ([About PostgreSQL users and roles](https://cloud.google.com/sql/docs/postgres/users)). Other applications share `nemos-pg`.
+
+14. Create the secret for the client secret of browser login. It has no value until [Google sign-in client and secret](#google-sign-in-client-and-secret).
+
+    ```bash
+    gcloud secrets create taskman-google-client-secret --replication-policy automatic
+    ```
+
+    Output: `Created secret [taskman-google-client-secret].`
+
+15. Let the server read the database password. If the command says that `taskman-server` does not exist, wait 1 minute and run it again: a new service account can take 1 minute to become usable.
+
+    ```bash
+    gcloud secrets add-iam-policy-binding taskman-db-password --member serviceAccount:taskman-server@nemos-infra.iam.gserviceaccount.com --role roles/secretmanager.secretAccessor
+    ```
+
+    Output: `Updated IAM policy for secret [taskman-db-password].`, then the policy.
+
+16. Let the server read the client secret.
+
+    ```bash
+    gcloud secrets add-iam-policy-binding taskman-google-client-secret --member serviceAccount:taskman-server@nemos-infra.iam.gserviceaccount.com --role roles/secretmanager.secretAccessor
+    ```
+
+    Output: `Updated IAM policy for secret [taskman-google-client-secret].`
+
+17. Let the server connect to Cloud SQL.
+
+    ```bash
+    gcloud projects add-iam-policy-binding nemos-infra --member serviceAccount:taskman-server@nemos-infra.iam.gserviceaccount.com --role roles/cloudsql.client --condition None
+    ```
+
+    Output: `Updated IAM policy for project [nemos-infra].`, then the policy of the project.
+
+18. Let the deployer deploy Cloud Run jobs and services. The deployer had this role before Nov 14, 2026, so the command changed nothing then.
+
+    ```bash
+    gcloud projects add-iam-policy-binding nemos-infra --member serviceAccount:taskman-deployer@nemos-infra.iam.gserviceaccount.com --role roles/run.developer --condition None
+    ```
+
+    Output: `Updated IAM policy for project [nemos-infra].`
+
+19. Let the deployer read the settings of the Cloud SQL instance.
+
+    ```bash
+    gcloud projects add-iam-policy-binding nemos-infra --member serviceAccount:taskman-deployer@nemos-infra.iam.gserviceaccount.com --role roles/cloudsql.viewer --condition None
+    ```
+
+    Output: `Updated IAM policy for project [nemos-infra].`
+
+20. Let the deployer push images to the repository `taskman`.
+
+    ```bash
+    gcloud artifacts repositories add-iam-policy-binding taskman --location us-central1 --member serviceAccount:taskman-deployer@nemos-infra.iam.gserviceaccount.com --role roles/artifactregistry.writer
+    ```
+
+    Output: `Updated IAM policy for repository [taskman].`
+
+21. Let the deployer run the job and the service as `taskman-server`.
+
+    ```bash
+    gcloud iam service-accounts add-iam-policy-binding taskman-server@nemos-infra.iam.gserviceaccount.com --member serviceAccount:taskman-deployer@nemos-infra.iam.gserviceaccount.com --role roles/iam.serviceAccountUser
+    ```
+
+    Output: `Updated IAM policy for serviceAccount [taskman-server@nemos-infra.iam.gserviceaccount.com].`
+
+22. Check the Workload Identity pool `github`. It exists, and the setup reuses it.
+
+    ```bash
+    gcloud iam workload-identity-pools describe github --location global
+    ```
+
+    Output: the details of the pool, with `name: projects/1037430670088/locations/global/workloadIdentityPools/github` and `state: ACTIVE`. If the output has `NOT_FOUND`, stop, and use [`bootstrap.sh`](#set-up-with-bootstrapsh).
+
+23. Create the provider `taskman`, which admits only the repository `vkroz/taskman` on branch `staging`.
+
+    ```bash
+    gcloud iam workload-identity-pools providers create-oidc taskman --location global --workload-identity-pool github --display-name "Taskman deployment" --issuer-uri https://token.actions.githubusercontent.com --attribute-mapping "google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref" --attribute-condition "assertion.repository == 'vkroz/taskman' && assertion.ref == 'refs/heads/staging'"
+    ```
+
+    Output: `Created workload identity pool provider [taskman].`
+
+24. Let GitHub runs of `vkroz/taskman` sign in as the deployer.
+
+    ```bash
+    gcloud iam service-accounts add-iam-policy-binding taskman-deployer@nemos-infra.iam.gserviceaccount.com --role roles/iam.workloadIdentityUser --member "principalSet://iam.googleapis.com/projects/1037430670088/locations/global/workloadIdentityPools/github/attribute.repository/vkroz/taskman"
+    ```
+
+    Output: `Updated IAM policy for serviceAccount [taskman-deployer@nemos-infra.iam.gserviceaccount.com].`
+
+25. List the providers of the pool `github`. The deployer trusts every provider of this pool that maps `attribute.repository`, also the earlier provider `github-actions`.
+
+    ```bash
+    gcloud iam workload-identity-pools providers list --workload-identity-pool github --location global --format 'table(name.basename(),attributeCondition)'
+    ```
+
+    Output:
+
+    ```text
+    NAME: github-actions
+    ATTRIBUTE_CONDITION: assertion.repository == 'vkroz/taskman' && assertion.repository_owner_id == '938321' && (assertion.ref == 'refs/heads/main' || assertion.ref == 'refs/heads/staging')
+
+    NAME: taskman
+    ATTRIBUTE_CONDITION: assertion.repository == 'vkroz/taskman' && assertion.ref == 'refs/heads/staging'
+    ```
+
+    Check that each condition admits only branches that you trust. On Nov 14, 2026, the two conditions admitted only `main` and `staging` of `vkroz/taskman`. `taskman-deployer` also keeps its earlier roles; `gcloud iam service-accounts get-iam-policy taskman-deployer@nemos-infra.iam.gserviceaccount.com --project nemos-infra` shows who can use it.
+
+26. Create the public service `taskman` with a placeholder image. The first deployment replaces the placeholder. This takes up to 2 minutes.
+
+    ```bash
+    gcloud run deploy taskman --region us-central1 --image us-docker.pkg.dev/cloudrun/container/hello --service-account taskman-server@nemos-infra.iam.gserviceaccount.com --no-invoker-iam-check --labels app=taskman
+    ```
+
+    Output: `Service [taskman] revision [taskman-00001-…] has been deployed and is serving 100 percent of traffic.`, then `Service URL: https://taskman-1037430670088.us-central1.run.app`. This is [the service address](#the-service-address).
+
+    The service accepts calls without a Google identity: Cloud Run does not check the invoker, and Taskman checks the token of each call. If the command fails with an error that names an organization policy, ask an organization administrator to allow `constraints/run.managed.requireInvokerIam` for the service.
+
+### GitHub environment and variables
+
+The deployment workflow reads two variables of the GitHub environment `nemos-infra`. Both values are fixed for `nemos-infra`. `bootstrap.sh` prints the same values.
+
+1. Create the environment. Open https://github.com/vkroz/taskman/settings/environments and click **New environment**. In **Name**, type `nemos-infra`, then click **Configure environment**.
+
+   Result: GitHub shows the settings of the environment `nemos-infra`.
+
+2. Limit the environment to `staging`. Under **Deployment branches and tags**, select **Selected branches and tags**. Click **Add deployment branch or tag rule**, keep **Ref type: Branch**, type `staging` in **Name pattern**, and click **Add rule**.
+
+   Result: the rule `staging` shows under **Deployment branches and tags**.
+
+3. Add the first variable. Under **Environment variables**, not "Environment secrets", click **Add environment variable**. In **Name**, type `GCP_WORKLOAD_IDENTITY_PROVIDER`. In **Value**, type `projects/1037430670088/locations/global/workloadIdentityPools/github/providers/taskman`. Click **Add variable**.
+
+   Result: the variable shows under **Environment variables**.
+
+4. Add the second variable the same way. In **Name**, type `GCP_DEPLOYER_SERVICE_ACCOUNT`. In **Value**, type `taskman-deployer@nemos-infra.iam.gserviceaccount.com`.
+
+   Result: the two variables show under **Environment variables**.
+
+5. Start the first deployment. Merge a change to `staging`. If a run of **Deploy to nemos-infra** stopped at "Check the one-time setup" before the setup, open that run and select "Re-run all jobs". On Nov 14, 2026, the run of an earlier merge started again this way.
+
+   Result: every job of the run passes. The schema job creates the tables, and the service replaces the placeholder.
+
+6. Check the server. Open `https://taskman-1037430670088.us-central1.run.app/readyz` in a browser. [Check deployments](#check-deployments) tells why you use only `/readyz`.
+
+   Result: `{"ok":true}`.
+
+### Google sign-in client and secret
+
+Browser login lets each person get a Taskman token with a Google account. You create the OAuth (Open Authorization) client in Google Auth Platform, in the Google Cloud console of `nemos-infra`. You need the Owner role or OAuth Config Editor (`roles/oauthconfig.editor`).
+
+1. Configure Google Auth Platform. Open https://console.cloud.google.com/auth/overview?project=nemos-infra and click **Get started**. Complete the four pages:
+   - **App Information:** in **App name**, type `Taskman`. In **User support email**, select your address.
+   - **Audience:** select **Internal** when each person signs in with an account of the Google Workspace organization of the project, as for `nemos-infra`. For a personal Gmail account, or another account outside the organization, select **External**, and later add each person under **Audience**, **Test users**.
+   - **Contact Information:** type your email address.
+   - **Finish:** agree to the Google API Services User Data Policy, click **Continue**, then **Create**.
+
+   Result: `OAuth configuration created!` If the page shows an overview and no **Get started**, the configuration exists: continue with the client.
+
+2. Create the client. Click **Clients**, then **Create client**. In **Application type**, select **Web application**. In **Name**, type `Taskman server`. Under **Authorized redirect URIs** (Uniform Resource Identifiers), click **Add URI** and type `https://taskman-1037430670088.us-central1.run.app/auth/callback`. This is `PUBLIC_URL/auth/callback`: see [The service address](#the-service-address). Click **Create**.
+
+   Result: `OAuth client created`, and a window shows the client ID and the client secret. Keep the window open for the next step. Google can take 5 minutes to a few hours to apply a new or changed redirect URI.
+
+3. Store the client secret, as [Store the client secret](#store-the-client-secret) shows. Store only the value that starts with `GOCSPX-`.
+
+   Output: `Created version [<number>] of the secret [taskman-google-client-secret].` The number is the next version number of the secret. On Nov 15, 2026, it was 2.
+
+4. Check the stored value. The command shows the length and the start of the value, not the value.
+
+   ```bash
+   gcloud secrets versions access latest --secret taskman-google-client-secret --project nemos-infra | python3 -c 'import sys; s=sys.stdin.read(); print("length", len(s), "| starts with GOCSPX-:", s.startswith("GOCSPX-"), "| spaces or newlines at ends:", s != s.strip())'
+   ```
+
+   Output: `length 35 | starts with GOCSPX-: True | spaces or newlines at ends: False`.
+
+5. Turn on browser login. In `deploy/gcp/nemos-infra.env`, set `GOOGLE_CLIENT_ID` to the client ID, and set [who may sign in](#who-may-sign-in). `PUBLIC_URL` must hold the service address. Merge the change to `staging`. On Nov 15, 2026, the file got `GOOGLE_CLIENT_ID=1037430670088-pl9k3458ngrm78nlpr6lseqrmc9a436m.apps.googleusercontent.com` and `ALLOWED_DOMAINS=reservoirco.io`.
+
+   Result: the run of **Deploy to nemos-infra** passes, and browser login is on.
+
+The first login on Nov 15, 2026 needed two fixes. These steps prevent both errors, so do not do the fixes again:
+
+- The client also lists the redirect URI of the second address, `https://taskman-<hash>-uc.a.run.app/auth/callback`. At that time, the server sent this address to Google. Now it sends `PUBLIC_URL`, so you can remove this URI from the client.
+- Version 1 of `taskman-google-client-secret` holds the downloaded client file. Version 2 holds only the client secret, and a new deployment read it. If version 1 is enabled, disable it, as [Store the client secret](#store-the-client-secret) shows.
+
+### First login from a computer
+
+Each person does these steps on a computer with a browser. They need [uv](https://docs.astral.sh/uv/). The outputs are from a Mac on Nov 15, 2026.
+
+1. Check that uv is installed.
+
+   ```bash
+   uv --version
+   ```
+
+   Output: a version, for example `uv 0.13.7 (Homebrew 2026-11-03 aarch64-apple-darwin)`. If the shell cannot find the command, install uv as its [installation page](https://docs.astral.sh/uv/getting-started/installation/) shows.
+
+2. Install the CLI from `staging`. The CLI on `main` has no `auth` command.
+
+   ```bash
+   uv tool install --force 'git+https://github.com/vkroz/taskman.git@staging#subdirectory=taskman'
+   ```
+
+   Output: the installed packages, then `Installed 2 executables: taskman, tm`.
+
+3. Log in. The command opens the Google sign-in page in the browser. Select your `reservoirco.io` account. When the page shows "You are logged in to Taskman. You can close this tab.", close the tab.
+
+   ```bash
+   taskman auth login --server https://taskman-1037430670088.us-central1.run.app
+   ```
+
+   Output: `Open this address in a browser on this computer to log in:` and the address, then `Logged in to https://taskman-1037430670088.us-central1.run.app as <you>@reservoirco.io.` If the login fails, see [Fix a failed login](#fix-a-failed-login).
+
+4. Check the login.
+
+   ```bash
+   taskman auth status
+   ```
+
+   Output: `Logged in to https://taskman-1037430670088.us-central1.run.app as <you>@reservoirco.io. Token from /Users/<you>/.config/taskman/credentials.json.`
+
+5. Make one call to the server.
+
+   ```bash
+   taskman list
+   ```
+
+   Output: `(no items)` while the database has no items, else the items.
+
+### Set up with bootstrap.sh
+
+[`deploy/gcp/bootstrap.sh`](../deploy/gcp/bootstrap.sh) does the [Google Cloud steps](#google-cloud-cloud-shell) in one run. Nobody has run it against a real project yet. You need `gcloud`, signed in as an Owner, and `python3`, for example in Cloud Shell. Run the script from the root of a checkout of `staging`:
+
+```bash
+deploy/gcp/bootstrap.sh deploy/gcp/nemos-infra.env
+```
+
+A repeated run creates only what is missing and never replaces a password. When the secret `taskman-db-password` has no value but the database `taskman` or the user `taskman` exists on `nemos-pg`, the script stops. At that point, it has turned on the APIs and set up no resource. These names belong to another application: choose other `DB_NAME` and `DB_USER` values in the environment file, and run the script again. If an organization policy blocks the public service, the script prints what to ask of an organization administrator.
+
+The script lists the providers of the pool `github`: check their conditions, as the provider list of the Google Cloud steps shows. At the end, it prints the two GitHub variables, the service address and the redirect URI. Then continue with [GitHub environment and variables](#github-environment-and-variables).
+
+The script differs from the Google Cloud steps in these points:
+
+- It gives `--project` to each command, and `--quiet` to the deployment of the placeholder. The steps select the project one time.
+- It stops at a taken database or user name only when the password secret has no value. Thus a repeated run continues.
+- It creates the resources that the steps only check, when they are missing: the instance `nemos-pg` (tier `SQL_TIER`), the repository `taskman`, the service account `taskman-deployer` and the pool `github`.
+- It creates the password secret and its first version with two commands. When the user `taskman` exists, it sets the password of the user from the secret.
+- It gives `taskman-server` the display name `Taskman taskman-server`.
+- It reads the project number for the deployer binding. The steps contain `1037430670088`.
+- When the service `taskman` exists, it does not deploy the placeholder. It only makes the service public.
+
+## Browser login
+
+### The service address
+
+The service address is `https://taskman-1037430670088.us-central1.run.app`. It is `PUBLIC_URL` in `deploy/gcp/nemos-infra.env`. `gcloud run deploy` and `bootstrap.sh` print it. People, agents and Google use only this address. Cloud Run also gives the service a second address, `https://taskman-<hash>-uc.a.run.app`. Do not use it: Google accepts only a registered redirect URI, and the CLI keeps each login for one exact address.
+
+### Store the client secret
+
+Put only the value of the client secret into the secret `taskman-google-client-secret`. The value starts with `GOCSPX-`. Do not put the downloaded file `client_secret_*.json` into it: Google then refuses each sign-in with `invalid_client`. Do this before you set the client ID: a deployment with a client ID fails while this secret has no value.
+
+In Cloud Shell, `read` waits for you to paste the client secret and press Enter. The terminal does not show it. Then the second command stores the value, and the third command removes it from the shell.
 
 ```bash
 read -rs CLIENT_SECRET
+```
+
+```bash
 printf %s "$CLIENT_SECRET" | gcloud secrets versions add taskman-google-client-secret --project nemos-infra --data-file -
+```
+
+```bash
 unset CLIENT_SECRET
 ```
 
@@ -66,18 +417,23 @@ If you downloaded the client as a JSON file, this command takes the client secre
 python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["web"]["client_secret"], end="")' <downloaded file> | gcloud secrets versions add taskman-google-client-secret --project nemos-infra --data-file -
 ```
 
-After you add a new version of a secret, open the last deployment run in the Actions tab. Select "Re-run all jobs", so that the new instances read the new version. Then disable the old version:
+A server instance reads the secret only when it starts. When browser login is on, a new version thus needs a new deployment: open the last deployment run in the Actions tab, and select "Re-run all jobs". Then find the old version, and disable it:
 
 ```bash
 gcloud secrets versions list taskman-google-client-secret --project nemos-infra
+```
+
+```bash
 gcloud secrets versions disable <old version> --secret taskman-google-client-secret --project nemos-infra
 ```
 
-In `deploy/gcp/nemos-infra.env`, set `GOOGLE_CLIENT_ID` to the client ID. `PUBLIC_URL` must hold the service address. Also set `ALLOWED_DOMAINS`, `ALLOWED_EMAILS`, or both, as comma-separated lists without spaces. Merge the change to `staging`. The deployment turns on browser login.
+### Who may sign in
 
-`ALLOWED_DOMAINS` admits the members of a Google Workspace organization. A personal Gmail account has no Workspace domain: put its address in `ALLOWED_EMAILS`. `deploy.sh` stops before it changes anything when `GOOGLE_CLIENT_ID` is set and `PUBLIC_URL` is empty, or both lists are empty. To turn browser login off, empty `GOOGLE_CLIENT_ID` and merge to `staging`.
+Set `ALLOWED_DOMAINS`, `ALLOWED_EMAILS`, or both, in `deploy/gcp/nemos-infra.env`, as comma-separated lists without spaces. `ALLOWED_DOMAINS` admits the members of a Google Workspace organization. A personal Gmail account has no Workspace domain: put its address in `ALLOWED_EMAILS`. To change who may sign in, change the lists and merge to `staging`. `deploy.sh` stops before it changes anything when `GOOGLE_CLIENT_ID` is set and `PUBLIC_URL` is empty, or both lists are empty. To turn browser login off, empty `GOOGLE_CLIENT_ID` and merge to `staging`.
 
 When browser login is on, anyone can open `/auth/token` and `/auth/cli` on the public service. Each request adds a row to the `logins` table under the database write lock, and Taskman does not limit the rate of these requests.
+
+### Fix a failed login
 
 When a login fails, the Taskman page or the Google page names an OAuth error code:
 
@@ -87,14 +443,7 @@ When a login fails, the Taskman page or the Google page names an OAuth error cod
 
 ## Use the server
 
-The server address is `https://taskman-1037430670088.us-central1.run.app`, the value of `PUBLIC_URL` in `deploy/gcp/nemos-infra.env`. Each person installs the CLI from `staging`, because the CLI on `main` has no `auth` command. Then they log in on a computer with a browser:
-
-```bash
-uv tool install --force 'git+https://github.com/vkroz/taskman.git@staging#subdirectory=taskman'
-taskman auth login --server https://taskman-1037430670088.us-central1.run.app
-```
-
-On a machine without a browser, open `https://taskman-1037430670088.us-central1.run.app/auth/token` on any computer and sign in. The page shows a personal access token one time. On the machine, run `taskman auth login --server https://taskman-1037430670088.us-central1.run.app --with-token` and paste the token. To connect an agent cloud environment, follow [Connect an agent cloud environment](../README.md#connect-an-agent-cloud-environment) in the README. Without browser login, an operator creates the token, as "Run operator commands" shows.
+Each person logs in from a computer with a browser, as [First login from a computer](#first-login-from-a-computer) shows. On a machine without a browser, open `https://taskman-1037430670088.us-central1.run.app/auth/token` on any computer and sign in. The page shows a personal access token one time. On the machine, run `taskman auth login --server https://taskman-1037430670088.us-central1.run.app --with-token` and paste the token. To connect an agent cloud environment, follow [Connect an agent cloud environment](../README.md#connect-an-agent-cloud-environment) in the README. Without browser login, an operator creates the token, as "Run operator commands" shows.
 
 ## Run operator commands
 
