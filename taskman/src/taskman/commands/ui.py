@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlsplit
 import typer
 
 from taskman import lifecycle
-from taskman.model.collection import collection, query
+from taskman.model.collection import collection, in_project_order, query
 from taskman.storage.store import Item, Store, StorageError, open_store, key_order
 
 
@@ -153,9 +153,7 @@ def workspace(store: Store, data: dict) -> dict[str, Any]:
     matched = query(rows, data.get("filters") or [], keyword, epic, SORTS[sort], descending,
                     where=lambda row: row["id"] in members)
     projects = store.projects()
-    # Group rows by project in project order; the stable sort keeps each project's tree order.
-    position = {p["key"]: index for index, p in enumerate(projects)}
-    matched.sort(key=lambda row: position.get(row["metadata"].get("project"), len(position)))
+    matched = in_project_order(matched, projects)
     open_count: dict[str, int] = {}
     for item in items.values():
         if item.status != "done":

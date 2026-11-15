@@ -11,6 +11,7 @@ import json
 import typer
 
 from taskman.lifecycle import is_ready
+from taskman.model.collection import in_manual_order
 from taskman.storage.store import Item, Store, key_order, open_store
 
 
@@ -82,9 +83,11 @@ def ready(
     An item is ready when it is not done, and the item and all its ancestors are
     finalized, not done, and have no unfinished dependency. When open items are
     not ready, text output ends with one line on stderr that names them and gives
-    the reason.
+    the reason. Items show in the order that you set in the UI or with
+    `taskman reorder`, as in `taskman list`.
     """
-    items = _load_graph(open_store())
+    store = open_store()
+    items = _load_graph(store)
     out: list[Item] = []
     left_out: list[Item] = []
     for item in items.values():
@@ -94,8 +97,7 @@ def ready(
             out.append(item)
         elif item.status != "done":
             left_out.append(item)
-    out.sort(key=lambda i: (i.priority, key_order(i.id)))
-    _emit(out, as_json)
+    _emit(in_manual_order(store, out), as_json)
     if left_out and not as_json:
         left_out.sort(key=lambda i: key_order(i.id))
         typer.echo(_not_ready_note(left_out, items), err=True)

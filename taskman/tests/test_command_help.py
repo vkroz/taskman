@@ -37,3 +37,7 @@ def test_help_describes_only_the_sql_model() -> None:
     text = _help()
     for removed in ("TASKMAN_TASKS_DIR", "file backend", "YYMMDD", "consolidat", "_<id>.md", "backlog/"):
         assert removed not in text
+
+
+def test_help_says_how_list_orders_items() -> None:
+    assert "List items in the order set in the UI or with `reorder`" in " ".join(_help().split())

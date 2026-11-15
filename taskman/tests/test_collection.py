@@ -1,11 +1,13 @@
 import json
 import pytest
+from dataclasses import replace
 from typer.testing import CliRunner
 from taskman import lifecycle
 from taskman.cli import app
-from taskman.model.collection import collection, query
+from taskman.model.collection import collection, in_manual_order, query
 from taskman.model.ordering import ordered_siblings, reorder_item
 from taskman.commands.collection import edit_item
+from taskman.commands.ui import workspace
 from taskman.storage.sql_store import open_sql_store
 from tests import sql_helpers as sql
 
@@ -193,6 +195,22 @@ def test_reorder_refuses_completed_records(store):
     assert "immutable" in result.output
     assert {item.id: item.metadata for item in store.items()} == before
     assert store.sibling_order()["root:TM"] == [first, second]
+
+
+def test_manual_order_is_the_order_of_the_ui_and_puts_an_unknown_item_last(store):
+    epic = sql.new("Epic", "epic")
+    first, second = sql.new("First", parent=epic), sql.new("Second", parent=epic)
+    ops = sql.new("Ops", project="OPS")
+    top = sql.new("Top")
+    sql.run("reorder", second, "--position", "1")
+    sql.run("reorder", top, "--position", "1")
+    items = store.items()
+    ui_order = [row["id"] for row in workspace(store, {})["rows"]]
+    assert ui_order == [top, epic, second, first, ops]
+    assert [item.id for item in in_manual_order(store, reversed(items))] == ui_order
+    # An item that another process adds after the order is read comes last.
+    added = replace(items[0], id="TM-99")
+    assert [item.id for item in in_manual_order(store, [added, *items])] == [*ui_order, "TM-99"]
 
 
 def test_hide_done_filter_composes_with_other_filters_and_context(store):
