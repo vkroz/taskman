@@ -33,7 +33,7 @@ from taskman.model.locking import mutating
 from taskman.storage.settings import load_env_file
 from taskman.storage.remote import remote_settings, server_url
 from taskman.storage.settings import storage_settings
-from taskman.storage.store import StorageConfigError, begin_command
+from taskman.storage.store import StorageConfigError, StorageError, begin_command
 from taskman.commands.install import install
 from taskman.commands.db import db_app
 from taskman.commands.collection import browse, edit, reorder
@@ -72,7 +72,10 @@ def _root(ctx: typer.Context) -> None:
 
 
 def _storage_errors(command):
-    """Report a database that cannot be opened (missing, wrong schema) as a settings error: exit 2."""
+    """Report a database that cannot be opened (missing, wrong schema) as a settings error: exit 2.
+
+    Report another storage error, for example an error answer of the server, as ``Error: ...``: exit 1.
+    """
 
     @wraps(command)
     def wrapped(*args, **kwargs):
@@ -81,6 +84,9 @@ def _storage_errors(command):
         except StorageConfigError as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(2) from None
+        except StorageError as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(1) from None
 
     return wrapped
 
