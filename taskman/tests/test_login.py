@@ -12,6 +12,7 @@ import threading
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -220,6 +221,75 @@ def test_a_cancelled_google_sign_in_is_reported(login_server):
     state = parse_qs(urlsplit(authorize).query)["state"][0]
     status, _, body = callback(login_server, {"state": state, "error": "access_denied"})
     assert status == 400 and "access_denied" in body
+
+
+class RefusingTokenEndpoint:
+    """A local token endpoint that refuses each code exchange with one answer, as Google does.
+
+    A body of ``None`` is a chunked body that the endpoint cuts off inside its first chunk.
+    """
+
+    def __init__(self, status: int, body: bytes | None) -> None:
+        self.forms: list[dict] = []
+        forms = self.forms
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:  # noqa: N802
+                form = self.rfile.read(int(self.headers["Content-Length"])).decode()
+                forms.append({key: values[0] for key, values in parse_qs(form).items()})
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                if body is None:
+                    self.send_header("Transfer-Encoding", "chunked")
+                    self.end_headers()
+                    self.wfile.write(b'ff\r\n{"error"')
+                    return
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args) -> None:
+                pass
+
+        self._server = HTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self._server.server_port}/token"
+        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+
+    def stop(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "shown"),
+    [
+        (401, b'{"error": "invalid_client", "error_description": "The OAuth client was not found."}',
+         "Google refused the sign-in (HTTP status 401, invalid_client)."),
+        (400, b'{"error": "invalid_grant", "error_description": "Bad Request"}',
+         "Google refused the sign-in (HTTP status 400, invalid_grant)."),
+        (500, b"<html>Server Error</html>", "Google refused the sign-in (HTTP status 500)."),
+        (401, b'{"error": "<script>alert(1)</script>"}', "Google refused the sign-in (HTTP status 401)."),
+        (401, b'{"error": "invalid_client\\n"}', "Google refused the sign-in (HTTP status 401)."),
+        (401, b'["invalid_client"]', "Google refused the sign-in (HTTP status 401)."),
+        (401, None, "Google refused the sign-in (HTTP status 401)."),
+    ],
+)
+def test_a_refused_code_exchange_shows_only_the_status_and_a_safe_error_code(sqlite_env, google, status, body, shown):
+    secret = "GOCSPX-test-client-secret"
+    endpoint = RefusingTokenEndpoint(status, body)
+    provider = Provider(authorize_url=PROVIDER.authorize_url, token_url=endpoint.url, issuers=PROVIDER.issuers)
+    # No post_form: the server sends the exchange to the endpoint with its own HTTP client.
+    running = RunningServer(sqlite_env, login=settings(client_secret=secret, provider=provider))
+    try:
+        query = google.sign_in(start_cli_login(running))
+        got, headers, page = callback(running, query)
+    finally:
+        running.stop()
+        endpoint.stop()
+    assert endpoint.forms[0]["code"] == query["code"] and endpoint.forms[0]["client_secret"] == secret
+    assert got == 502 and shown in page and "Location" not in headers
+    for hidden in (query["code"], query["state"], secret, "was not found", "Bad Request", "Server Error", "alert"):
+        assert hidden not in page
 
 
 @pytest.mark.parametrize(

@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import html
+import http.client
 import json
 import os
 import re
@@ -38,6 +39,7 @@ LOGIN_TIME = timedelta(minutes=10)
 EXCHANGE_TIME = timedelta(minutes=2)
 _STATE = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 _CHALLENGE = re.compile(r"^[A-Za-z0-9_-]{43}$")
+_ERROR_CODE = re.compile(r"^[a-z_]{1,64}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +137,19 @@ def _claims(id_token: str) -> dict[str, Any]:
     return claims
 
 
+def _error_code(exc: urllib.error.HTTPError) -> str:
+    """The OAuth error code of a refused request (RFC 6749, section 5.2), such as ``invalid_client``, or ``""``.
+
+    Only the code: ``error_description`` is free text of the provider.
+    """
+    try:
+        answer = json.loads(exc.read(4096))
+    except (OSError, ValueError, http.client.HTTPException):
+        return ""
+    code = answer.get("error") if isinstance(answer, dict) else None
+    return code if isinstance(code, str) and _ERROR_CODE.fullmatch(code) else ""
+
+
 def _post_form(url: str, form: dict[str, str]) -> dict[str, Any]:
     request = urllib.request.Request(url, data=urlencode(form).encode("ascii"), method="POST")
     request.add_header("Content-Type", "application/x-www-form-urlencoded")
@@ -143,7 +158,9 @@ def _post_form(url: str, form: dict[str, str]) -> dict[str, Any]:
         with urllib.request.urlopen(request, timeout=15) as response:
             return json.loads(response.read())
     except urllib.error.HTTPError as exc:
-        raise LoginError(502, f"Google refused the sign-in code (HTTP status {exc.code}).") from None
+        code = _error_code(exc)
+        detail = f"HTTP status {exc.code}, {code}" if code else f"HTTP status {exc.code}"
+        raise LoginError(502, f"Google refused the sign-in ({detail}).") from None
     except (urllib.error.URLError, OSError, ValueError):
         raise LoginError(502, "Taskman cannot reach Google to finish the sign-in.") from None
 
