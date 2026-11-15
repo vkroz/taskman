@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 
 from taskman.model.ordering import apply_order
-from taskman.storage.store import Store, key_order
+from taskman.storage.store import Item, Store, key_order
 
 
 def collection(store: Store) -> list[dict]:
@@ -134,3 +135,17 @@ def query(
 
     walk(None, 0)
     return result
+
+
+def in_project_order(rows: list[dict], projects: list[dict[str, str]]) -> list[dict]:
+    """Group rows by project in project order; the stable sort keeps each project's tree order."""
+    position = {p["key"]: index for index, p in enumerate(projects)}
+    return sorted(rows, key=lambda row: position.get(row["metadata"].get("project"), len(position)))
+
+
+def in_manual_order(store: Store, items: Iterable[Item]) -> list[Item]:
+    """The items in the manual order of the UI: by project, then depth-first, siblings by rank, then key."""
+    rows = in_project_order(query(collection(store)), store.projects())
+    position = {row["id"]: index for index, row in enumerate(rows)}
+    # An item that another process adds after this read comes last.
+    return sorted(items, key=lambda item: position.get(item.id, len(position)))

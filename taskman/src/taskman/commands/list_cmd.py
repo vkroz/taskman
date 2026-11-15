@@ -6,7 +6,8 @@ import json
 import typer
 
 from taskman.commands.queries import _as_dict
-from taskman.storage.store import open_store, key_order
+from taskman.model.collection import in_manual_order
+from taskman.storage.store import open_store
 
 
 def list_items(
@@ -19,7 +20,12 @@ def list_items(
     assignee: str | None = typer.Option(None, "--assignee", help="Only items with this assignee."),
     label: str | None = typer.Option(None, "--label", help="Only items with this label."),
 ) -> None:
-    """List work items in the tree, optionally filtered, optionally as JSON."""
+    """List work items in the tree, optionally filtered, optionally as JSON.
+
+    Items show in the order that you set in the UI or with `taskman reorder`:
+    by project, each parent before its children, and siblings by position.
+    Text output groups the items by status and keeps this order in each group.
+    """
     store = open_store()
     items = store.items()
     parents = {item.id: item.parent_id for item in items}
@@ -37,7 +43,7 @@ def list_items(
         return False
 
     rows: list[dict] = []
-    for item in items:
+    for item in in_manual_order(store, items):
         if parent and not under_parent(item.id):
             continue
         if status is not None and item.status != status:
@@ -51,7 +57,6 @@ def list_items(
         if label is not None and label not in (item.metadata.get("labels") or []):
             continue
         rows.append(_as_dict(item))
-    rows.sort(key=lambda r: (r["status"], r["priority"], key_order(r["id"])))
 
     if as_json:
         typer.echo(json.dumps(rows, indent=2))

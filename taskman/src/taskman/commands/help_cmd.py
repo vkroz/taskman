@@ -67,7 +67,8 @@ LIFECYCLE
   close     Mark a completed item done. Requires all descendants and
             dependencies done, a current summary, and a current passing
             verification.
-  list      List items; --json for agents.
+  list      List items in the order set in the UI or with `reorder`; --json
+            for agents.
   show      Print an item's fields and description.
   context   Read item, ancestors, descendants, dependencies and activity as
             JSON.

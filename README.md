@@ -52,6 +52,8 @@ taskman move TASK_ID active
 
 `ready` lists the open items that can start: the item and all its ancestors are finalized, and their dependencies are done. Without `--json`, `ready` also names on stderr the open items that are not ready, and why.
 
+`list` and `ready` show items in the order that you set in the UI or with `taskman reorder`. Items of one project stay together, each parent comes before its children, and siblings follow their position. The text output of `list` groups the items by status and keeps this order in each group.
+
 A story uses type `feat`. Taskman permits other nesting shapes; `task` is always a leaf. Independent tasks can run in parallel. Each agent reads `context` and records its contribution through the CLI. Taskman does not launch coding agents itself.
 
 ## Record work and verify

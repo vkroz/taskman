@@ -77,6 +77,22 @@ def test_read_commands_work_through_the_server(remote_env):
     assert task in run("search", "Task")
 
 
+def test_list_and_ready_follow_the_order_set_with_reorder_through_the_server(remote_env):
+    feat = new("Feature", "feat")
+    first, second = new("First", parent=feat), new("Second", parent=feat)
+    for key in (feat, first, second):
+        run("finalize", key)
+    run("reorder", second, "--position", "1")
+
+    def keys(*args):
+        return [row["id"] for row in json.loads(run(*args, "--json"))]
+
+    assert keys("list") == keys("ready") == [feat, second, first]
+    assert keys("list", "--parent", feat) == [second, first]
+    assert [line.split()[2] for line in run("list", "--parent", feat).splitlines() if line.startswith("  ")] == [
+        second, first]
+
+
 @pytest.mark.parametrize(
     "command",
     [["list"], ["ready"], ["show", "TM-1"], ["context", "TM-1"], ["search", "x"], ["validate"],

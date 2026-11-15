@@ -144,10 +144,33 @@ def test_ready_prints_no_note_when_it_leaves_nothing_out(sqlite_env) -> None:
     assert other in _ready().stderr
 
 
+def test_ready_follows_the_order_set_with_reorder(sqlite_env) -> None:
+    feat = sql.new("Feature", "feat")
+    sql.prepare(feat)
+    first, second, third = (_item_under(title, feat) for title in ("First", "Second", "Third"))
+    blocked = _item_under("Blocked", feat)
+    _depend(blocked, first)
+    other = _item("Other")
+    assert _ids("ready") == [feat, first, second, third, other]
+    sql.run("reorder", third, "--position", "1")
+    sql.run("reorder", other, "--position", "1")
+    # The same items as before, in the new order; the blocked item stays out.
+    order = [other, feat, third, first, second]
+    assert _ids("ready") == order
+    assert [line.split()[2] for line in _ready().stdout.splitlines()] == order
+
+
+def test_ready_keeps_its_order_when_reorder_is_refused(sqlite_env) -> None:
+    first, second = _item("First"), _item("Second")
+    assert "Position must be between 1 and 2" in sql.run("reorder", second, "--position", "3", code=2)
+    assert _ids("ready") == [first, second]
+
+
 def test_ready_help_says_what_ready_means(sqlite_env) -> None:
     text = " ".join(runner.invoke(app, ["ready", "--help"]).output.split())
     assert "the item and all its ancestors are finalized, not done, and have no unfinished dependency" in text
     assert "When open items are not ready, text output ends with one line on stderr that names them" in text
+    assert "Items show in the order that you set in the UI or with `taskman reorder`" in text
 
 
 # ---- dependents ----
