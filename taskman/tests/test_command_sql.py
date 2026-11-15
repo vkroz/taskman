@@ -80,7 +80,8 @@ def test_new_prints_keys_and_needs_a_project(cli):
     assert "needs a project key" in cli("new", "--title", "Orphan", code=1)
     assert "uppercase" in cli("new", "--title", "Bad", "--project", "tm", code=2)
     assert _json("new", "--title", "Epic", "--type", "epic", "--project", "TM", "--json") == {"id": "TM-1", "path": "sqlite:TM-1"}
-    assert cli("new", "--title", "Child", "--parent", "TM-1").strip() == "sqlite:TM-2"
+    assert cli("new", "--title", "Child", "--parent", "TM-1") == "TM-2\n"
+    assert cli("update", "TM-2", "--body-file", "-", input="Spec.\n") == "TM-2\n"
     assert _json("show", "TM-2", "--json")["frontmatter"]["project"] == "TM"
     assert "item not found" in cli("show", "TM-9", code=1)
 
@@ -185,7 +186,7 @@ def test_close_and_convert_name_children_by_key(cli):
     for key in ("TM-2", "TM-1"):
         _comment(key, "summary", "Done")
         _comment(key, "verification", "Checked", result="pass")
-        assert cli("close", key).strip() == f"sqlite:{key}"
+        assert cli("close", key) == f"{key}\n"
     assert "immutable" in cli("assign", "TM-2", "codex", code=2)
     assert [e["field"] for e in _json("activity", "TM-1", "--json")][-1] == "status"
 

@@ -132,7 +132,7 @@ The JSON output of `show --json` and `context` keeps today's shape, so the plugi
 
 `context` also gives `activity` for the item.
 
-The location of an item is `<backend>:<key>`, for example `sqlite:TM-42`. Commands that printed a file path print this location. Error messages that list children list their keys.
+The location of an item is `<backend>:<key>`, for example `sqlite:TM-42`. The `path` field of JSON output gives the location. Text output gives the key, for example `new`, `move`, `update`, `convert`, `close` and `validate`. Error messages that list children list their keys.
 
 `show` without `--json` prints the item as Markdown: a frontmatter block with the fields, then the description.
 

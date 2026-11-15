@@ -21,4 +21,4 @@ def close(
     """Flip an item to status ``done``. Rejects if descendants are not all done."""
     with reported():
         item = lifecycle.close(open_store(), item_id)
-    typer.echo(item.location)
+    typer.echo(item.id)

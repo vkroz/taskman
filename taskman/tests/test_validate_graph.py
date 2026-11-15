@@ -43,7 +43,9 @@ def test_validate_simple_cycle_errors(sqlite_env) -> None:
     b = sql.new("B")
     sql.run("depend", a, "--on", b)
     _add_dependency(sqlite_env, b, a)
-    assert "dependency_cycle" in sql.run("validate", code=1)
+    output = sql.run("validate", code=1)
+    assert f"[ERROR] dependency_cycle: {a}\n" in output and "sqlite:" not in output
+    assert json.loads(sql.run("validate", "--json", code=1))["findings"][0]["path"] == f"sqlite:{a}"
 
 
 def test_validate_transitive_cycle_errors(sqlite_env) -> None:

@@ -45,7 +45,7 @@ def new(
         raise typer.Exit(1) from exc
     with reported():
         item = lifecycle.create(open_store(), title, item_type, parent, body, project=project)
-    typer.echo(json.dumps({"id": item.id, "path": item.location}) if as_json else item.location)
+    typer.echo(json.dumps({"id": item.id, "path": item.location}) if as_json else item.id)
 
 
 def finalize(

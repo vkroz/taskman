@@ -13,7 +13,7 @@ runner = CliRunner()
 def test_close_leaf_task_marks_done(sqlite_env) -> None:
     key = sql.new("Foo")
     sql.prepare(key)
-    assert sql.run("close", key).strip() == f"sqlite:{key}"
+    assert sql.run("close", key) == f"{key}\n"
     assert sql.show(key)["frontmatter"]["status"] == "done"
 
 

@@ -20,7 +20,7 @@ def _row(key: str) -> dict:
 
 def test_new_top_level_creates_backlog_draft(sqlite_env) -> None:
     out = sql.run("new", "--title", "Hello", "--type", "task", "--project", "TM")
-    assert out.strip() == "sqlite:TM-1"
+    assert out == "TM-1\n"
     fm = sql.show("TM-1")["frontmatter"]
     assert fm["type"] == "task"
     assert fm["status"] == "backlog"

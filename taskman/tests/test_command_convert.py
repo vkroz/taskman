@@ -18,7 +18,7 @@ def _new_sql(title: str, item_type: str, parent: str | None = None) -> str:
 
 def test_convert_epic_to_feat(sqlite_env) -> None:
     key = _new_sql("Foo", "epic")
-    assert sql.run("convert", key, "feat").strip() == f"sqlite:{key}"
+    assert sql.run("convert", key, "feat") == f"{key}\n"
     assert sql.show(key)["frontmatter"]["type"] == "feat"
 
 
