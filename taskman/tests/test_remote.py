@@ -37,6 +37,17 @@ def test_a_work_item_goes_from_new_to_done_through_the_server(remote_env):
     assert remote_env.store.get(key).status == "done"
 
 
+def test_text_output_prints_keys_and_json_keeps_the_location(remote_env):
+    assert run("new", "--title", "Task", "--project", "TM") == "TM-1\n"
+    assert json.loads(run("new", "--title", "Other", "--project", "TM", "--json")) == {"id": "TM-2", "path": "server:TM-2"}
+    assert run("update", "TM-1", "--body-file", "-", input="Spec.\n") == "TM-1\n"
+    prepare("TM-1")
+    assert run("move", "TM-1", "active") == "TM-1\n"
+    assert run("convert", "TM-1", "feat") == "TM-1\n"
+    refused = run("move", "TM-2", "active", code=2)  # a draft cannot become active
+    assert "Error" in refused and "server:" not in refused
+
+
 def test_the_person_of_the_token_is_the_author(remote_env):
     key = new("Task")
     assert show(key)["frontmatter"]["created_by"] == "Vlad"

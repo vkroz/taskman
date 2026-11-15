@@ -28,4 +28,4 @@ def convert(
         raise typer.Exit(2)
     with reported():
         item = lifecycle.convert(open_store(), item_id, target_type)
-    typer.echo(item.location)
+    typer.echo(item.id)

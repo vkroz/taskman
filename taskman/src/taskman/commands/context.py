@@ -27,7 +27,7 @@ def update(
     body = read_body(body_file)
     with reported():
         item = lifecycle.update_body(open_store(), item_id, body)
-    typer.echo(item.location)
+    typer.echo(item.id)
 
 
 def comment(

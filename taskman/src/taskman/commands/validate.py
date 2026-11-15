@@ -33,7 +33,8 @@ def validate(
             typer.echo("OK")
         else:
             for f in findings:
-                typer.echo(f"[{f.severity.upper()}] {f.code}: {f.path}")
+                # The path is the location `<backend>:<key>`; text output names the key.
+                typer.echo(f"[{f.severity.upper()}] {f.code}: {f.path.rpartition(':')[2]}")
                 typer.echo(f"    {f.message}")
             summary = f"{len(findings)} finding(s); errors: " + str(
                 sum(1 for f in findings if f.severity == "error")

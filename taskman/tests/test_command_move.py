@@ -12,7 +12,7 @@ runner = CliRunner()
 def test_move_backlog_to_active(sqlite_env) -> None:
     key = sql.new("Foo")
     sql.prepare(key)
-    assert sql.run("move", key, "active").strip() == f"sqlite:{key}"
+    assert sql.run("move", key, "active") == f"{key}\n"
     assert sql.show(key)["frontmatter"]["status"] == "active"
 
 

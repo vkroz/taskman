@@ -23,4 +23,4 @@ def move(
         raise typer.Exit(2)
     with reported():
         item = lifecycle.move(open_store(), item_id, target_status)
-    typer.echo(item.location)
+    typer.echo(item.id)
