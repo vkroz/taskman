@@ -20,7 +20,7 @@ import typer
 
 from taskman.login import challenge_for, page
 from taskman.storage.credentials import credentials_path, forget_login, save_login, saved_token
-from taskman.storage.remote import RemoteStore, check_server_url, server_url
+from taskman.storage.remote import RemoteStore, check_server_url, remote_settings, server_url
 from taskman.storage.store import StorageConfigError, StorageError
 
 auth_app = typer.Typer(help="Log in to a Taskman server.", no_args_is_help=True)
@@ -146,10 +146,7 @@ def status() -> None:
         raise typer.Exit(1)
     source = "TASKMAN_TOKEN" if os.environ.get("TASKMAN_TOKEN", "").strip() else str(credentials_path())
     try:
-        url = check_server_url(url)
-        token = os.environ.get("TASKMAN_TOKEN", "").strip() or saved_token(url)
-        if not token:
-            raise StorageConfigError(f"Not logged in to {url}. Run: taskman auth login")
+        url, token = remote_settings()
         person = RemoteStore(url, token).whoami()
     except (StorageConfigError, StorageError) as exc:
         _fail(str(exc))
