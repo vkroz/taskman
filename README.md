@@ -204,7 +204,7 @@ The person of the token is the author of each change. With `--actor claude`, the
 A cloud agent session starts without the CLI, the server address and a token. Set these items one time in the settings of the cloud environment, never in the repository:
 
 1. Network access: allow the exact host of the server, for example `taskman.example.com`. Do not allow a wildcard such as `*.run.app`, because it opens every service in that domain. Allow all HTTP methods: the CLI sends each change as a POST request.
-2. Setup step: install the CLI from the branch that the server deploys from, for example `uv tool install --force 'git+https://github.com/vkroz/taskman.git@staging#subdirectory=taskman'`.
+2. Setup step: install the CLI from the branch that the server deploys from. Use the `staging` command in [Install](#install).
 3. `TASKMAN_SERVER_URL`: set the server address as a plain variable, for example `https://taskman.example.com`. The address is not a secret.
 4. Token: on your computer, open `https://taskman.example.com/auth/token` and sign in. The page shows a token one time. Give it to the environment in one of two ways:
    - The network proxy of the platform adds the token to each request to the host: save the token as a network secret for the host. For a Claude Code network secret, use the header `Authorization` and the prefix `Bearer`. Then set the plain variable `TASKMAN_TOKEN=proxy-injected`. The proxy replaces this placeholder.
