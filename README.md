@@ -223,7 +223,7 @@ uv sync --extra dev --extra postgres
 TASKMAN_TEST_DATABASE_URL=postgresql://taskman:taskman@127.0.0.1:54329/taskman_test uv run pytest
 ```
 
-The browser tests of the workspace page need the `ui` extra, which installs Playwright 1.63.0. They also need its Chromium build (`uv run playwright install chromium`). Without Playwright or Chromium, pytest reports them as skipped. `uv run pytest -m ui` runs only the workspace page tests.
+The browser tests of the workspace page need the `ui` extra, which installs Playwright 1.63.0. They also need its Chromium build (`uv run playwright install chromium`). Without Playwright or Chromium, pytest reports them as skipped. With `TASKMAN_TEST_REQUIRE_BROWSER=1`, as in CI, pytest reports them as failed. `uv run pytest -m ui` runs only the workspace page tests.
 
 ```sh
 uv sync --extra dev --extra postgres --extra ui
