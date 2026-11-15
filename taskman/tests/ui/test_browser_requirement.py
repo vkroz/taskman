@@ -54,3 +54,4 @@ def test_browser_tests_fail_without_a_browser_when_required(tmp_path, missing) -
     assert result.returncode in (pytest.ExitCode.TESTS_FAILED, pytest.ExitCode.INTERRUPTED), result.stdout
     assert "(TASKMAN_TEST_REQUIRE_BROWSER=1)" in result.stdout
     assert "skipped" not in result.stdout
+    assert "During handling of the above exception" not in result.stdout
