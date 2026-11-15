@@ -8,6 +8,11 @@ Postgres tests are reported as skipped.
 from __future__ import annotations
 
 import os
+
+# Typer colors and frames its output when GITHUB_ACTIONS, FORCE_COLOR or PY_COLORS is set,
+# and decides this when it is first imported. Tests compare plain text, so turn it off here.
+os.environ["_TYPER_FORCE_DISABLE_TERMINAL"] = "1"
+
 from urllib.parse import urlparse
 
 import pytest
