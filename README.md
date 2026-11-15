@@ -50,6 +50,8 @@ taskman context TASK_ID
 taskman move TASK_ID active
 ```
 
+`ready` lists the open items that can start: the item and all its ancestors are finalized, and their dependencies are done. Without `--json`, `ready` also names on stderr the open items that are not ready, and why.
+
 A story uses type `feat`. Taskman permits other nesting shapes; `task` is always a leaf. Independent tasks can run in parallel. Each agent reads `context` and records its contribution through the CLI. Taskman does not launch coding agents itself.
 
 ## Record work and verify

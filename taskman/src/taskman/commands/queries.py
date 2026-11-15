@@ -48,18 +48,56 @@ def _emit(results: list[Item], as_json: bool) -> None:
         )
 
 
+_NOTE_LIMIT = 10
+
+
+def _not_ready_reason(item: Item, items: dict[str, Item]) -> str:
+    """Why an open item is not ready: a draft, under a draft, or waiting on dependencies."""
+    if item.draft:
+        return "draft"
+    parent = items.get(item.parent_id)
+    while parent:
+        if parent.draft:
+            return "under a draft"
+        parent = items.get(parent.parent_id)
+    return "waiting on dependencies"
+
+
+def _not_ready_note(left_out: list[Item], items: dict[str, Item]) -> str:
+    """One line that names the open items that ``ready`` leaves out, and why."""
+    groups: dict[str, list[str]] = {"draft": [], "under a draft": [], "waiting on dependencies": []}
+    for item in left_out[:_NOTE_LIMIT]:
+        groups[_not_ready_reason(item, items)].append(item.id)
+    named = "; ".join(f"{', '.join(keys)} ({reason})" for reason, keys in groups.items() if keys)
+    more = f"; and {len(left_out) - _NOTE_LIMIT} more" if len(left_out) > _NOTE_LIMIT else ""
+    return f"Not ready: {named}{more}. To see them, run: taskman list"
+
+
 def ready(
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON."),
     project: str | None = typer.Option(None, "--project", help="Only items of this project key."),
 ) -> None:
-    """List items whose every dependency is in done (or who have no deps)."""
+    """List open items that are ready to start.
+
+    An item is ready when it is not done, and the item and all its ancestors are
+    finalized, not done, and have no unfinished dependency. Text output ends with
+    one line on stderr that names the open items that are not ready, and why.
+    """
     items = _load_graph(open_store())
     out: list[Item] = []
+    left_out: list[Item] = []
     for item in items.values():
-        if is_ready(item, items) and (project is None or item.metadata.get("project") == project):
+        if project is not None and item.metadata.get("project") != project:
+            continue
+        if is_ready(item, items):
             out.append(item)
+        elif item.status != "done":
+            left_out.append(item)
     out.sort(key=lambda i: (i.priority, key_order(i.id)))
     _emit(out, as_json)
+    if left_out and not as_json:
+        left_out.sort(key=lambda i: key_order(i.id))
+        typer.echo(_not_ready_note(left_out, items), err=True)
 
 
 def dependents(
