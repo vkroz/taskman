@@ -34,7 +34,8 @@ REQUIRE_BROWSER = os.environ.get("TASKMAN_TEST_REQUIRE_BROWSER", "").strip() == 
 def _unavailable(reason: str) -> NoReturn:
     """Skips the tests, or fails them when ``TASKMAN_TEST_REQUIRE_BROWSER=1``."""
     if REQUIRE_BROWSER:
-        pytest.fail(f"{reason} (TASKMAN_TEST_REQUIRE_BROWSER=1)", pytrace=False)
+        # ``from None`` keeps the exception being handled out of the report; the reason already names it.
+        raise pytest.fail.Exception(f"{reason} (TASKMAN_TEST_REQUIRE_BROWSER=1)", pytrace=False) from None
     pytest.skip(reason, allow_module_level=True)
 
 
