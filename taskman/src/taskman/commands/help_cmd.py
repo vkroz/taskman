@@ -64,7 +64,7 @@ LIFECYCLE
 ================================================================================
 
   new       Create a draft work item (top-level with --project, or nested
-            with --parent).
+            with --parent). Give the title as TITLE or with --title.
   finalize  Clear the draft marker after the user reviews.
   move      Change status. Children keep their own status.
   convert   Change an item's type. An item with children cannot become a task.

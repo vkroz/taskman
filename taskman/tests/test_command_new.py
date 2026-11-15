@@ -43,6 +43,20 @@ def test_new_top_level_frontmatter(sqlite_env) -> None:
     assert row["priority"] == "00"
 
 
+def test_new_takes_the_title_as_an_argument(sqlite_env) -> None:
+    assert sql.run("new", "Epic A", "--type", "epic", "--project", "TM").strip() == "sqlite:TM-1"
+    assert sql.run("new", "--parent", "TM-1", "Child B").strip() == "sqlite:TM-2"
+    assert sql.show("TM-1")["frontmatter"]["title"] == "Epic A"
+    assert sql.show("TM-2")["frontmatter"]["title"] == "Child B"
+
+
+def test_new_needs_exactly_one_title(sqlite_env) -> None:
+    for args in ((), ("A", "--title", "B")):
+        out = sql.run("new", *args, "--project", "TM", code=2)
+        assert "exactly one of TITLE and --title" in out, args
+    assert json.loads(sql.run("list", "--json")) == []
+
+
 # ---- nested creation ----
 
 

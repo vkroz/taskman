@@ -40,7 +40,7 @@ taskman new --type feat --title "Persist conversations" --parent EPIC_ID --body-
 taskman new --title "Save messages" --parent STORY_ID --body-file task.md --json
 ```
 
-Replace the uppercase placeholders with the keys returned by `new`. New items are drafts. Finalize items once their scope is agreed; finalize their ancestors too before execution.
+Replace the uppercase placeholders with the keys returned by `new`. `new` also takes the title as an argument, for example `taskman new "Save messages" --parent STORY_ID`. New items are drafts. Finalize items once their scope is agreed; finalize their ancestors too before execution.
 
 ```sh
 taskman finalize TASK_ID

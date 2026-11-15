@@ -18,7 +18,8 @@ from taskman.storage.store import open_store
 
 
 def new(
-    title: str = typer.Option(..., "--title", help="Human title."),
+    title: str | None = typer.Argument(None, metavar="[TITLE]", help="Human title. Give this or --title."),
+    title_option: str | None = typer.Option(None, "--title", help="Human title."),
     item_type: str = typer.Option("task", "--type", help="One of: epic, feat, task."),
     parent: str | None = typer.Option(
         None,
@@ -32,6 +33,9 @@ def new(
     as_json: bool = typer.Option(False, "--json", help="Emit ID and path as JSON."),
 ) -> None:
     """Create a new work item (draft)."""
+    if (title is None) == (title_option is None):
+        raise typer.BadParameter("give exactly one of TITLE and --title")
+    title = title if title is not None else title_option
     if item_type not in ("epic", "feat", "task"):
         typer.echo(
             f"Error: --type must be one of epic|feat|task, got: {item_type!r}",
