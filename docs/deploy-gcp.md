@@ -246,7 +246,7 @@ Cloud Shell is a terminal in the Google Cloud console. It has `gcloud` and `pyth
 
     Check that each condition admits only branches that you trust. On Nov 14, 2026, the two conditions admitted only `main` and `staging` of `vkroz/taskman`. `taskman-deployer` also keeps its earlier roles; `gcloud iam service-accounts get-iam-policy taskman-deployer@nemos-infra.iam.gserviceaccount.com --project nemos-infra` shows who can use it.
 
-26. Create the public service `taskman` with a placeholder image. The first deployment replaces the placeholder. This takes up to 2 minutes.
+26. Create the public service `taskman` with a placeholder image. The first deployment replaces the placeholder. This takes up to 2 minutes. Do this step only when the service `taskman` does not exist: on an existing service, the placeholder replaces the server until the next deployment. The service exists in `nemos-infra` since Nov 14, 2026.
 
     ```bash
     gcloud run deploy taskman --region us-central1 --image us-docker.pkg.dev/cloudrun/container/hello --service-account taskman-server@nemos-infra.iam.gserviceaccount.com --no-invoker-iam-check --labels app=taskman
