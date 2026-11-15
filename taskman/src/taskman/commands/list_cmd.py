@@ -5,6 +5,7 @@ import json
 
 import typer
 
+from taskman.commands.queries import _as_dict
 from taskman.storage.store import open_store, key_order
 
 
@@ -35,7 +36,7 @@ def list_items(
             current = parents.get(current)
         return False
 
-    rows: list[dict[str, str]] = []
+    rows: list[dict] = []
     for item in items:
         if parent and not under_parent(item.id):
             continue
@@ -49,18 +50,7 @@ def list_items(
             continue
         if label is not None and label not in (item.metadata.get("labels") or []):
             continue
-        rows.append(
-            {
-                "priority": item.priority,
-                "type": item.type,
-                "id": item.id,
-                "status": item.status,
-                "slug": item.slug,
-                "title": item.title,
-                "path": item.location,
-                "parent_id": item.parent_id,
-            }
-        )
+        rows.append(_as_dict(item))
     rows.sort(key=lambda r: (r["status"], r["priority"], key_order(r["id"])))
 
     if as_json:
@@ -71,7 +61,7 @@ def list_items(
         typer.echo("(no items)")
         return
 
-    by_status: dict[str, list[dict[str, str]]] = {}
+    by_status: dict[str, list[dict]] = {}
     for row in rows:
         by_status.setdefault(row["status"], []).append(row)
     for s in ("backlog", "active", "done"):
