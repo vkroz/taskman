@@ -171,6 +171,8 @@ def test_ready_help_says_what_ready_means(sqlite_env) -> None:
     assert "the item and all its ancestors are finalized, not done, and have no unfinished dependency" in text
     assert "When open items are not ready, text output ends with one line on stderr that names them" in text
     assert "Items show in the order that you set in the UI or with `taskman reorder`" in text
+    # The text output of ready has no status groups, so the help does not compare it with list.
+    assert "taskman list" not in text
 
 
 # ---- dependents ----

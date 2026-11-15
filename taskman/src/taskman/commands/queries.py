@@ -84,7 +84,7 @@ def ready(
     finalized, not done, and have no unfinished dependency. When open items are
     not ready, text output ends with one line on stderr that names them and gives
     the reason. Items show in the order that you set in the UI or with
-    `taskman reorder`, as in `taskman list`.
+    `taskman reorder`.
     """
     store = open_store()
     items = _load_graph(store)
