@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -62,6 +63,28 @@ def test_read_commands_work_through_the_server(remote_env):
     assert json.loads(run("context", task))["item"]["id"] == task
     run("reorder", task, "--position", "1")
     assert task in run("search", "Task")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [["list"], ["ready"], ["show", "TM-1"], ["context", "TM-1"], ["search", "x"], ["validate"],
+     ["dependents", "TM-1"], ["waiting-on", "TM-1"], ["activity", "TM-1"], ["browse"]],
+)
+def test_a_read_command_reports_a_server_error_in_one_line(remote_env, sqlite_env, command):
+    new("Task")
+    # The server's database loses its items table: every read fails on the server with HTTP 500.
+    conn = sqlite3.connect(sqlite_env.sqlite_path)
+    try:
+        conn.execute("ALTER TABLE items RENAME TO items_gone")
+    finally:
+        conn.close()
+    assert run(*command, code=1) == "Error: The Taskman server failed.\n"
+
+
+def test_a_read_command_still_reports_a_settings_error_with_exit_2(remote_env, monkeypatch):
+    monkeypatch.setenv("TASKMAN_TOKEN", "tmn_wrong")
+    output = run("show", "TM-1", code=2)
+    assert output.startswith("Error: ") and "Traceback" not in output
 
 
 def test_the_cli_opens_no_database_in_remote_mode(remote_env, monkeypatch):
