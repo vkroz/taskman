@@ -288,6 +288,7 @@ def test_a_refused_code_exchange_shows_only_the_status_and_a_safe_error_code(sql
         endpoint.stop()
     assert endpoint.forms[0]["code"] == query["code"] and endpoint.forms[0]["client_secret"] == secret
     assert got == 502 and shown in page and "Location" not in headers
+    assert "Press Ctrl+C in that terminal, then run the command again." in page
     for hidden in (query["code"], query["state"], secret, "was not found", "Bad Request", "Server Error", "alert"):
         assert hidden not in page
 
@@ -311,7 +312,7 @@ def test_the_token_page_shows_a_personal_access_token_one_time(login_server, goo
     status, headers, _ = get(f"{login_server.url}/auth/token?label=build-vm")
     assert status == 302
     status, headers, body = callback(login_server, google.sign_in(headers["Location"]))
-    assert status == 200 and "tmn_" in body and "ada@example.com" in body
+    assert status == 200 and "tmn_" in body and "ada@example.com" in body and "Ctrl+C" not in body
     assert headers["Cache-Control"] == "no-store" and headers["Referrer-Policy"] == "no-referrer"
     assert "default-src 'none'" in headers["Content-Security-Policy"]
     assert list_tokens(login_server.store)[-1]["label"] == "build-vm"
