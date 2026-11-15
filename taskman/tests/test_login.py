@@ -375,3 +375,24 @@ def test_a_damaged_login_file_is_reported(server):
     path.parent.mkdir(parents=True)
     path.write_text("{not json")
     assert "Delete it and run: taskman auth login" in run("list", code=2)
+
+
+def test_the_auth_commands_report_a_damaged_login_file_in_one_line(server):
+    path = credentials_path()
+    path.parent.mkdir(parents=True)
+    path.write_text("{not json")
+    message = f"Error: Taskman cannot read {path}. Delete it and run: taskman auth login\n"
+    assert run("auth", "status", code=1) == message
+    assert run("auth", "logout", code=2) == message
+    assert run("auth", "login", "--with-token", input=server.token + "\n", code=2) == message
+    # The server accepts the token; the CLI cannot save it.
+    assert run("auth", "login", "--server", server.url, "--with-token", input=server.token + "\n", code=2) == message
+    path.unlink()
+    assert "Logged in to" in run("auth", "login", "--server", server.url, "--with-token", input=server.token + "\n")
+
+
+def test_the_auth_commands_report_a_settings_error_in_one_line(server, monkeypatch):
+    monkeypatch.setenv("TASKMAN_SERVER_URL", "http://taskman.example.com")
+    message = "Error: The Taskman server address must use https:// unless the server runs on this machine.\n"
+    assert run("auth", "status", code=1) == message
+    assert run("auth", "login", "--with-token", input=server.token + "\n", code=2) == message
