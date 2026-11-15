@@ -385,6 +385,19 @@ def test_edit_comments_the_reason(store):
         lifecycle.edit(store, item, "Renamed", "New body", " ")
 
 
+def test_edit_without_a_description_keeps_it(store):
+    draft = lifecycle.create(store, "Draft", "task", None, "Draft spec.\n", project="TM").id
+    finalized = lifecycle.create(store, "Item", "task", None, "Item spec.\n", project="TM").id
+    lifecycle.finalize(store, finalized)
+    for key, body in ((draft, "Draft spec.\n"), (finalized, "Item spec.\n")):
+        edited = lifecycle.edit(store, key, "Renamed", None, "Rename only")
+        assert (edited.title, edited.body) == ("Renamed", body)
+        assert store.get(key).body == body
+    with pytest.raises(LifecycleError, match="Description must not be empty"):
+        lifecycle.edit(store, finalized, "Renamed", "", "Clear it")
+    assert store.get(finalized).body == "Item spec.\n"
+
+
 def test_comments_cannot_change_or_be_removed(store, sql_only):
     item = store.get(_new(store, "Item"))
     lifecycle.record(store, item.id, "decision", "pytest", "first")

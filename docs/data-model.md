@@ -92,7 +92,7 @@ Each rule of epic requirement R1 applies to the SQL model as follows.
 
 | Rule | SQL model |
 | --- | --- |
-| Drafts | A new item has draft true. `finalize` sets it to false. A draft can not become active or done. An item can not become active when an ancestor is a draft. `edit` accepts an empty description only while the item is a draft. |
+| Drafts | A new item has draft true. `finalize` sets it to false. A draft can not become active or done. An item can not become active when an ancestor is a draft. `edit` accepts an empty description only while the item is a draft. Without a description, `edit` keeps the current one. |
 | Close gates | `close` needs: no open descendant, no unfinished dependency on the item or an ancestor, a `summary` comment at the current revision, and the latest `verification` comment at the current revision with result `pass`. |
 | Immutability | The change of status to `done` is the last change to an item. After it, the item accepts no change and no comment: no field, link, label, assignee or rank changes (decision M2). |
 | Revision | The revision increases by 1 when the description, type or dependencies change, and when a `decision` or `progress` comment is added. When an item gets a new revision, a new child, a discarded child, or a status change, the revision of each ancestor increases by 1. Assignee, labels and rank do not change the revision. |

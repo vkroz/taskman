@@ -297,6 +297,15 @@ def test_edit_journals_the_store_actor_and_allows_title_only_drafts(api, store):
                                             "base_title": "T"}, status=400)["error"]
 
 
+def test_edit_without_a_body_keeps_the_description(api, store):
+    key = _create(api, "Item", project="TM")
+    lifecycle.finalize(store, key)
+    saved = api("/api/edit", {"id": key, "title": "Renamed", "reason": "Rename only"})
+    assert (saved["ok"], saved["row"]["title"], store.get(key).body) == (True, "Renamed", "Body")
+    error = api("/api/edit", {"id": key, "title": "Renamed", "body": "", "reason": "Clear"}, status=400)["error"]
+    assert "must not be empty" in error and store.get(key).body == "Body"
+
+
 def test_lifecycle_edit_records_the_store_actor(store):
     with store.lock():
         key = lifecycle.create(store, "Item", "task", None, "Body", project="TM").id

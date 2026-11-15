@@ -73,6 +73,19 @@ def test_a_write_does_not_wait_for_its_own_lock(cli):
     assert time.monotonic() - started < 5  # a second connection would wait 30 s for the write lock
 
 
+def test_edit_changes_only_the_title_without_a_body_file(cli):
+    cli("new", "--title", "Item", "--project", "TM", "--body-file", "-", input="Item spec.\n")
+    cli("new", "--title", "Draft", "--project", "TM", "--body-file", "-", input="Draft spec.\n")
+    cli("finalize", "TM-1")
+    for key, body in (("TM-1", "Item spec.\n"), ("TM-2", "Draft spec.\n")):
+        assert cli("edit", key, "--title", "Renamed", "--reason", "Rename only") == f"Updated: {key}\n"
+        assert (_json("show", key, "--json")["frontmatter"]["title"], _json("show", key, "--json")["body"]) == (
+            "Renamed", body)
+    assert "Description must not be empty" in cli("edit", "TM-1", "--title", "T", "--reason", "Clear",
+                                                  "--body-file", "-", input="", code=2)
+    assert _json("show", "TM-1", "--json")["body"] == "Item spec.\n"
+
+
 # ---- keys and projects -----------------------------------------------------
 
 
