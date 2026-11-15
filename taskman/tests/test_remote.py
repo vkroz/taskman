@@ -347,7 +347,7 @@ def test_the_user_name_and_a_query_with_an_at_sign_do_not_hide_the_driver_reason
     assert "secret" not in output
 
 
-def test_serve_reports_an_address_it_cannot_use(sqlite_env):
+def test_serve_reports_an_address_it_cannot_use(sqlite_env, monkeypatch):
     busy = socket.socket()
     busy.bind(("127.0.0.1", 0))
     busy.listen()
@@ -359,6 +359,11 @@ def test_serve_reports_an_address_it_cannot_use(sqlite_env):
     assert output == f"Error: Taskman cannot listen on 127.0.0.1:{port}: Address already in use\n"
     output = run("serve", "--host", "203.0.113.9", "--port", "0", code=2)
     assert output.startswith("Error: Taskman cannot listen on 203.0.113.9:0: ") and output.count("\n") == 1
+    for port in ("70000", "-1"):
+        output = run("serve", "--port", port, code=2)
+        assert output == f"Error: Taskman cannot listen on 127.0.0.1:{port}: bind(): port must be 0-65535.\n"
+    monkeypatch.setenv("PORT", "70000")
+    assert run("serve", code=2) == "Error: Taskman cannot listen on 127.0.0.1:70000: bind(): port must be 0-65535.\n"
 
 
 def test_serve_listens_on_the_port_variable_and_stops_on_sigterm(sqlite_env):
