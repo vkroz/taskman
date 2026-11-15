@@ -61,8 +61,8 @@ def serve(
     with _database() as store:
         try:
             server = make_server(host, port, store, logins=Logins(store, settings) if settings else None)
-        except OSError as exc:
-            typer.echo(f"Error: Taskman cannot listen on {host}:{port}: {exc.strerror or exc}", err=True)
+        except (OSError, OverflowError) as exc:  # OverflowError: a port out of the range 0-65535
+            typer.echo(f"Error: Taskman cannot listen on {host}:{port}: {getattr(exc, 'strerror', None) or exc}", err=True)
             raise typer.Exit(2) from None
         if settings:
             typer.echo(f"Browser login with Google is on for {settings.public_url}.")
