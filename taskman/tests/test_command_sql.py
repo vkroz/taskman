@@ -213,6 +213,14 @@ def test_command_help_needs_no_database(tmp_path, monkeypatch):
 
 def test_a_missing_database_is_reported_and_not_created(tmp_path, monkeypatch):
     _env(monkeypatch, tmp_path)
-    output = run("show", "TM-1", code=2)
-    assert "There is no Taskman database" in output and "taskman db upgrade" in output
+    for args in (("show", "TM-1"), ("list",), ("ready",), ("new", "--title", "T", "--project", "TM")):
+        output = run(*args, code=2)
+        assert f"No Taskman server is set, and there is no local database at {tmp_path / 'taskman.db'}." in output, args
+        assert "run `taskman auth login --server URL`, or set TASKMAN_SERVER_URL and TASKMAN_TOKEN" in output, args
+        assert "To create a local database, run `taskman db upgrade`." in output, args
     assert not (tmp_path / "taskman.db").exists()
+    # The server's own commands cannot use a server, so they name only the database.
+    output = run("token", "list", code=2)
+    assert "There is no Taskman database" in output and "auth login" not in output
+    run("db", "upgrade")
+    assert run("list").strip() == "(no items)"
