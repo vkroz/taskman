@@ -39,11 +39,7 @@ A project owner of `nemos-infra` does these steps before the first deployment. Y
 
 3. Merge to `staging`. The first deployment creates the schema and replaces the placeholder image. If the files reached `staging` before this setup, the first run fails at the check of the one-time setup: open that run and select "Re-run all jobs".
 
-The script also prints the address of the service and the OAuth (Open Authorization) redirect URI (Uniform Resource Identifier) for browser login. To show the address again:
-
-```bash
-gcloud run services describe taskman --project nemos-infra --region us-central1 --format 'value(status.url)'
-```
+The script also prints the service address and the OAuth (Open Authorization) redirect URI (Uniform Resource Identifier) for browser login. The service address is `https://taskman-1037430670088.us-central1.run.app`. It is `PUBLIC_URL` in `deploy/gcp/nemos-infra.env`. People, agents and Google use only this address. Cloud Run also gives the service a second address, `https://taskman-<hash>-uc.a.run.app`. Do not use it: Google accepts only a registered redirect URI, and the CLI keeps each login for one exact address.
 
 The setup does not use or change the earlier resources: the services `taskman-staging` and `taskman-prod`, the databases `taskman_staging` and `taskman_prod`, their secrets, and the provider `github-actions`.
 
@@ -53,7 +49,7 @@ Browser login lets each person get a token with a Google account. Create the OAu
 
 1. Under Branding, enter the app name and a support email address.
 2. Under Audience, select Internal only when each person signs in with an account of the Google Workspace organization of the project. For a personal Gmail account, or another account outside the organization, select External and add each person as a test user.
-3. Under Clients, create a client of type "Web application". Add the redirect URI that `bootstrap.sh` printed, `<service address>/auth/callback`, as an authorized redirect URI.
+3. Under Clients, create a client of type "Web application". Add `https://taskman-1037430670088.us-central1.run.app/auth/callback` as an authorized redirect URI. This is `PUBLIC_URL/auth/callback`, which `bootstrap.sh` printed.
 4. Copy the client ID and the client secret.
 
 Put the client secret into the secret `taskman-google-client-secret`, which `bootstrap.sh` created without a value. Do this before you set the client ID: a deployment with a client ID fails while this secret has no value. `read` waits for you to paste the client secret and press Enter. The terminal does not show it.
@@ -64,22 +60,22 @@ printf %s "$CLIENT_SECRET" | gcloud secrets versions add taskman-google-client-s
 unset CLIENT_SECRET
 ```
 
-In `deploy/gcp/nemos-infra.env`, set `GOOGLE_CLIENT_ID` to the client ID. Also set `ALLOWED_DOMAINS`, `ALLOWED_EMAILS`, or both, as comma-separated lists without spaces. Merge the change to `staging`. The deployment turns on browser login.
+In `deploy/gcp/nemos-infra.env`, set `GOOGLE_CLIENT_ID` to the client ID. `PUBLIC_URL` must hold the service address. Also set `ALLOWED_DOMAINS`, `ALLOWED_EMAILS`, or both, as comma-separated lists without spaces. Merge the change to `staging`. The deployment turns on browser login.
 
-`ALLOWED_DOMAINS` admits the members of a Google Workspace organization. A personal Gmail account has no Workspace domain: put its address in `ALLOWED_EMAILS`. `deploy.sh` stops before it changes anything when `GOOGLE_CLIENT_ID` is set and both lists are empty. To turn browser login off, empty `GOOGLE_CLIENT_ID` and merge to `staging`.
+`ALLOWED_DOMAINS` admits the members of a Google Workspace organization. A personal Gmail account has no Workspace domain: put its address in `ALLOWED_EMAILS`. `deploy.sh` stops before it changes anything when `GOOGLE_CLIENT_ID` is set and `PUBLIC_URL` is empty, or both lists are empty. To turn browser login off, empty `GOOGLE_CLIENT_ID` and merge to `staging`.
 
 When browser login is on, anyone can open `/auth/token` and `/auth/cli` on the public service. Each request adds a row to the `logins` table under the database write lock, and Taskman does not limit the rate of these requests.
 
 ## Use the server
 
-Each person installs the CLI from `staging`, because the CLI on `main` has no `auth` command. Then they log in on a computer with a browser:
+The server address is `https://taskman-1037430670088.us-central1.run.app`, the value of `PUBLIC_URL` in `deploy/gcp/nemos-infra.env`. Each person installs the CLI from `staging`, because the CLI on `main` has no `auth` command. Then they log in on a computer with a browser:
 
 ```bash
 uv tool install --force 'git+https://github.com/vkroz/taskman.git@staging#subdirectory=taskman'
-taskman auth login --server <service address>
+taskman auth login --server https://taskman-1037430670088.us-central1.run.app
 ```
 
-On a machine without a browser, open `<service address>/auth/token` on any computer and sign in. The page shows a personal access token one time. On the machine, run `taskman auth login --server <service address> --with-token` and paste the token. An agent sandbox can set `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` instead. Without browser login, an operator creates the token, as "Run operator commands" shows.
+On a machine without a browser, open `https://taskman-1037430670088.us-central1.run.app/auth/token` on any computer and sign in. The page shows a personal access token one time. On the machine, run `taskman auth login --server https://taskman-1037430670088.us-central1.run.app --with-token` and paste the token. An agent sandbox can set `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` instead. Without browser login, an operator creates the token, as "Run operator commands" shows.
 
 ## Run operator commands
 
@@ -113,7 +109,7 @@ Each deployment is a run of the workflow **Deploy to nemos-infra** in the [Actio
 gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="taskman-db-upgrade"' --project nemos-infra --limit 50 --format 'value(textPayload)'
 ```
 
-The [Cloud Run page](https://console.cloud.google.com/run?project=nemos-infra) shows the image of the job and of the service. `curl -fsS <service address>/readyz` prints `{"ok":true}` when the server can query the database. `/readyz` needs no token. Do not use `/healthz` on Cloud Run: Google's front end reserves some paths that end in `z`, and it answers `/healthz` with its own 404 page. The request does not reach Taskman.
+The [Cloud Run page](https://console.cloud.google.com/run?project=nemos-infra) shows the image of the job and of the service. `curl -fsS https://taskman-1037430670088.us-central1.run.app/readyz` prints `{"ok":true}` when the server can query the database. `/readyz` needs no token. Do not use `/healthz` on Cloud Run: Google's front end reserves some paths that end in `z`, and it answers `/healthz` with its own 404 page. The request does not reach Taskman.
 
 ## Deploy by hand or roll back
 
@@ -130,7 +126,7 @@ Schema upgrades go forward only. With an image that has an older schema version 
 
 ## Another project or cloud
 
-Another Google Cloud project needs its own environment file. Copy `deploy/gcp/nemos-infra.env`, change the names, run `bootstrap.sh` with the new file, and add a workflow like `deploy-nemos-infra.yml` that reads it.
+Another Google Cloud project needs its own environment file. Copy `deploy/gcp/nemos-infra.env`, change the names, and run `bootstrap.sh` with the new file. Set `PUBLIC_URL` to the service address that it prints. Add a workflow like `deploy-nemos-infra.yml` that reads the file.
 
 The same image runs on another platform that gives:
 
