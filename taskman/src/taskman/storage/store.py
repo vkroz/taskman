@@ -11,7 +11,7 @@ import re
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from contextvars import ContextVar
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from functools import wraps
 from typing import Any, Protocol
 
@@ -66,7 +66,9 @@ def item_data(item: Item) -> dict[str, Any]:
 
 
 def item_from_data(data: dict[str, Any]) -> Item:
-    return Item(**data)
+    """An item from the server API. A field that a newer server adds is ignored."""
+    known = {field.name for field in fields(Item)}
+    return Item(**{key: value for key, value in data.items() if key in known})
 
 
 def served(operation: Callable) -> Callable:
