@@ -4,7 +4,9 @@ Taskman is the source of truth for work shared by Codex, Claude Code and other a
 
 ## Context and scope
 
-Taskman stores work items in SQLite (the default, one file for all repositories) or Postgres, as the user's settings select. If a command reports that there is no database or that the schema is old, run `taskman db upgrade`.
+Before work, run `taskman auth status`. When the project instructions or the user name a Taskman server, continue only when it prints `Logged in to` that server. Otherwise stop and report the output. Never create items in a local database for shared work.
+
+When no server is named, the local database is correct. Taskman stores work items in SQLite (the default, one file for all repositories) or Postgres, as the user's settings select. If a command reports that there is no database or that the schema is old, run `taskman db upgrade`.
 
 Items have keys such as `TM-42`: the project key, then a number. A key identifies the item and its project. Read `taskman context KEY` before work: it includes requirements, ancestors, descendants, dependencies, comments and activity. Resolve a missing key with `taskman list --json` (add `--project KEY` to narrow it); ask only if the target remains ambiguous.
 
