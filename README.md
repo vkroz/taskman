@@ -219,7 +219,7 @@ The lines below give the mechanism of each platform on Nov 15, 2026. They are no
 
 - Claude Code on the web: set "Limited" network access and add the host to the allowed domains. Add a setup script. Set the variables `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN=proxy-injected`. Add a network secret for the host.
 - OpenAI Codex cloud: turn on agent internet access to the host for all HTTP methods. Add an install script. Set the variable `TASKMAN_SERVER_URL`. Add a network secret `TASKMAN_TOKEN` for the host. The agent sees only a placeholder.
-- GitHub Copilot cloud agent: add the host to the Copilot internet access allowlist of the repository. Save `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` as secrets under "Secrets and variables" > "Agents". Install the CLI in `.github/workflows/copilot-setup-steps.yml`. The agent can read the token.
+- GitHub Copilot cloud agent: add the host to the Copilot internet access allowlist of the repository. Save `TASKMAN_TOKEN` and `TASKMAN_SERVER_URL` as secrets under "Secrets and variables" > "Agents". The default cloud sandbox gets no variables, so the address is a secret here. On the Actions runtime, install the CLI in `.github/workflows/copilot-setup-steps.yml`. This one repository file holds no address and no token. The agent can read the token.
 - Grok: no hosted agent environment found as of Nov 15, 2026.
 
 ### Turn on browser login
