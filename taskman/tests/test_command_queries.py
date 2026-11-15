@@ -220,3 +220,20 @@ def test_waiting_on_excludes_done_deps(sqlite_env) -> None:
 
 def test_waiting_on_missing_target(sqlite_env) -> None:
     assert "not found" in sql.run("waiting-on", "TM-99", code=1)
+
+
+def test_dependents_and_waiting_on_follow_the_order_set_with_reorder(sqlite_env) -> None:
+    target = _item("Target")
+    first, second, third = (_item(title) for title in ("First", "Second", "Third"))
+    for key in (first, second, third):
+        _depend(key, target)
+    waiting = _item("Waiting")
+    _depend(waiting, first, second, third)
+    sql.run("reorder", third, "--position", "1")
+    assert _ids("dependents", target) == [third, first, second]
+    assert _ids("waiting-on", waiting) == [third, first, second]
+    for command, key in (("dependents", target), ("waiting-on", waiting)):
+        lines = sql.run(command, key).splitlines()
+        assert [line.split()[2] for line in lines] == [third, first, second]
+        text = " ".join(sql.run(command, "--help").split())
+        assert "Items show in the order that you set in the UI or with `taskman reorder`" in text

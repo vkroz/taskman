@@ -107,8 +107,12 @@ def dependents(
     item_id: str = typer.Argument(..., help="Item ID to find dependents of."),
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON."),
 ) -> None:
-    """List non-done items that list ``<id>`` in their depends_on."""
-    items = _load_graph(open_store())
+    """List non-done items that list ``<id>`` in their depends_on.
+
+    Items show in the order that you set in the UI or with `taskman reorder`.
+    """
+    store = open_store()
+    items = _load_graph(store)
     if item_id not in items:
         typer.echo(f"Warning: item not found: {item_id}", err=True)
         raise typer.Exit(1)
@@ -116,16 +120,19 @@ def dependents(
         i for i in items.values()
         if i.status != "done" and item_id in i.depends_on
     ]
-    out.sort(key=lambda i: (i.priority, key_order(i.id)))
-    _emit(out, as_json)
+    _emit(in_manual_order(store, out), as_json)
 
 
 def waiting_on(
     item_id: str = typer.Argument(..., help="Item ID whose deps to inspect."),
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON."),
 ) -> None:
-    """List unfinished dependencies of this item and its ancestors."""
-    items = _load_graph(open_store())
+    """List unfinished dependencies of this item and its ancestors.
+
+    Items show in the order that you set in the UI or with `taskman reorder`.
+    """
+    store = open_store()
+    items = _load_graph(store)
     if item_id not in items:
         typer.echo(f"Warning: item not found: {item_id}", err=True)
         raise typer.Exit(1)
@@ -138,5 +145,4 @@ def waiting_on(
     if missing:
         raise typer.BadParameter("missing dependencies: " + ", ".join(sorted(missing)))
     out = [items[dep] for dep in dependencies if items[dep].status != "done"]
-    out.sort(key=lambda i: (i.priority, key_order(i.id)))
-    _emit(out, as_json)
+    _emit(in_manual_order(store, out), as_json)
