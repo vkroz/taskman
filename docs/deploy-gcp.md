@@ -9,8 +9,6 @@ A project owner sets up `nemos-infra` one time, before the first deployment. Two
 - **The steps of [Set up the environment once](#set-up-the-environment-once).** A project owner did these steps for `nemos-infra` on Nov 14 and 15, 2026. Each command gives the output of that run. Use this path.
 - **The script [`bootstrap.sh`](#set-up-with-bootstrapsh).** It does the Google Cloud steps in one run. Nobody has run it against a real project yet.
 
-The GitHub steps, the sign-in steps and the first login are the same on the two paths.
-
 ## How a deployment runs
 
 The workflow [`deploy-nemos-infra.yml`](../.github/workflows/deploy-nemos-infra.yml):
@@ -371,7 +369,7 @@ Each person does these steps on a computer with a browser. They need [uv](https:
 
 ### Set up with bootstrap.sh
 
-[`deploy/gcp/bootstrap.sh`](../deploy/gcp/bootstrap.sh) does the [Google Cloud steps](#google-cloud-cloud-shell) in one run. Nobody has run it against a real project yet. You need `gcloud`, signed in as an Owner, and `python3`, for example in Cloud Shell. Run the script from the root of a checkout of `staging`:
+[`deploy/gcp/bootstrap.sh`](../deploy/gcp/bootstrap.sh) does the [Google Cloud steps](#google-cloud-cloud-shell) in one run. You need `gcloud`, signed in as an Owner, and `python3`, for example in Cloud Shell. Run the script from the root of a checkout of `staging`:
 
 ```bash
 deploy/gcp/bootstrap.sh deploy/gcp/nemos-infra.env
