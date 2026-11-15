@@ -59,7 +59,11 @@ def serve(
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(2) from None
     with _database() as store:
-        server = make_server(host, port, store, logins=Logins(store, settings) if settings else None)
+        try:
+            server = make_server(host, port, store, logins=Logins(store, settings) if settings else None)
+        except OSError as exc:
+            typer.echo(f"Error: Taskman cannot listen on {host}:{port}: {exc.strerror or exc}", err=True)
+            raise typer.Exit(2) from None
         if settings:
             typer.echo(f"Browser login with Google is on for {settings.public_url}.")
         else:

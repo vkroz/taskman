@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -229,6 +230,45 @@ def test_server_commands_need_a_database(tmp_path, monkeypatch):
     assert "taskman db upgrade" in run("serve", code=2)
     monkeypatch.setenv("PORT", "eighty")
     assert "PORT must be a number" in run("serve", code=2)
+
+
+_DATABASE_COMMANDS = (["list"], ["db", "upgrade"], ["serve"], ["token", "list"])
+
+
+def test_a_file_that_is_not_a_database_is_reported_in_one_line(sqlite_env, tmp_path, monkeypatch):
+    path = tmp_path / "garbage.db"
+    path.write_text("{bad")
+    monkeypatch.setenv("TASKMAN_DATABASE_URL", f"sqlite://{path}")
+    for command in _DATABASE_COMMANDS:
+        assert run(*command, code=2) == "Error: Cannot open the Taskman database: file is not a database\n"
+    monkeypatch.setenv("TASKMAN_DATABASE_URL", f"sqlite://{sqlite_env.sqlite_path}")
+    assert run("list").strip() == "(no items)"
+
+
+@pytest.mark.parametrize("password", ["secretpw", "secret pw"])
+def test_a_postgres_database_that_cannot_be_opened_is_reported_without_the_url(sqlite_env, monkeypatch, password):
+    pytest.importorskip("psycopg")
+    url = f"postgresql://taskman:{password}@127.0.0.1:1/unreachable_test"
+    monkeypatch.setenv("TASKMAN_BACKEND", "postgres")
+    monkeypatch.setenv("TASKMAN_DATABASE_URL", url)
+    for command in _DATABASE_COMMANDS:
+        output = run(*command, code=2)
+        assert output.startswith("Error: Cannot open the Taskman database: ") and output.count("\n") == 1
+        assert password not in output and url not in output and "Traceback" not in output
+
+
+def test_serve_reports_an_address_it_cannot_use(sqlite_env):
+    busy = socket.socket()
+    busy.bind(("127.0.0.1", 0))
+    busy.listen()
+    port = busy.getsockname()[1]
+    try:
+        output = run("serve", "--port", port, code=2)
+    finally:
+        busy.close()
+    assert output == f"Error: Taskman cannot listen on 127.0.0.1:{port}: Address already in use\n"
+    output = run("serve", "--host", "203.0.113.9", "--port", "0", code=2)
+    assert output.startswith("Error: Taskman cannot listen on 203.0.113.9:0: ") and output.count("\n") == 1
 
 
 def test_serve_listens_on_the_port_variable_and_stops_on_sigterm(sqlite_env):

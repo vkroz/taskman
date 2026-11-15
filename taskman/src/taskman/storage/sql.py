@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import unquote
 
 from taskman.storage.settings import StorageSettings
 from taskman.storage.store import StorageConfigError
@@ -33,14 +34,24 @@ def connect(settings: StorageSettings, *, create: bool = True) -> tuple[Any, Dia
     """Open an autocommit connection; callers group statements with :func:`transaction`.
 
     With ``create=False`` a missing SQLite file is an error, not a new empty database.
+    A database that cannot be opened is a :class:`StorageConfigError` with the driver's reason.
     """
     if settings.backend == "sqlite":
         path = settings.sqlite_path
         if not create and not path.is_file():
             raise StorageConfigError(f"There is no Taskman database at {path}. Run: taskman db upgrade")
         path.parent.mkdir(parents=True, exist_ok=True)
-        # The UI server shares one store across threads; SqlStore serializes access.
-        conn = sqlite3.connect(path, timeout=30, isolation_level=None, check_same_thread=False)
+        try:
+            # The UI server shares one store across threads; SqlStore serializes access.
+            conn = sqlite3.connect(path, timeout=30, isolation_level=None, check_same_thread=False)
+        except sqlite3.DatabaseError as exc:
+            raise _cannot_open(exc) from None
+        try:
+            # A file that is not a database fails here, at the first read of its header.
+            conn.execute("PRAGMA schema_version")
+        except sqlite3.DatabaseError as exc:
+            conn.close()
+            raise _cannot_open(exc) from None
         conn.execute("PRAGMA foreign_keys = ON")
         return conn, SQLITE
     if settings.backend == "postgres":
@@ -52,9 +63,23 @@ def connect(settings: StorageSettings, *, create: bool = True) -> tuple[Any, Dia
             ) from None
         options = dict(settings.postgres)
         url = options.pop("url", "")
-        # Keyword values (socket, database, user, password) override the URL's.
-        return psycopg.connect(url, autocommit=True, connect_timeout=10, **options), POSTGRES
+        try:
+            # Keyword values (socket, database, user, password) override the URL's.
+            return psycopg.connect(url, autocommit=True, connect_timeout=10, **options), POSTGRES
+        except psycopg.Error as exc:
+            # A message about a malformed URL can quote the URL's password.
+            url_password = url.partition("://")[2].rpartition("@")[0].partition(":")[2]
+            raise _cannot_open(exc, url, options.get("password"), url_password, unquote(url_password)) from None
     raise StorageConfigError(f"The {settings.backend} backend has no SQL database.")
+
+
+def _cannot_open(exc: Exception, *secrets: str | None) -> StorageConfigError:
+    """The driver's reason on one line, with each secret replaced by ``***``."""
+    reason = " ".join(str(exc).split())
+    for secret in secrets:
+        if secret:
+            reason = reason.replace(secret, "***")
+    return StorageConfigError(f"Cannot open the Taskman database: {reason}")
 
 
 @contextmanager
