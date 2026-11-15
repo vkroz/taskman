@@ -91,10 +91,11 @@ def login(
 ) -> None:
     """Log in to a Taskman server. Later commands use it."""
     try:
-        url = check_server_url(server or server_url() or "")
-    except StorageConfigError as exc:
-        if not (server or server_url()):
+        named = server or server_url()
+        if not named:
             _fail("Name the server: taskman auth login --server https://taskman.example.com", 2)
+        url = check_server_url(named)
+    except StorageConfigError as exc:
         _fail(str(exc), 2)
     try:
         if with_token:
@@ -104,19 +105,22 @@ def login(
         else:
             token = browser_login(url, (label or socket.gethostname())[:60], open_browser=not no_browser)
         person = RemoteStore(url, token).whoami()
+        save_login(url, token)
     except StorageConfigError as exc:
         _fail(str(exc), 2)
     except StorageError as exc:
         _fail(str(exc))
-    save_login(url, token)
     typer.echo(f"Logged in to {url} as {person}.")
 
 
 @auth_app.command("logout")
 def logout() -> None:
     """Revoke the saved token on the server and remove it from this machine."""
-    url = server_url()
-    token = saved_token(url) if url else ""
+    try:
+        url = server_url()
+        token = saved_token(url) if url else ""
+    except StorageConfigError as exc:
+        _fail(str(exc), 2)
     if not token:
         typer.echo("Not logged in.")
         return
@@ -133,7 +137,10 @@ def logout() -> None:
 @auth_app.command("status")
 def status() -> None:
     """Show the server and the person of the login. Never shows the token."""
-    url = server_url()
+    try:
+        url = server_url()
+    except StorageConfigError as exc:
+        _fail(str(exc))
     if not url:
         typer.echo("Not logged in. Taskman uses the database on this computer.")
         raise typer.Exit(1)
