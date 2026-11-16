@@ -894,3 +894,39 @@ def test_item_text_never_becomes_markup(rw, desktop):
     expect(desktop.locator("#toasts")).to_contain_text("created as draft")
     assert desktop.locator("img").count() == 0
     assert dialogs == []
+
+
+# ---- 17. token page of the server ----
+# The server's /auth/token page shares this module's browser: one Playwright per test session.
+
+
+def test_a_person_revokes_an_own_token_on_the_token_page(sqlite_env, chromium):
+    """The page has a strict Content-Security-Policy and sends no referrer; a real browser still posts its form."""
+    from taskman.storage.accounts import create_token, list_tokens
+    from tests.conftest import RunningServer
+    from tests.test_login import FakeGoogle, get, settings
+
+    google = FakeGoogle()
+    server = RunningServer(sqlite_env, login=settings(), post_form=google.post_form)
+    context = chromium.new_context()
+    try:
+        laptop_id, laptop = create_token(server.store, "ada@example.com", "laptop", days=90)
+        _, headers, _ = get(f"{server.url}/auth/token")
+        query = google.sign_in(headers["Location"])
+        page = context.new_page()
+        messages: list[str] = []
+        page.on("console", lambda message: messages.append(message.text))
+        page.goto(f"{server.url}/auth/callback?state={query['state']}&code={query['code']}")
+        laptop_row = page.locator("tr", has=page.locator("td", has_text="laptop"))
+        laptop_row.get_by_role("button", name="Revoke").click()
+        page.get_by_text(f"Revoked token {laptop_id}.").wait_for()
+        assert laptop_row.get_by_role("button").count() == 0
+        request = urllib.request.Request(f"{server.url}/api/v1/whoami", headers={"Authorization": f"Bearer {laptop}"})
+        with pytest.raises(urllib.error.HTTPError) as refused:
+            urllib.request.urlopen(request, timeout=10)
+        assert refused.value.code == 401
+        assert list_tokens(server.store, "ada@example.com")[-1]["revoked_at"] is None
+        assert not [text for text in messages if "Content Security Policy" in text]
+    finally:
+        context.close()
+        server.stop()
