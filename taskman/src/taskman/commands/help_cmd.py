@@ -51,14 +51,18 @@ ITEMS AND KEYS
 
   A new top-level item needs --project KEY; Taskman creates the project on
   first use. A child gets the project of its parent. Dependencies stay inside
-  one project. A command finds the item and its project from the key.
+  one project. A command finds the item and its project from the key. For
+  an unknown key, every command prints `Error: item not found: KEY` and
+  exits with code 1.
 
   A comment has a kind: decision, progress, handoff, summary or
   verification. A verification comment has a result: pass, fail or blocked.
   Nobody can change or delete a comment.
 
   Each change to a field writes an activity entry with its author and time.
-  The author is the --actor value, or the git user.name.
+  The author is the --actor value. Without it, the author is the person of
+  the token on a server, or the git user.name with a local database. On a
+  server, --actor NAME gives the author `NAME for <person>`.
 
 ================================================================================
 LIFECYCLE

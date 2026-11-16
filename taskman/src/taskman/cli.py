@@ -33,7 +33,7 @@ from taskman.model.locking import mutating
 from taskman.storage.settings import load_env_file
 from taskman.storage.remote import remote_settings, server_url
 from taskman.storage.settings import storage_settings
-from taskman.storage.store import StorageConfigError, StorageError, begin_command
+from taskman.storage.store import StorageConfigError, StorageError, begin_command, open_store
 from taskman.commands.install import install
 from taskman.commands.db import db_app
 from taskman.commands.collection import browse, edit, reorder
@@ -75,11 +75,16 @@ def _storage_errors(command):
     """Report a database that cannot be opened (missing, wrong schema) as a settings error: exit 2.
 
     Report another storage error, for example an error answer of the server, as ``Error: ...``: exit 1.
+    Report an unknown item key the same way in every command: ``Error: item not found: KEY``, exit 1.
     """
 
     @wraps(command)
     def wrapped(*args, **kwargs):
         try:
+            item_id = kwargs.get("item_id")
+            if item_id is not None and open_store().get(item_id) is None:
+                typer.echo(f"Error: item not found: {item_id}", err=True)
+                raise typer.Exit(1)
             return command(*args, **kwargs)
         except StorageConfigError as exc:
             typer.echo(f"Error: {exc}", err=True)

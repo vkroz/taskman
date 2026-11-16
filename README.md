@@ -74,7 +74,7 @@ taskman comment TASK_ID --kind verification --result pass --actor "Claude Code" 
 taskman close TASK_ID
 ```
 
-`record` is an alias of `comment`. Every command that changes an item accepts `--actor NAME`; without it, the author is your git `user.name`. `comment` takes its text from `--body TEXT` or from `--body-file FILE`; `--body-file -` reads stdin. Comment on significant choices, their reasons and changes to scope. The completion summary should explain what changed, why, and any limits. Verification comments should name the checks, commands, results and source revision or relevant working-tree changes. Distinguish executed tests from source inspection and another agent's report.
+`record` is an alias of `comment`. Every command that changes an item accepts `--actor NAME`; without it, the author is the person of the token on a server, or your git `user.name` with a local database. `comment` takes its text from `--body TEXT` or from `--body-file FILE`; `--body-file -` reads stdin. Comment on significant choices, their reasons and changes to scope. The completion summary should explain what changed, why, and any limits. Verification comments should name the checks, commands, results and source revision or relevant working-tree changes. Distinguish executed tests from source inspection and another agent's report.
 
 Open requirements may be refined to achieve the agreed outcome. Changes to the description, dependencies, type or children, and new decision or progress comments, invalidate earlier completion evidence. Close requires a current summary, a current passing verification, and completed dependencies and descendants. A recorded pass is the agent's assertion: Taskman does not run tests or prove that assertion.
 

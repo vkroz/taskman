@@ -48,7 +48,7 @@ A comment replaces a journal entry.
 | --- | --- |
 | kind | `decision`, `progress`, `handoff`, `summary` or `verification`. |
 | result | `pass`, `fail` or `blocked`. Only a `verification` comment has a result, and it must have one. |
-| author | 1 to 100 characters: the `--actor` value, or the git `user.name` (decision M1). |
+| author | 1 to 100 characters: the `--actor` value. Without it, the person of the token on a server, or the git `user.name` with a local database (decision M1). |
 | text | Markdown text. It must not be empty. |
 | revision | The item revision when Taskman stored the comment. |
 | created | The time of the comment. |
@@ -68,7 +68,7 @@ Taskman writes one activity entry for each change to a work item.
 | item | The work item. |
 | field | The changed field: `created`, `title`, `description`, `status`, `draft`, `type`, `rank`, `assignee`, `labels` or `dependencies`. |
 | old value, new value | The values before and after the change. For `description`, Taskman stores the full old and new text. |
-| author | Who made the change: the `--actor` value, or the git `user.name` (decision M1). |
+| author | Who made the change: the `--actor` value. Without it, the person of the token on a server, or the git `user.name` with a local database (decision M1). |
 | time | The time of the change. |
 
 A comment does not make an activity entry. The comment itself is the record.
@@ -161,7 +161,7 @@ The location of an item is `<backend>:<key>`, for example `sqlite:TM-42`. The `p
 
 ## Decisions
 
-- **M1 Author of a change (agreed Nov 9, 2026).** Every command that changes an item accepts an optional `--actor NAME`. Without it, the author is the git `user.name`. The author goes into the activity entry and into comments.
+- **M1 Author of a change (agreed Nov 9, 2026).** Every command that changes an item accepts an optional `--actor NAME`. Without it, the author is the person of the token on a server, or the git `user.name` with a local database. The author goes into the activity entry and into comments.
 - **M2 Done items (agreed Nov 9, 2026).** The change of status to `done` is the last change to an item. After it, nothing changes: not fields, links, labels, assignee, rank or comments. Today the UI can still reorder done items; that stops.
 - **M3 `record` becomes `comment` (agreed Nov 9, 2026).** The new name matches the model. Feature 261109005 moved the plugin skills to `comment` and kept `record` as an alias for older plugin installs.
 - **M4 JSON shape (agreed Nov 9, 2026).** `show --json` and `context` keep today's keys, with comments in `frontmatter.journal`. A Jira-like shape (for example `fields` and `comments`) is not planned; feature 261109005 kept this shape.
