@@ -346,7 +346,7 @@ def _make_handler(store: Store):
                 body, parent = data.get('body', ''), data.get('parent') or None
                 if not isinstance(title, str) or not title.strip() or len(title) > 200:
                     raise ValueError('Enter a title of 1–200 characters')
-                if kind not in ('task', 'feat', 'epic') or not isinstance(body, str):
+                if kind not in lifecycle.ITEM_TYPES or not isinstance(body, str):
                     raise ValueError('Invalid task type or description')
                 project = data.get('project') or None
                 if parent is not None and not isinstance(parent, str):

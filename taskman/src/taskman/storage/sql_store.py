@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from taskman.model.yaml_io import emit_frontmatter
-from taskman.storage.schema import CURRENT_VERSION
+from taskman.storage.schema import CURRENT_VERSION, MIGRATIONS
 from taskman.storage.settings import StorageSettings
 from taskman.storage.sql import SQLITE, Dialect, connect, is_lost, transaction
 from taskman.storage.store import Item, StorageConfigError, StorageError
@@ -81,7 +81,13 @@ class SqlStore:
         self._mutex = threading.RLock()
         self._depth = 0
         with self._read():
-            version = self._schema_version()
+            versions = self._schema_versions()
+        version = max(versions, default=0)
+        missing = [m.version for m in MIGRATIONS if m.version not in versions and m.version < version]
+        if missing:
+            raise StorageConfigError(
+                f"The database schema lacks version {', '.join(map(str, missing))}. Run: taskman db upgrade"
+            )
         if version < CURRENT_VERSION:
             raise StorageConfigError(
                 f"The database schema is at version {version}; Taskman needs version {CURRENT_VERSION}. "
@@ -96,15 +102,15 @@ class SqlStore:
     def close(self) -> None:
         self.conn.close()
 
-    def _schema_version(self) -> int:
-        """The applied schema version, or 0 without a schema. Reads only: no lock, no DDL."""
+    def _schema_versions(self) -> set[int]:
+        """The applied schema versions, empty without a schema. Reads only: no lock, no DDL."""
         if self.dialect is SQLITE:
             exists = self._q("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_versions'").fetchone()
         else:
             exists = self._q("SELECT to_regclass('schema_versions')").fetchone()[0]
         if not exists:
-            return 0
-        return self._q("SELECT MAX(version) FROM schema_versions").fetchone()[0] or 0
+            return set()
+        return {row[0] for row in self._q("SELECT version FROM schema_versions").fetchall()}
 
     # ---- transactions --------------------------------------------------
 

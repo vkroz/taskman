@@ -1,11 +1,13 @@
 """Versioned SQL schema for the work-item model in ``docs/data-model.md``.
 
 Each migration has a version number. ``upgrade`` applies the migrations
-above the database's recorded version, in order, in one transaction, and
-records each version in ``schema_versions``.
+that the database has not recorded, in order, in one transaction, and
+records each version in ``schema_versions``. A version can be missing below
+the highest one when branches merge in another order than their numbers.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -19,6 +21,8 @@ class Migration:
     version: int
     name: str
     statements: tuple[str, ...]
+    # A step that differs between the dialects; it runs after ``statements``.
+    run: Callable[[Any, Dialect], None] | None = None
 
 
 # Column types that differ between the dialects.
@@ -26,6 +30,44 @@ _TYPES = {
     "sqlite": {"pk": "INTEGER PRIMARY KEY AUTOINCREMENT", "bigint": "INTEGER", "real": "REAL"},
     "postgres": {"pk": "BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY", "bigint": "BIGINT", "real": "DOUBLE PRECISION"},
 }
+
+_OLD_TYPE_CHECK = "CHECK (type IN ('epic', 'feat', 'task'))"
+_NEW_TYPE_CHECK = "CHECK (type IN ('epic', 'feat', 'task', 'bugfix'))"
+
+
+def _allow_bugfix_type(conn: Any, dialect: Dialect) -> None:
+    """Let ``items.type`` hold ``bugfix``. Rows, ids, keys and indexes stay as they are.
+
+    Postgres replaces the named constraint. SQLite cannot alter a CHECK and its
+    usual table rebuild is unsafe here: with foreign keys on, which cannot change
+    inside a transaction, ``DROP TABLE items`` deletes the comments, labels and
+    activity of every item. So SQLite edits the stored table definition, the
+    procedure that https://sqlite.org/lang_altertable.html gives to change CHECK
+    constraints. All existing rows satisfy the wider constraint.
+    """
+    if dialect.name == "postgres":
+        conn.execute(
+            f"ALTER TABLE items DROP CONSTRAINT items_type_check, ADD CONSTRAINT items_type_check {_NEW_TYPE_CHECK}"
+        )
+        return
+    version = conn.execute("PRAGMA schema_version").fetchone()[0]
+    conn.execute("PRAGMA writable_schema = ON")
+    try:
+        conn.execute(
+            "UPDATE sqlite_master SET sql = replace(sql, ?, ?) WHERE type = 'table' AND name = 'items'",
+            (_OLD_TYPE_CHECK, _NEW_TYPE_CHECK),
+        )
+        # A new schema version makes every connection read the new definition.
+        conn.execute(f"PRAGMA schema_version = {int(version) + 1}")
+    finally:
+        conn.execute("PRAGMA writable_schema = OFF")
+    sql = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'items'").fetchone()[0]
+    if _NEW_TYPE_CHECK not in sql:
+        raise StorageConfigError("The items table has an unexpected definition; cannot add the bugfix type.")
+    problems = [row[0] for row in conn.execute("PRAGMA integrity_check").fetchall()]
+    if problems != ["ok"]:
+        raise StorageConfigError(f"The database failed its integrity check: {'; '.join(problems)}")
+
 
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
@@ -157,6 +199,12 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
+    Migration(4, "bugfix item type", (), run=_allow_bugfix_type),
+    Migration(
+        5,
+        "index of login start times",
+        ("CREATE INDEX logins_created_at ON logins (created_at)",),
+    ),
 )
 
 CURRENT_VERSION = MIGRATIONS[-1].version
@@ -186,12 +234,15 @@ def upgrade(conn: Any, dialect: Dialect, migrations: tuple[Migration, ...] = MIG
             raise StorageConfigError(
                 f"The database schema is at version {current}; this Taskman knows version {latest}. Upgrade Taskman."
             )
+        recorded = {row[0] for row in conn.execute("SELECT version FROM schema_versions").fetchall()}
         applied = []
         for migration in migrations:
-            if migration.version <= current:
+            if migration.version in recorded:
                 continue
             for statement in migration.statements:
                 conn.execute(statement.format(**_TYPES[dialect.name]))
+            if migration.run:
+                migration.run(conn, dialect)
             conn.execute(
                 dialect.sql("INSERT INTO schema_versions (version, name, applied_at) VALUES (?, ?, ?)"),
                 (migration.version, migration.name, datetime.now(timezone.utc).isoformat()),
