@@ -239,3 +239,11 @@ def test_dependents_and_waiting_on_follow_the_order_set_with_reorder(sqlite_env)
         assert [line.split()[2] for line in lines] == [third, first, second]
         text = " ".join(sql.run(command, "--help").split())
         assert "Items show in the order that you set in the UI or with `taskman reorder`" in text
+
+
+def test_ready_shows_a_bugfix_in_an_aligned_type_column(sqlite_env) -> None:
+    bugfix, task = _item("Fix Crash"), _item("A Task")
+    sql.run("convert", bugfix, "bugfix")
+    lines = sql.run("ready").splitlines()
+    assert f"  00 bugfix {bugfix} backlog fix_crash                      Fix Crash" in lines
+    assert f"  00 task   {task} backlog a_task                         A Task" in lines

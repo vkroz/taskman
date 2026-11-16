@@ -55,3 +55,9 @@ def test_help_lists_the_query_and_edit_commands() -> None:
     lifecycle = _help().split("LIFECYCLE")[1].split("INVARIANTS")[0]
     for name in ("ready", "edit", "browse", "search", "waiting-on", "dependents"):
         assert f"\n  {name} " in lifecycle or f"\n  {name}\n" in lifecycle, name
+
+
+def test_help_describes_the_bugfix_type() -> None:
+    text = _help()
+    assert "epic | feat | task | bugfix" in text
+    assert "A `task` or `bugfix` item has no children" in text

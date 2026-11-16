@@ -44,7 +44,7 @@ def _emit(results: list[Item], as_json: bool) -> None:
         return
     for i in results:
         typer.echo(
-            f"  {i.priority} {i.type:5} {i.id} {i.status:7} "
+            f"  {i.priority} {i.type:6} {i.id} {i.status:7} "
             f"{i.slug:30} {i.title}"
         )
 

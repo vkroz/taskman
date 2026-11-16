@@ -120,3 +120,25 @@ def test_finalize_parent_item(sqlite_env) -> None:
     sql.new("Child", parent=parent)
     sql.run("finalize", parent)
     assert sql.show(parent)["frontmatter"]["draft"] is False
+
+
+# ---- bugfix ----
+
+
+def test_new_creates_a_bugfix(sqlite_env) -> None:
+    key = sql.new("Fix crash", "bugfix")
+    assert sql.show(key)["frontmatter"]["type"] == "bugfix"
+    assert "type: bugfix" in sql.run("show", key)
+
+
+def test_new_rejects_a_bugfix_as_parent(sqlite_env) -> None:
+    bugfix = sql.new("Fix crash", "bugfix")
+    out = sql.run("new", "--title", "Sub", "--parent", bugfix, code=1)
+    assert f"cannot add child to a bugfix ({bugfix}): bugfix = leaf invariant" in out
+    assert [row["id"] for row in json.loads(sql.run("list", "--json"))] == [bugfix]
+
+
+def test_new_names_bugfix_among_the_types(sqlite_env) -> None:
+    out = sql.run("new", "--title", "X", "--type", "bug", "--project", "TM", code=2)
+    assert "--type must be one of epic|feat|task|bugfix, got: 'bug'" in out
+    assert "epic, feat, task, bugfix" in sql.run("new", "--help")
