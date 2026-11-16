@@ -20,7 +20,7 @@ from taskman.storage.store import open_store
 def new(
     title: str | None = typer.Argument(None, metavar="[TITLE]", help="Human title. Give this or --title."),
     title_option: str | None = typer.Option(None, "--title", help="Human title."),
-    item_type: str = typer.Option("task", "--type", help="One of: epic, feat, task."),
+    item_type: str = typer.Option("task", "--type", help="One of: epic, feat, task, bugfix."),
     parent: str | None = typer.Option(
         None,
         "--parent",
@@ -36,9 +36,9 @@ def new(
     if (title is None) == (title_option is None):
         raise typer.BadParameter("give exactly one of TITLE and --title")
     title = title if title is not None else title_option
-    if item_type not in ("epic", "feat", "task"):
+    if item_type not in lifecycle.ITEM_TYPES:
         typer.echo(
-            f"Error: --type must be one of epic|feat|task, got: {item_type!r}",
+            f"Error: --type must be one of {'|'.join(lifecycle.ITEM_TYPES)}, got: {item_type!r}",
             err=True,
         )
         raise typer.Exit(2)

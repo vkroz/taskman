@@ -29,8 +29,18 @@ def test_list_text_marks_drafts_in_the_priority_column(sqlite_env) -> None:
     finalized = _new("Finalized")
     draft = sql.new("Draft")
     lines = sql.run("list").splitlines()
-    assert f"  00 task  {finalized} finalized                      Finalized" in lines
-    assert f"  draft task  {draft} draft                          Draft" in lines
+    assert f"  00 task   {finalized} finalized                      Finalized" in lines
+    assert f"  draft task   {draft} draft                          Draft" in lines
+
+
+def test_list_shows_and_filters_bugfix_items(sqlite_env) -> None:
+    bugfix = _new("Fix Crash", "bugfix")
+    task = _new("A Task", "task")
+    lines = sql.run("list").splitlines()
+    assert f"  00 bugfix {bugfix} fix_crash                      Fix Crash" in lines
+    assert f"  00 task   {task} a_task                         A Task" in lines
+    out = sql.run("list", "--type", "bugfix")
+    assert "fix_crash" in out and "a_task" not in out
 
 
 def test_list_groups_by_status(sqlite_env) -> None:

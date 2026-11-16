@@ -227,3 +227,120 @@ def test_db_upgrade_refuses_the_file_backend(tmp_path, monkeypatch):
     result = runner.invoke(app, ["db", "upgrade"])
     assert result.exit_code == 2
     assert "The file backend was removed" in result.output
+
+
+_ITEM = ("INSERT INTO items (project, number, type, title, status, parent_id, created_at, created_by, changed_at) "
+         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+_DATA_TABLES = ("projects", "items", "labels", "dependencies", "comments", "activity")
+
+
+def _version_3_database_with_items(conn, dialect) -> None:
+    """A database at schema version 3 with items, labels, dependencies, comments and activity."""
+    q = dialect.sql
+    now = "2026-11-16T00:00:00+00:00"
+    assert upgrade(conn, dialect, MIGRATIONS[:3]) == [1, 2, 3]
+    with transaction(conn, dialect):
+        conn.execute(q("INSERT INTO projects (key, name, next_number, created_at) VALUES (?, ?, ?, ?)"), ("TM", "TM", 4, now))
+        conn.execute(q(_ITEM), ("TM", 1, "epic", "Epic", "active", None, now, "pytest", now))
+        conn.execute(q(_ITEM), ("TM", 2, "task", "Child", "backlog", 1, now, "pytest", now))
+        conn.execute(q(_ITEM), ("TM", 3, "feat", "Feature", "done", None, now, "pytest", now))
+        conn.execute(q("INSERT INTO labels (item_id, label) VALUES (?, ?)"), (2, "ui"))
+        conn.execute(q("INSERT INTO dependencies (item_id, depends_on) VALUES (?, ?)"), (2, 3))
+        for text in ("first", "second", "third"):
+            conn.execute(q("INSERT INTO comments (item_id, kind, author, text, revision, created_at) VALUES (?, ?, ?, ?, ?, ?)"),
+                         (2, "decision", "pytest", text, 1, now))
+        # The next comment id stays above a deleted one.
+        conn.execute("DELETE FROM comments WHERE text = 'third'")
+        conn.execute(q("INSERT INTO activity (item_id, field, old_value, new_value, author, created_at) VALUES (?, ?, ?, ?, ?, ?)"),
+                     (2, "status", "backlog", "active", "pytest", now))
+
+
+def _rows(conn) -> dict[str, list[tuple]]:
+    return {table: sorted(tuple(row) for row in conn.execute(f"SELECT * FROM {table}").fetchall()) for table in _DATA_TABLES}
+
+
+def _indexes(conn, dialect) -> set[str]:
+    if dialect.name == "sqlite":
+        rows = conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")
+    else:
+        rows = conn.execute("SELECT indexname FROM pg_indexes WHERE schemaname = 'public'")
+    return {row[0] for row in rows.fetchall()}
+
+
+def test_upgrade_from_version_3_allows_bugfix_and_keeps_every_row(db):
+    conn, dialect = db
+    q = dialect.sql
+    now = "2026-11-16T00:00:00+00:00"
+    _version_3_database_with_items(conn, dialect)
+    rows, indexes = _rows(conn), _indexes(conn, dialect)
+    with pytest.raises(Exception):
+        with transaction(conn, dialect):
+            conn.execute(q(_ITEM), ("TM", 4, "bugfix", "Too early", "backlog", None, now, "pytest", now))
+
+    assert upgrade(conn, dialect) == [m.version for m in MIGRATIONS if m.version > 3]
+
+    assert _rows(conn) == rows
+    assert indexes <= _indexes(conn, dialect)  # version 4 keeps every index; later versions may add some
+    with transaction(conn, dialect):
+        conn.execute(q(_ITEM), ("TM", 4, "bugfix", "Fix crash", "backlog", 1, now, "pytest", now))
+        bugfix = conn.execute("SELECT id FROM items WHERE type = 'bugfix'").fetchone()[0]
+        conn.execute(q("INSERT INTO comments (item_id, kind, author, text, revision, created_at) VALUES (?, ?, ?, ?, ?, ?)"),
+                     (bugfix, "progress", "pytest", "after", 1, now))
+    # New ids continue after the existing ones.
+    assert bugfix > 3
+    assert conn.execute("SELECT id FROM comments WHERE text = 'after'").fetchone()[0] == 4
+    rejected = [
+        # A type that is still unknown.
+        (_ITEM, ("TM", 5, "bug", "Bad", "backlog", None, now, "pytest", now)),
+        # A comment of an item that does not exist: the foreign keys still hold.
+        ("INSERT INTO comments (item_id, kind, author, text, revision, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+         (99, "decision", "pytest", "orphan", 0, now)),
+        # A dependency on an item that does not exist.
+        ("INSERT INTO dependencies (item_id, depends_on) VALUES (?, ?)", (2, 99)),
+    ]
+    for statement, values in rejected:
+        with pytest.raises(Exception):
+            with transaction(conn, dialect):
+                conn.execute(q(statement), values)
+    if dialect.name == "sqlite":
+        assert conn.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_a_new_connection_reads_the_upgraded_type_rule(sql_settings):
+    conn, dialect = connect(sql_settings)
+    try:
+        _version_3_database_with_items(conn, dialect)
+    finally:
+        conn.close()
+    conn, dialect = connect(sql_settings)
+    try:
+        # The open connection read the version 3 schema before the upgrade.
+        other, _ = connect(sql_settings)
+        try:
+            other.execute("SELECT COUNT(*) FROM items").fetchone()
+            assert upgrade(conn, dialect) == [m.version for m in MIGRATIONS if m.version > 3]
+            now = "2026-11-16T00:00:00+00:00"
+            with transaction(other, dialect):
+                other.execute(dialect.sql(_ITEM), ("TM", 4, "bugfix", "Fix", "backlog", None, now, "pytest", now))
+        finally:
+            other.close()
+    finally:
+        conn.close()
+
+
+def test_a_failed_bugfix_migration_leaves_version_3(db, monkeypatch):
+    conn, dialect = db
+    _version_3_database_with_items(conn, dialect)
+    if dialect.name == "sqlite":
+        # An items table whose definition Taskman did not write.
+        monkeypatch.setattr("taskman.storage.schema._OLD_TYPE_CHECK", "CHECK (type IN ('other'))")
+    else:
+        conn.execute("ALTER TABLE items RENAME CONSTRAINT items_type_check TO custom_type_check")
+    rows, before = _rows(conn), _schema_snapshot(conn, dialect)
+    with pytest.raises(Exception, match="unexpected definition" if dialect.name == "sqlite" else "items_type_check"):
+        upgrade(conn, dialect)
+    assert _rows(conn) == rows
+    assert _schema_snapshot(conn, dialect) == before
+    with transaction(conn, dialect):
+        assert database_version(conn, dialect) == 3

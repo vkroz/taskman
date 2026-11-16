@@ -229,3 +229,22 @@ def test_the_server_works_over_each_database(sql_settings):
         assert [row["person"] for row in list_tokens(running.store)] == ["Vlad"]
     finally:
         running.stop()
+
+
+def test_a_bugfix_is_created_and_takes_no_children(server):
+    key = create(server, "Fix crash", item_type="bugfix")
+    assert call(server, "GET", f"/api/v1/items/{key}")[1]["item"]["metadata"]["type"] == "bugfix"
+    status, answer = run(server, "create", {"title": "Child", "item_type": "task", "parent_id": key})
+    assert status == 422 and "bugfix = leaf invariant" in answer["error"]["message"]
+    assert run(server, "convert", {"item_id": key, "target_type": "task"})[0] == 200
+    assert run(server, "convert", {"item_id": key, "target_type": "bugfix"})[0] == 200
+
+
+def test_an_unknown_type_is_a_rule_error(server):
+    key = create(server)
+    for operation, arguments in (("create", {"title": "Bug", "item_type": "bug", "parent_id": None, "project": "TM"}),
+                                 ("convert", {"item_id": key, "target_type": "bug"})):
+        status, answer = run(server, operation, arguments)
+        assert status == 422 and answer["error"]["usage"] is True
+        assert answer["error"]["message"] == "the type must be one of epic, feat, task, bugfix, got: 'bug'"
+    assert [item.type for item in server.store.items()] == ["task"]

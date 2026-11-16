@@ -191,6 +191,20 @@ def test_task_cannot_have_children(store):
         lifecycle.create(store, "Child", "task", task)
 
 
+def test_bugfix_is_a_leaf_type(store):
+    bugfix = _new(store, "Fix crash", "bugfix")
+    assert store.get(bugfix).type == "bugfix"
+    with pytest.raises(LifecycleError, match="bugfix = leaf invariant"):
+        lifecycle.create(store, "Child", "task", bugfix)
+    feat = _new(store, "Feature", "feat")
+    lifecycle.create(store, "Child", "bugfix", feat)
+    with pytest.raises(LifecycleError, match="has children"):
+        lifecycle.convert(store, feat, "bugfix")
+    with pytest.raises(LifecycleError, match="the type must be one of epic, feat, task, bugfix"):
+        lifecycle.create(store, "Bug", "bug", None, project="TM")
+    assert [item.type for item in store.items()] == ["bugfix", "feat", "bugfix"]
+
+
 def test_closed_parent_rejects_new_children(store):
     feat = _new(store, "Feature", "feat")
     _closed(store, feat)

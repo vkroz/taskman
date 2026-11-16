@@ -62,7 +62,7 @@ taskman move TASK_ID active
 
 `list` and `ready` show items in the order that you set in the UI or with `taskman reorder`. Items of one project stay together. Each parent comes before its children. Siblings follow their position. The text output of `list` groups the items by status and keeps this order in each group.
 
-A story uses type `feat`. Taskman permits other nesting shapes; `task` is always a leaf. Independent tasks can run in parallel. Each agent reads `context` and records its contribution through the CLI. Taskman does not launch coding agents itself.
+A story uses type `feat`. Taskman permits other nesting shapes; `task` and `bugfix` are always leaves. Independent tasks can run in parallel. Each agent reads `context` and records its contribution through the CLI. Taskman does not launch coding agents itself.
 
 ## Record work and verify
 

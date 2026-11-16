@@ -10,7 +10,7 @@ When no server is named, the local database is correct. Taskman stores work item
 
 Items have keys such as `TM-42`: the project key, then a number. A key identifies the item and its project. Read `taskman context KEY` before work: it includes requirements, ancestors, descendants, dependencies, comments and activity. Resolve a missing key with `taskman list --json` (add `--project KEY` to narrow it); ask only if the target remains ambiguous.
 
-Use `epic`, `feat` (story/feature), and `task`; a task is a leaf. Product-level requirements and architecture live in the project's existing documents. Follow that project's document conventions and link documents from tasks rather than duplicating requirements.
+Use `epic`, `feat` (story/feature), `task`, and `bugfix` (a task that fixes a bug); a task or bugfix is a leaf. Product-level requirements and architecture live in the project's existing documents. Follow that project's document conventions and link documents from tasks rather than duplicating requirements.
 
 The UI creates tasks, adds comments, sets assignees and labels, and displays agent-written context. All lifecycle operations are available through the CLI. Taskman does not launch agents itself.
 
