@@ -109,6 +109,6 @@ def search(
         return
     for m in matches:
         typer.echo(
-            f"  [{m.rank}] {m.priority} {m.item_type:5} {m.item_id} "
+            f"  [{m.rank}] {m.priority} {m.item_type:6} {m.item_id} "
             f"{m.status:7} {m.slug:30} {m.title}"
         )

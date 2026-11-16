@@ -224,6 +224,124 @@ def test_a_cancelled_google_sign_in_is_reported(login_server):
     assert status == 400 and "access_denied" in body
 
 
+@pytest.fixture
+def logins_db(sql_settings):
+    """The login steps over an upgraded, empty database of each SQL dialect."""
+    from taskman.login import Logins
+    from taskman.storage.schema import upgrade
+    from taskman.storage.sql import connect
+    from taskman.storage.sql_store import open_sql_store
+
+    conn, dialect = connect(sql_settings)
+    try:
+        upgrade(conn, dialect)
+    finally:
+        conn.close()
+    store = open_sql_store(sql_settings, actor="server")
+    yield Logins(store, settings())
+    store.close()
+
+
+def _add_login(logins, name: str, created_at: datetime, finished_at: datetime | None = None,
+               person: str | None = None) -> None:
+    with logins.store.lock():
+        logins._q(
+            "INSERT INTO logins (state_hash, kind, nonce, verifier, created_at, finished_at, person) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (name, "token", "n", "v", created_at.isoformat(), finished_at and finished_at.isoformat(), person),
+        )
+
+
+def test_a_new_login_removes_anonymous_rows_after_one_hour_and_signed_in_rows_after_one_day(logins_db, monkeypatch):
+    import taskman.login
+
+    now = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(taskman.login, "_now", lambda: now)
+    tick = timedelta(microseconds=1)
+    hour, day = now - timedelta(hours=1), now - timedelta(days=1)
+    ada = "ada@example.com"
+    _add_login(logins_db, "unfinished at the hour", hour)
+    _add_login(logins_db, "unfinished past the hour", hour - tick)
+    # A callback with an error or a bad code finishes a row but signs in nobody.
+    _add_login(logins_db, "failed at the hour", hour, hour)
+    _add_login(logins_db, "failed past the hour", hour - tick, hour)
+    _add_login(logins_db, "signed in past the hour", hour - tick, hour, ada)
+    _add_login(logins_db, "signed in at the day", day, day, ada)
+    _add_login(logins_db, "signed in past the day", day - tick, day, ada)
+    logins_db.start("token", {})
+    rows = logins_db._q("SELECT state_hash FROM logins WHERE nonce = 'n' ORDER BY state_hash").fetchall()
+    assert [row[0] for row in rows] == [
+        "failed at the hour", "signed in at the day", "signed in past the hour", "unfinished at the hour",
+    ]
+    assert logins_db._q("SELECT COUNT(*) FROM logins").fetchone()[0] == 5
+
+
+def test_the_cleanup_keeps_the_rows_of_running_logins(login_server, google):
+    verifier = "v" * 50
+    authorize = start_cli_login(login_server, verifier)
+    # The person returns from Google 9 minutes later; another login started in between.
+    nine = (datetime.now(timezone.utc) - timedelta(minutes=9)).isoformat()
+    login_server.store.conn.execute("UPDATE logins SET created_at = ?", (nine,))
+    start_cli_login(login_server, port=50001)
+    status, headers, _ = callback(login_server, google.sign_in(authorize))
+    assert status == 302
+    code = parse_qs(urlsplit(headers["Location"]).query)["code"][0]
+    # The CLI trades its code 1 minute later, after one more login started.
+    one = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    login_server.store.conn.execute("UPDATE logins SET finished_at = ? WHERE finished_at IS NOT NULL", (one,))
+    start_cli_login(login_server, port=50002)
+    status, answer = post(f"{login_server.url}/auth/exchange", {"code": code, "verifier": verifier})
+    assert status == 200 and answer["person"] == "ada@example.com"
+
+
+def _age_logins(server, minutes: int) -> None:
+    old = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+    server.store.conn.execute("UPDATE logins SET created_at = ?, finished_at = ?", (old, old))
+
+
+@pytest.mark.parametrize("answer", [{"error": "access_denied"}, {"code": "bogus"}, {}])
+def test_a_sign_in_that_ends_without_a_person_is_gone_after_one_hour(login_server, answer):
+    # Anyone can take the state from the Location header and end the sign-in with an error.
+    status, headers, _ = get(f"{login_server.url}/auth/token")
+    state = parse_qs(urlsplit(headers["Location"]).query)["state"][0]
+    assert callback(login_server, {"state": state, **answer})[0] in (400, 500, 502)
+    _age_logins(login_server, 61)
+    get(f"{login_server.url}/auth/token")
+    assert login_server.store.conn.execute("SELECT COUNT(*) FROM logins").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("kind", ["token", "cli"])
+def test_a_signed_in_login_stays_one_day(login_server, google, kind):
+    if kind == "token":
+        authorize = get(f"{login_server.url}/auth/token")[1]["Location"]
+        assert callback(login_server, google.sign_in(authorize))[0] == 200
+    else:
+        assert callback(login_server, google.sign_in(start_cli_login(login_server)))[0] == 302
+    _age_logins(login_server, 23 * 60)
+    get(f"{login_server.url}/auth/token")
+    rows = login_server.store.conn.execute("SELECT person FROM logins ORDER BY id").fetchall()
+    assert [row[0] for row in rows] == ["ada@example.com", None]
+
+
+def test_a_sign_in_that_is_not_allowed_is_gone_after_one_hour(login_server, google):
+    authorize = start_cli_login(login_server)
+    status, _, body = callback(login_server, google.sign_in(authorize, email="eve@elsewhere.example"))
+    assert status == 403 and "may not use this Taskman server" in body
+    _age_logins(login_server, 61)
+    start_cli_login(login_server, port=50001)
+    assert login_server.store.conn.execute("SELECT COUNT(*) FROM logins").fetchone()[0] == 1
+
+
+def test_an_unfinished_sign_in_older_than_one_hour_is_gone_after_a_new_login(login_server, google):
+    authorize = start_cli_login(login_server)
+    old = (datetime.now(timezone.utc) - timedelta(minutes=61)).isoformat()
+    login_server.store.conn.execute("UPDATE logins SET created_at = ?", (old,))
+    start_cli_login(login_server, port=50001)
+    assert login_server.store.conn.execute("SELECT COUNT(*) FROM logins").fetchone()[0] == 1
+    status, _, body = callback(login_server, google.sign_in(authorize))
+    assert status == 400 and "unknown or already used" in body
+
+
 class RefusingTokenEndpoint:
     """A local token endpoint that refuses each code exchange with one answer, as Google does.
 

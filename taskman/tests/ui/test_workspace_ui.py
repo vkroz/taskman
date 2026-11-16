@@ -306,6 +306,36 @@ def test_rows_show_keys_and_signals(ro, desktop):
     assert chip.evaluate("c => getComputedStyle(c).borderTopStyle") == "dashed"
 
 
+# The boxes of the rendered text, not of the spans: a fixed-width key span can end before the title
+# while its text overflows into the title.
+KEY_AND_TITLE = """rows => rows.map(r => {
+  const text = (el) => { const range = document.createRange(); range.selectNodeContents(el);
+    return range.getBoundingClientRect().toJSON(); };
+  return [r.dataset.id, text(r.querySelector('.key')), text(r.querySelector('.title'))];
+})"""
+
+
+@pytest.mark.parametrize("width", [1440, 1000, 390])
+def test_space_between_key_and_title(rw, chromium, width):
+    # A 9-character key and the longest key a project allows (10 letters) beside the seeded short keys.
+    rw.api("/api/items", {"title": "Long key", "type": "task", "project": "TASKMAN"})
+    rw.api("/api/items", {"title": "Longest key", "type": "task", "project": "LONGESTKEY"})
+    context, page = _page(chromium, {**MOBILE, "viewport": {"width": width, "height": 844}} if width < 720 else
+                          {"viewport": {"width": width, "height": 900}})
+    try:
+        visit(page, rw, "/?view=drafts")
+        rows = page.eval_on_selector_all("#rows .row", KEY_AND_TITLE)
+    finally:
+        context.close()
+    assert {"TASKMAN-1", "LONGESTKEY-1", "TM-12"} <= {key for key, _, _ in rows}
+    for key, k, t in rows:
+        assert k["width"] > 0 and t["width"] > 0, key
+        if k["top"] < t["bottom"] and t["top"] < k["bottom"]:  # on one line: the title starts after the key
+            assert t["left"] - k["right"] >= 4, (key, k, t)
+        else:  # on two lines, as on a phone: the title starts below the key
+            assert k["bottom"] <= t["top"], (key, k, t)
+
+
 # ---- 3. views and counts (P0-7) ----
 
 
@@ -896,7 +926,38 @@ def test_item_text_never_becomes_markup(rw, desktop):
     assert dialogs == []
 
 
-# ---- 17. token page of the server ----
+# ---- 17. bugfix type ----
+
+
+def test_bugfix_is_created_filtered_and_takes_no_sub_items(rw, desktop):
+    visit(desktop, rw, "/?view=drafts&project=TM")
+    desktop.click("#new")
+    pills = desktop.eval_on_selector_all("dialog[open] .pill", "ps => ps.map(p => p.textContent)")
+    assert pills == ["Task", "Bugfix", "Feature", "Epic"]
+    desktop.fill("dialog[open] input[name=title]", "Fix the crash on save")
+    desktop.click("dialog[open] .pill:has-text('Bugfix')")
+    expect(desktop.locator("dialog[open] button[type=submit]")).to_have_text("Create bugfix")
+    with desktop.expect_request(lambda r: r.url.endswith("/api/items") and r.method == "POST") as info:
+        desktop.click("dialog[open] button[type=submit]")
+    assert json.loads(info.value.post_data)["type"] == "bugfix"
+    key = info.value.response().json()["id"]
+    expect(row(desktop, key).locator(".type-icon.type-bugfix")).to_have_attribute("title", "Bugfix")
+
+    desktop.click("[data-facet=type]")
+    desktop.click(".popover label:has-text('Bugfix')")
+    expect(desktop.locator("#applied")).to_contain_text("Type is Bugfix")
+    expect(desktop.locator("#rows .row:not(.context)")).to_have_count(1)
+    assert row_ids(desktop, context=False) == [key]
+    desktop.keyboard.press("Escape")
+
+    visit(desktop, rw, f"/?view=drafts&item={key}")
+    expect(detail_key(desktop)).to_have_text(key)
+    expect(desktop.locator("#add-sub-item")).to_have_count(0)
+    open_menu_item(desktop, "Add comment")
+    expect(desktop.locator("dialog[open] textarea[name=text]")).to_be_focused()
+
+
+# ---- 18. token page of the server ----
 # The server's /auth/token page shares this module's browser: one Playwright per test session.
 
 

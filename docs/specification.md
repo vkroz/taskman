@@ -4,7 +4,7 @@ Taskman owns the shared work records; coding agents own execution. A workflow su
 
 ## Work records
 
-Items have a stable ID, title, type, requirements, status and optional parent and dependencies. Types are epic, feature/story (`feat`) and task. A task is a leaf; other nesting is flexible. Requirements may link existing project documents rather than duplicate them.
+Items have a stable ID, title, type, requirements, status and optional parent and dependencies. Types are epic, feature/story (`feat`), task and bugfix. A task or bugfix is a leaf; other nesting is flexible. Requirements may link existing project documents rather than duplicate them.
 
 Items persist in a SQL database: SQLite (the default, one file shared by all repositories) or Postgres, which connects by URL or through a Cloud SQL unix socket. Items belong to projects and have keys such as `TM-42`; a key identifies the item and its project. Each item also has an assignee, labels and an activity entry for each field change. Taskman does not read `tasks/` Markdown files from earlier versions. [The data model](data-model.md) defines the entities and how each lifecycle rule applies to them.
 

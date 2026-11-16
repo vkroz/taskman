@@ -39,6 +39,10 @@ from taskman.storage.store import StorageConfigError
 TOKEN_DAYS = 90
 LOGIN_TIME = timedelta(minutes=10)
 EXCHANGE_TIME = timedelta(minutes=2)
+# How long the logins table keeps a row without and with a signed-in person. Both are well
+# above LOGIN_TIME + EXCHANGE_TIME, so the cleanup never removes a row that a running login still needs.
+ANONYMOUS_KEPT = timedelta(hours=1)
+SIGNED_IN_KEPT = timedelta(days=1)
 PAGE_TIME = timedelta(minutes=10)
 _STATE = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 _CHALLENGE = re.compile(r"^[A-Za-z0-9_-]{43}$")
@@ -202,7 +206,12 @@ class Logins:
         state, nonce, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(32), secrets.token_urlsafe(48)
         now = _now()
         with self.store.lock():
-            self._q("DELETE FROM logins WHERE created_at < ?", ((now - timedelta(days=1)).isoformat(),))
+            # Anyone can start a login, and end it with an error, without a token. Only a row where
+            # Google signed in a person who may use this server has a person; other rows go after 1 hour.
+            self._q(
+                "DELETE FROM logins WHERE created_at < ? AND (person IS NULL OR created_at < ?)",
+                ((now - ANONYMOUS_KEPT).isoformat(), (now - SIGNED_IN_KEPT).isoformat()),
+            )
             self._q(
                 "INSERT INTO logins (state_hash, kind, cli_port, cli_state, code_challenge, label, nonce, verifier, "
                 "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -251,12 +260,12 @@ class Logins:
         })
         email = self._verified_email(_claims(str(answer.get("id_token", ""))), nonce)
         if kind == "token":
-            _, token = create_token(self.store, email, label or "web page", TOKEN_DAYS)
             # The page key lets this page, and no other, revoke the person's tokens for a short time.
             page_key = secrets.token_urlsafe(32)
             with self.store.lock():
                 self._q("UPDATE logins SET person = ?, exchange_hash = ? WHERE id = ?",
                         (email, _fingerprint(page_key), login_id))
+                _, token = create_token(self.store, email, label or "web page", TOKEN_DAYS)
             return "token", token_page(email, token, list_tokens(self.store, email), page_key)
         code = secrets.token_urlsafe(32)
         with self.store.lock():
