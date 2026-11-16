@@ -306,6 +306,36 @@ def test_rows_show_keys_and_signals(ro, desktop):
     assert chip.evaluate("c => getComputedStyle(c).borderTopStyle") == "dashed"
 
 
+# The boxes of the rendered text, not of the spans: a fixed-width key span can end before the title
+# while its text overflows into the title.
+KEY_AND_TITLE = """rows => rows.map(r => {
+  const text = (el) => { const range = document.createRange(); range.selectNodeContents(el);
+    return range.getBoundingClientRect().toJSON(); };
+  return [r.dataset.id, text(r.querySelector('.key')), text(r.querySelector('.title'))];
+})"""
+
+
+@pytest.mark.parametrize("width", [1440, 1000, 390])
+def test_space_between_key_and_title(rw, chromium, width):
+    # A 9-character key and the longest key a project allows (10 letters) beside the seeded short keys.
+    rw.api("/api/items", {"title": "Long key", "type": "task", "project": "TASKMAN"})
+    rw.api("/api/items", {"title": "Longest key", "type": "task", "project": "LONGESTKEY"})
+    context, page = _page(chromium, {**MOBILE, "viewport": {"width": width, "height": 844}} if width < 720 else
+                          {"viewport": {"width": width, "height": 900}})
+    try:
+        visit(page, rw, "/?view=drafts")
+        rows = page.eval_on_selector_all("#rows .row", KEY_AND_TITLE)
+    finally:
+        context.close()
+    assert {"TASKMAN-1", "LONGESTKEY-1", "TM-12"} <= {key for key, _, _ in rows}
+    for key, k, t in rows:
+        assert k["width"] > 0 and t["width"] > 0, key
+        if k["top"] < t["bottom"] and t["top"] < k["bottom"]:  # on one line: the title starts after the key
+            assert t["left"] - k["right"] >= 4, (key, k, t)
+        else:  # on two lines, as on a phone: the title starts below the key
+            assert k["bottom"] <= t["top"], (key, k, t)
+
+
 # ---- 3. views and counts (P0-7) ----
 
 
