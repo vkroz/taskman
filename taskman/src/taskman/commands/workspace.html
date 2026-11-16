@@ -679,6 +679,9 @@
       .type-task {
         color: var(--text-2);
       }
+      .type-bugfix {
+        color: var(--fail);
+      }
       .key {
         flex: none;
         width: 64px;
@@ -1968,6 +1971,7 @@
         epic: [["path", { d: "M9 1.5 3.5 9H8l-1 5.5L12.5 7H8z" }]],
         feat: [["path", { d: "M4.5 2.5h7v11L8 11l-3.5 2.5z" }]],
         task: [["rect", { x: 2.5, y: 2.5, width: 11, height: 11, rx: 2 }], ["path", { d: "M5.5 8l2 2 3-4" }]],
+        bugfix: [["rect", { x: 5, y: 4.5, width: 6, height: 9, rx: 3 }], ["path", { d: "M8 8v5.5M5 9H2.5M13.5 9H11M6 4.5 4.5 2.5M10 4.5l1.5-2" }]],
         "st-backlog": [C()],
         "st-ready": [C()],
         "st-draft": [C(5.5, { "stroke-dasharray": "2.2 2" })],
@@ -2017,7 +2021,9 @@
       const FLAT_VIEWS = new Set(["attention", "ready", "blocked", "done"]);
       const SORTS = [["manual", "Manual"], ["key", "Key"], ["title", "Title"], ["state", "State"], ["type", "Type"],
         ["assignee", "Assignee"], ["created", "Created"], ["updated", "Updated"]];
-      const TYPE_NAME = { epic: "Epic", feat: "Feature", task: "Task" };
+      const TYPE_NAME = { epic: "Epic", feat: "Feature", task: "Task", bugfix: "Bugfix" };
+      // Items of these types have no children.
+      const LEAF_TYPES = ["task", "bugfix"];
       const STATE_NAME = { draft: "Draft", blocked: "Blocked", ready: "Ready", active: "Active", done: "Done" };
       const STATE_ORDER = ["draft", "ready", "active", "blocked", "done"];
       const REASON = { verification_failed: "Verification failed", verification_blocked: "Verification blocked",
@@ -3272,7 +3278,7 @@
         if (d.close_gates) out.push(readinessCard(d));
         const description = markdown(d.body, fm.title);
         if (description.length) out.push(h("section", { "aria-label": "Description" }, h("div", { class: "desc description" }, description)));
-        if (d.children.length || (open && fm.type !== "task" && !S.missing)) out.push(subItems(d));
+        if (d.children.length || (open && !LEAF_TYPES.includes(fm.type) && !S.missing)) out.push(subItems(d));
         if (d.depends_on.length) out.push(relations("Depends on", d.depends_on));
         if (d.dependents.length) out.push(relations("Blocks", d.dependents));
         out.push(timelineSection(d));
@@ -3292,7 +3298,7 @@
             ["Add comment", () => openComment(d), { icon: "plus" }],
             ["Assignee and labels", () => openFields(d), { icon: "edit" }],
           ];
-          if (fm.type !== "task") items.push(["Show only its sub-items", () => { S.epic = id; filtersChanged(); }, { icon: "filter" }]);
+          if (!LEAF_TYPES.includes(fm.type)) items.push(["Show only its sub-items", () => { S.epic = id; filtersChanged(); }, { icon: "filter" }]);
           if (d.can_discard) items.push("-", ["Delete draft", () => confirmDiscard(d), { danger: true }]);
           else if (fm.draft) items.push("-", [`Delete draft: ${d.discard_blocked_reason}`, () => {}, { disabled: true }]);
           menu(more, items, `Actions for ${id}`);
@@ -3338,7 +3344,7 @@
         const fm = d.frontmatter;
         const done = d.children.filter((c) => c.state === "done").length;
         const ordered = [...d.children].sort((a, b) => (a.state === "blocked" ? 0 : 1) - (b.state === "blocked" ? 0 : 1));
-        const add = fm.status !== "done" && fm.type !== "task" && !S.missing
+        const add = fm.status !== "done" && !LEAF_TYPES.includes(fm.type) && !S.missing
           ? Button("Add sub-item", { kind: "ghost", size: "sm", icon: "plus", onclick: () => openCreate({ parent: fm.id }), attrs: { id: "add-sub-item" } })
           : null;
         const section = h("section", { "aria-label": "Sub-items" },
@@ -3472,7 +3478,7 @@
         const title = h("input", { name: "title", class: "title-input", placeholder: "Title", "aria-label": "Title", maxlength: 200, autocomplete: "off" });
         const titleError = h("span", { class: "field-error", hidden: true });
         const types = h("fieldset", { class: "pills" }, h("legend", { class: "field-label", text: "Type" }),
-          ["task", "feat", "epic"].map((t) => h("label", { class: "pill" },
+          ["task", "bugfix", "feat", "epic"].map((t) => h("label", { class: "pill" },
             h("input", { type: "radio", name: "type", value: t, checked: t === defaultType }), TypeIcon(t), TYPE_NAME[t])));
         const parentSelect = h("select", { name: "parent", "aria-label": "Parent" }, h("option", { value: "" }, "No parent"));
         if (parent) parentSelect.append(h("option", { value: parent, selected: true }, known ? `${parent} · ${clip(known.title, 48)}` : parent));
@@ -3823,7 +3829,7 @@
         for (const value of S.facets[facet.key]) if (!(value in counts)) counts[value] = 0;
         let values = Object.keys(counts);
         if (facet.key === "state") values.sort((a, b) => STATE_ORDER.indexOf(a) - STATE_ORDER.indexOf(b));
-        else if (facet.key === "type") values.sort((a, b) => ["epic", "feat", "task"].indexOf(a) - ["epic", "feat", "task"].indexOf(b));
+        else if (facet.key === "type") values.sort((a, b) => ["epic", "feat", "task", "bugfix"].indexOf(a) - ["epic", "feat", "task", "bugfix"].indexOf(b));
         else values.sort();
         return values.map((value) => ({ value, label: facetLabel(facet.key, value), count: counts[value] }));
       }
@@ -4035,7 +4041,7 @@
             event.preventDefault();
             const focused = row ? S.byId.get(row.dataset.id) : null;
             const candidate = focused || (S.detail ? S.detail.row : null);
-            openCreate({ parent: candidate && candidate.type !== "task" && candidate.status !== "done" ? candidate.id : null });
+            openCreate({ parent: candidate && !LEAF_TYPES.includes(candidate.type) && candidate.status !== "done" ? candidate.id : null });
             return;
           }
           case "j":
@@ -4131,7 +4137,7 @@
           if (!search.value) $("#topbar").classList.remove("searching");
         });
         $("#search-toggle").onclick = openSearch;
-        $("#new").onclick = () => openCreate({ parent: S.detail && S.detail.row.type !== "task" && S.detail.row.status !== "done" ? S.detail.row.id : null });
+        $("#new").onclick = () => openCreate({ parent: S.detail && !LEAF_TYPES.includes(S.detail.row.type) && S.detail.row.status !== "done" ? S.detail.row.id : null });
         $("#new-m").onclick = $("#new").onclick;
         $("#shortcuts-btn").onclick = openShortcuts;
         $("#filters-btn").onclick = openFilterSheet;

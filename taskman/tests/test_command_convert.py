@@ -79,3 +79,24 @@ def test_convert_preserves_status_and_priority(sqlite_env) -> None:
     assert row["status"] == "active"
     assert row["priority"] == "00"
     assert row["type"] == "feat"
+
+
+def test_convert_leaf_to_bugfix_and_back(sqlite_env) -> None:
+    key = _new_sql("Foo", "task")
+    sql.run("convert", key, "bugfix")
+    assert sql.show(key)["frontmatter"]["type"] == "bugfix"
+    sql.run("convert", key, "feat")
+    assert sql.show(key)["frontmatter"]["type"] == "feat"
+
+
+def test_convert_to_bugfix_with_children_rejected(sqlite_env) -> None:
+    feat = _new_sql("F", "feat")
+    child = _new_sql("Child", "task", parent=feat)
+    out = sql.run("convert", feat, "bugfix", code=1)
+    assert f"cannot convert {feat} to bugfix — has children: {child}" in out
+    assert sql.show(feat)["frontmatter"]["type"] == "feat"
+
+
+def test_convert_names_bugfix_among_the_types(sqlite_env) -> None:
+    key = _new_sql("Foo", "task")
+    assert "'bugfix'" in sql.run("convert", key, "story", code=2)

@@ -76,6 +76,6 @@ def list_items(
         for row in by_status[s]:
             # A draft shows "draft" in the priority column.
             typer.echo(
-                f"  {'draft' if row['draft'] else row['priority']} {row['type']:5} {row['id']} "
+                f"  {'draft' if row['draft'] else row['priority']} {row['type']:6} {row['id']} "
                 f"{row['slug']:30} {row['title']}"
             )

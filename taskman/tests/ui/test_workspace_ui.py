@@ -894,3 +894,34 @@ def test_item_text_never_becomes_markup(rw, desktop):
     expect(desktop.locator("#toasts")).to_contain_text("created as draft")
     assert desktop.locator("img").count() == 0
     assert dialogs == []
+
+
+# ---- 17. bugfix type ----
+
+
+def test_bugfix_is_created_filtered_and_takes_no_sub_items(rw, desktop):
+    visit(desktop, rw, "/?view=drafts&project=TM")
+    desktop.click("#new")
+    pills = desktop.eval_on_selector_all("dialog[open] .pill", "ps => ps.map(p => p.textContent)")
+    assert pills == ["Task", "Bugfix", "Feature", "Epic"]
+    desktop.fill("dialog[open] input[name=title]", "Fix the crash on save")
+    desktop.click("dialog[open] .pill:has-text('Bugfix')")
+    expect(desktop.locator("dialog[open] button[type=submit]")).to_have_text("Create bugfix")
+    with desktop.expect_request(lambda r: r.url.endswith("/api/items") and r.method == "POST") as info:
+        desktop.click("dialog[open] button[type=submit]")
+    assert json.loads(info.value.post_data)["type"] == "bugfix"
+    key = info.value.response().json()["id"]
+    expect(row(desktop, key).locator(".type-icon.type-bugfix")).to_have_attribute("title", "Bugfix")
+
+    desktop.click("[data-facet=type]")
+    desktop.click(".popover label:has-text('Bugfix')")
+    expect(desktop.locator("#applied")).to_contain_text("Type is Bugfix")
+    expect(desktop.locator("#rows .row:not(.context)")).to_have_count(1)
+    assert row_ids(desktop, context=False) == [key]
+    desktop.keyboard.press("Escape")
+
+    visit(desktop, rw, f"/?view=drafts&item={key}")
+    expect(detail_key(desktop)).to_have_text(key)
+    expect(desktop.locator("#add-sub-item")).to_have_count(0)
+    open_menu_item(desktop, "Add comment")
+    expect(desktop.locator("dialog[open] textarea[name=text]")).to_be_focused()
