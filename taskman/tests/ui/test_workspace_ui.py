@@ -22,6 +22,7 @@ from typing import NoReturn
 
 import pytest
 
+from taskman import lifecycle
 from taskman.storage.schema import upgrade
 from taskman.storage.settings import StorageSettings
 from taskman.storage.sql import connect
@@ -222,6 +223,19 @@ def discard_changes(page):
 
 def detail_key(page):
     return page.locator("#preview .d-key")
+
+
+def eventually(check, timeout=5.0):
+    """Wait until ``check()`` is true; the in-place fields save in the background."""
+    deadline = time.monotonic() + timeout
+    while not check():
+        assert time.monotonic() < deadline, "the expected change did not happen"
+        time.sleep(0.1)
+
+
+def agent_store(folder: Path):
+    """A second writer on the database of the ``rw`` server, for changes the UI cannot make."""
+    return open_sql_store(StorageSettings("sqlite", sqlite_path=folder / "work.db"), actor="Codex")
 
 
 # ---- 1. density (P0-4) ----
@@ -515,7 +529,7 @@ def test_detail_panel(ro, desktop):
 
     visit(desktop, ro, "/?item=TM-3")
     expect(desktop.locator("#preview .locked")).to_have_text("Closed with evidence")
-    assert desktop.locator("#edit-item").count() == 0
+    assert desktop.locator("#preview [contenteditable], #preview input, #preview select, #preview textarea").count() == 0
 
 
 # ---- 7. poll safety (P0-1) ----
@@ -595,41 +609,269 @@ def test_integrity(rw, desktop):
     seen = queries(desktop)
     visit(desktop, rw, "/?item=RES-5")
     expect(detail_key(desktop)).to_have_text("RES-5")
-    open_menu_item(desktop, "Assignee and labels")
-    desktop.fill("dialog[open] input[name=assignee]", "bob")
-    desktop.fill("dialog[open] input[aria-label='Add label']", "Bad Label")
-    desktop.click("dialog[open] button[type=submit]")
-    expect(desktop.locator("dialog[open] .field-error:visible")).to_contain_text("not a valid label")
-    assert not [url for url in seen if url.endswith("/api/fields")]
+    desktop.fill("#assignee-field", "bob")
+    desktop.fill("#label-field", "Bad Label")
+    desktop.press("#label-field", "Tab")
+    expect(desktop.locator("#preview .field-error:visible")).to_contain_text("not a valid label")
+    expect(desktop.locator("#assignee-field")).to_have_value("bob")
+    assert not [url for url in seen if url.endswith("/api/label")]
     shown = rw.api("/api/show/RES-5")["frontmatter"]
-    assert shown["assignee"] is None and shown["labels"] == ["bug", "ui"]
-    desktop.keyboard.press("Escape")
-    discard_changes(desktop)
+    assert shown["assignee"] == "bob" and shown["labels"] == ["bug", "ui"]
+    desktop.press("#label-field", "Escape")
 
-    desktop.click("#edit-item")
+    desktop.click("#preview .description")
     desktop.request.post(rw.base + "/api/edit", headers=HEADERS, data=json.dumps(
         {"id": "RES-5", "title": "Show onboarding wizard validation errors", "body": "Other body\n", "reason": "Other edit"}))
     actor = rw.api("/api/query", {"view": "attention"})["actor"]
-    desktop.fill("dialog[open] textarea[name=body]", "My body\n")
-    desktop.fill("dialog[open] input[name=reason]", "Mine")
-    desktop.click("dialog[open] button[type=submit]")
-    alert = desktop.locator("dialog[open] [role=alert]")
+    desktop.fill("#description-field", "My body\n")
+    desktop.fill("#description-reason", "Mine")
+    desktop.press("#description-reason", "Tab")
+    alert = desktop.locator("#preview .edit-extras", has=desktop.locator("#description-reason")).locator("[role=alert]")
     expect(alert).to_contain_text(f"Changed by {actor}")
-    expect(desktop.locator("dialog[open]")).to_have_count(1)
+    expect(desktop.locator("#description-field")).to_have_value("My body\n")
     assert rw.api("/api/show/RES-5")["body"] == "Other body\n"
-    desktop.keyboard.press("Escape")
-    discard_changes(desktop)
+    alert.get_by_role("button", name="Overwrite with mine").click()
+    expect(alert).to_be_hidden()
+    assert rw.api("/api/show/RES-5")["body"] == "My body\n"
 
     # A child's change bumps the parent's revision; the parent edit still saves.
     visit(desktop, rw, "/?item=TM-6")
     expect(detail_key(desktop)).to_have_text("TM-6")
-    desktop.click("#edit-item")
+    desktop.click("#title-field")
     rw.api("/api/comment", {"id": "TM-7", "kind": "progress", "text": "Child moved on"})
-    desktop.fill("dialog[open] input[name=title]", "Serve Taskman over HTTP")
-    desktop.fill("dialog[open] input[name=reason]", "Shorter title")
-    desktop.click("dialog[open] button[type=submit]")
+    desktop.locator("#title-field").fill("Serve Taskman over HTTP")
+    desktop.press("#title-field", "Enter")
+    expect(desktop.locator("#preview .field-error:visible")).to_have_count(0)
+    desktop.wait_for_function("""async () => (await (await fetch('/api/show/TM-6')).json()).frontmatter.title
+        === 'Serve Taskman over HTTP'""")
+
+
+# ---- 8a. edit in place ----
+
+
+def test_title_saves_when_it_loses_focus_and_esc_restores_it(rw, desktop):
+    visit(desktop, rw, "/?view=ready&item=RES-5")
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    assert desktop.get_by_role("button", name="Edit", exact=True).count() == 0
+    journal = rw.api("/api/show/RES-5")["frontmatter"].get("journal") or []
+    title = desktop.locator("#title-field")
+    title.click()
+    expect(desktop.locator("#title-reason")).to_be_visible()
+    title.fill("Show wizard errors inline")
+    desktop.click("#preview .meta")  # focus leaves the field
+    eventually(lambda: rw.api("/api/show/RES-5")["frontmatter"]["title"] == "Show wizard errors inline")
+    expect(row(desktop, "RES-5").locator(".title")).to_have_text("Show wizard errors inline")
+    expect(desktop.locator("#title-reason")).to_be_hidden()
+    # A person saves without a reason: no decision comment is added.
+    assert (rw.api("/api/show/RES-5")["frontmatter"].get("journal") or []) == journal
+
+    title.click()
+    desktop.keyboard.press("End")
+    desktop.keyboard.type(" later")
+    desktop.keyboard.press("Escape")
+    expect(title).to_have_text("Show wizard errors inline")
+    expect(desktop.locator("#detail-title")).to_be_focused()
+    expect(desktop.locator("#preview")).to_be_visible()
+    desktop.wait_for_timeout(300)
+    assert rw.api("/api/show/RES-5")["frontmatter"]["title"] == "Show wizard errors inline"
+
+    # The reason stays available and becomes a decision comment.
+    title.click()
+    title.fill("Show wizard validation errors inline")
+    desktop.fill("#title-reason", "Name the validation errors")
+    desktop.press("#title-reason", "Enter")  # no effect in the reason field
+    desktop.locator("#title-reason").blur()
+    eventually(lambda: (rw.api("/api/show/RES-5")["frontmatter"].get("journal") or [{}])[-1].get("text")
+               == "Name the validation errors")
+    assert rw.api("/api/show/RES-5")["frontmatter"]["title"] == "Show wizard validation errors inline"
+
+
+def test_description_edits_in_place(rw, desktop):
+    visit(desktop, rw, "/?item=RES-5")
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    body = rw.api("/api/show/RES-5")["body"]
+    desktop.click("#title-field")
+    # The title's reason field closes only after the click, so the click still lands on the description.
+    desktop.click("#preview .description p")
+    editor = desktop.locator("#description-field")
+    expect(editor).to_be_focused()
+    expect(editor).to_have_value(body)
+    editor.fill("## Expected\nAn inline error under the role ARN field.\n")
+    desktop.click("#preview .meta")
+    eventually(lambda: rw.api("/api/show/RES-5")["body"] == "## Expected\nAn inline error under the role ARN field.\n")
+    expect(editor).to_be_hidden()
+    expect(desktop.locator("#preview .description h3")).to_have_text("Expected")
+    expect(desktop.locator("#preview .description")).to_contain_text("An inline error under the role ARN field.")
+
+    desktop.click("#preview .description p")
+    editor.fill("Discard me")
+    editor.press("Escape")
+    expect(editor).to_be_hidden()
+    expect(desktop.locator("#preview .description")).to_be_focused()
+    expect(desktop.locator("#preview .description")).not_to_contain_text("Discard me")
+    desktop.wait_for_timeout(300)
+    assert rw.api("/api/show/RES-5")["body"] == "## Expected\nAn inline error under the role ARN field.\n"
+
+
+def test_status_assignee_and_labels_save_in_place(rw, desktop):
+    visit(desktop, rw, "/?view=drafts&item=TM-13")
+    expect(detail_key(desktop)).to_have_text("TM-13")
+    options = desktop.eval_on_selector_all("#status-field option", "os => os.map(o => [o.value, o.disabled, o.textContent])")
+    assert options == [["backlog", False, "Backlog"], ["active", True, "Active (finalize first)"],
+                       ["done", True, "Done (3 checks open)"]]
+
+    visit(desktop, rw, "/?item=RES-5")
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    status = desktop.locator("#status-field")
+    status.focus()
+    status.select_option("active")
+    desktop.keyboard.press("Tab")
+    eventually(lambda: rw.api("/api/show/RES-5")["frontmatter"]["status"] == "active")
+
+    assignee = desktop.locator("#assignee-field")
+    assignee.fill("Codex")
+    assignee.press("Enter")
+    eventually(lambda: rw.api("/api/show/RES-5")["frontmatter"]["assignee"] == "Codex")
+    expect(desktop.locator("#detail-title")).to_be_focused()
+    assignee.fill("Nobody")
+    assignee.press("Escape")
+    expect(assignee).to_have_value("Codex")
+
+    entry = desktop.locator("#label-field")
+    entry.fill("Backend")
+    entry.press("Enter")
+    expect(desktop.locator("#preview .tokens .chip")).to_have_text(["backend", "bug", "ui"])
+    desktop.get_by_role("button", name="Remove label bug").click()
+    expect(entry).to_be_focused()
+    entry.blur()
+    eventually(lambda: rw.api("/api/show/RES-5")["frontmatter"]["labels"] == ["backend", "ui"])
+    expect(desktop.locator("#preview .state")).to_contain_text("Active")
+
+
+def test_labels_typed_in_a_row_keep_focus_and_esc_cancels_them(rw, desktop):
+    visit(desktop, rw, "/?item=RES-5")
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    labels = []
+    desktop.on("request", lambda request: labels.append(request) if request.url.endswith("/api/label") else None)
+    entry = desktop.locator("#label-field")
+    chips = desktop.locator("#preview .tokens .chip")
+    entry.click()
+    # Real keystrokes: j and c are page shortcuts, so they must reach the field.
+    desktop.keyboard.type("jobs,cost")
+    desktop.keyboard.press("Enter")
+    expect(chips).to_have_text(["bug", "cost", "jobs", "ui"])
+    expect(entry).to_be_focused()
+    expect(entry).to_have_value("")
+    desktop.keyboard.press("Backspace")
+    expect(chips).to_have_text(["bug", "cost", "jobs"])
+    expect(entry).to_be_focused()
+    expect(detail_key(desktop)).to_have_text("RES-5")
     expect(desktop.locator("dialog[open]")).to_have_count(0)
-    assert rw.api("/api/show/TM-6")["frontmatter"]["title"] == "Serve Taskman over HTTP"
+    desktop.keyboard.press("Escape")
+    expect(chips).to_have_text(["bug", "ui"])
+    desktop.wait_for_timeout(300)
+    assert labels == []
+    assert rw.api("/api/show/RES-5")["frontmatter"]["labels"] == ["bug", "ui"]
+
+    entry.click()
+    desktop.keyboard.type("docs,jobs")
+    desktop.keyboard.press("Enter")
+    desktop.keyboard.press("Tab")
+    eventually(lambda: rw.api("/api/show/RES-5")["frontmatter"]["labels"] == ["bug", "docs", "jobs", "ui"])
+    assert len(labels) == 1
+
+
+def test_status_field_names_the_ancestor_that_refuses_the_move(rw, desktop, tmp_path):
+    draft_parent = rw.api("/api/items", {"title": "Draft feature", "type": "feat", "project": "TM"})["id"]
+    under_draft = rw.api("/api/items", {"title": "Under a draft", "type": "task", "parent": draft_parent, "body": "Spec."})["id"]
+    under_blocked = rw.api("/api/items", {"title": "Under a blocked feature", "type": "task", "parent": "TM-11",
+                                          "body": "Spec."})["id"]
+    agent = agent_store(tmp_path)
+    try:
+        with agent.lock():
+            lifecycle.finalize(agent, under_draft)
+            lifecycle.finalize(agent, under_blocked)
+    finally:
+        agent.close()
+    active = "#status-field option[value=active]"
+    visit(desktop, rw, f"/?item={under_draft}")
+    expect(detail_key(desktop)).to_have_text(under_draft)
+    expect(desktop.locator(active)).to_be_disabled()
+    expect(desktop.locator(active)).to_have_text(f"Active (finalize {draft_parent} first)")
+    visit(desktop, rw, f"/?item={under_blocked}")
+    expect(detail_key(desktop)).to_have_text(under_blocked)
+    expect(desktop.locator(active)).to_be_disabled()
+    expect(desktop.locator(active)).to_have_text("Active (blocked by TM-6)")
+
+
+def test_failed_save_keeps_the_text_and_shows_the_error(rw, desktop, tmp_path):
+    visit(desktop, rw, "/?item=RES-5")
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    title = desktop.locator("#title-field")
+    desktop.route("**/api/edit", lambda route: route.fulfill(
+        status=400, content_type="application/json", body=json.dumps({"error": "The database is not reachable"})))
+    title.click()
+    title.fill("Typed while offline")
+    title.blur()
+    alert = desktop.locator("#preview .edit-extras", has=desktop.locator("#title-reason")).locator("[role=alert]")
+    expect(alert).to_have_text("The database is not reachable")
+    expect(title).to_have_text("Typed while offline")
+    expect(title).to_have_attribute("data-unsaved", "")
+    desktop.wait_for_timeout(5500)  # a poll does not render over the unsaved text
+    expect(title).to_have_text("Typed while offline")
+    desktop.unroute("**/api/edit")
+    title.click()
+    title.blur()
+    eventually(lambda: rw.api("/api/show/RES-5")["frontmatter"]["title"] == "Typed while offline")
+    expect(alert).to_be_hidden()
+
+    # The server's own refusal shows the same way.
+    title.click()
+    title.fill("")
+    title.blur()
+    expect(alert).to_have_text("Enter a title of 1–200 characters")
+    title.press("Escape")
+    expect(title).to_have_text("Typed while offline")
+    expect(alert).to_be_hidden()
+
+    # A move the lifecycle refuses keeps the choice and shows why.
+    status = desktop.locator("#status-field")
+    status.focus()  # a poll does not render the panel again while a field is in use
+    agent = agent_store(tmp_path)
+    try:
+        with agent.lock():
+            lifecycle.set_dependencies(agent, "RES-5", ["RES-6"])
+    finally:
+        agent.close()
+    status.select_option("active")
+    status.blur()
+    expect(desktop.locator("#preview .fields [role=alert]:visible")).to_have_text("dependency is not done: RES-6")
+    expect(status).to_have_value("active")
+    assert rw.api("/api/show/RES-5")["frontmatter"]["status"] == "backlog"
+
+
+def test_closing_from_the_status_field_makes_the_item_read_only(rw, desktop, tmp_path):
+    key = rw.api("/api/items", {"title": "Close me", "type": "task", "project": "TM", "body": "Spec."})["id"]
+    agent = agent_store(tmp_path)
+    try:
+        with agent.lock():
+            lifecycle.finalize(agent, key)
+    finally:
+        agent.close()
+    rw.api("/api/comment", {"id": key, "kind": "summary", "text": "Done."})
+    rw.api("/api/comment", {"id": key, "kind": "verification", "text": "Checked.", "result": "pass"})
+    visit(desktop, rw, f"/?item={key}")
+    expect(detail_key(desktop)).to_have_text(key)
+    status = desktop.locator("#status-field")
+    expect(status.locator("option[value=done]")).to_be_enabled()
+    status.focus()
+    status.select_option("done")
+    desktop.click("#preview .meta")
+    expect(desktop.locator("#preview .locked")).to_have_text("Closed with evidence")
+    assert rw.api(f"/api/show/{key}")["frontmatter"]["status"] == "done"
+    assert desktop.locator("#preview [contenteditable], #preview input, #preview select, #preview textarea").count() == 0
+    desktop.click("#preview .description")
+    assert desktop.locator("#preview textarea").count() == 0
 
 
 # ---- 9. filters and sort (P0-9) ----
@@ -706,14 +948,10 @@ def test_keyboard(ro, desktop):
     # Every dialog the detail panel opens has an accessible name.
     visit(desktop, ro, "/?item=RES-5")
     expect(detail_key(desktop)).to_have_text("RES-5")
-    for opener in ("#edit-item", "Add comment", "Assignee and labels"):
-        if opener.startswith("#"):
-            desktop.click(opener)
-        else:
-            open_menu_item(desktop, opener)
-        expect(desktop.locator("dialog[open]")).to_have_accessible_name(re.compile(r"\S"))
-        desktop.keyboard.press("Escape")
-        expect(desktop.locator("dialog[open]")).to_have_count(0)
+    open_menu_item(desktop, "Add comment")
+    expect(desktop.locator("dialog[open]")).to_have_accessible_name(re.compile(r"\S"))
+    desktop.keyboard.press("Escape")
+    expect(desktop.locator("dialog[open]")).to_have_count(0)
 
 
 # ---- 11. create and comment (P0-14) ----
@@ -771,10 +1009,11 @@ def test_errors_and_recovery(rw, desktop):
 
     visit(desktop, rw, "/?view=drafts&item=TM-13")
     expect(detail_key(desktop)).to_have_text("TM-13")
-    expect(desktop.locator("#edit-item")).to_be_enabled()
+    expect(desktop.locator("#title-field")).to_have_attribute("contenteditable", "plaintext-only")
     desktop.request.post(rw.base + "/api/discard", headers=HEADERS, data=json.dumps({"id": "TM-13"}))
-    expect(desktop.locator("#preview [role=alert]")).to_have_text("TM-13 was deleted or discarded", timeout=7000)
-    expect(desktop.locator("#edit-item")).to_be_disabled()
+    expect(desktop.locator("#preview .notice")).to_have_text("TM-13 was deleted or discarded", timeout=7000)
+    expect(desktop.locator("#title-field")).not_to_have_attribute("contenteditable", re.compile(".*"))
+    expect(desktop.locator("#status-field")).to_be_disabled()
     # Only the title and the disabled actions stay; gates and timeline no longer describe anything.
     expect(desktop.locator("#detail-title")).to_be_visible()
     for stale in (".readiness", 'section[aria-label="Timeline"]', 'section[aria-label="Description"]'):

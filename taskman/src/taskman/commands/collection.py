@@ -23,6 +23,8 @@ def edit(
     reason: str = typer.Option(...),
 ):
     """Edit the title, and optionally the description, of an open item and journal the reason."""
+    if not reason.strip():
+        raise typer.BadParameter("Explain why the task changed")
     body = read_body(body_file) if body_file is not None else None
     try:
         edit_item(open_store(), item_id, title, body, reason)

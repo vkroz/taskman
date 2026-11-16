@@ -270,7 +270,7 @@ def _make_handler(store: Store):
                 self._json(403, {'error': 'Only local Taskman UI requests are accepted.'})
                 return
             if self.path not in ('/api/items', '/api/query', '/api/edit', '/api/discard', '/api/reorder',
-                                 '/api/comment', '/api/assign', '/api/label', '/api/fields'):
+                                 '/api/comment', '/api/assign', '/api/label', '/api/fields', '/api/move'):
                 self._json(404, {'error': 'Unknown endpoint'})
                 return
             try:
@@ -329,6 +329,11 @@ def _make_handler(store: Store):
                             _unchanged_ok(lambda: lifecycle.label(store, item_id, labels, removed))
                             _unchanged_ok(lambda: lifecycle.assign(store, item_id, assignee))
                             result = {'ok': True}
+                        elif self.path == '/api/move':
+                            target = data.get('status')
+                            if target not in ('backlog', 'active', 'done'):
+                                raise ValueError('Choose the status backlog, active or done')
+                            result = _unchanged_ok(lambda: lifecycle.move(store, item_id, target))
                         elif self.path == '/api/discard':
                             lifecycle.discard(store, item_id)
                             result = {'ok': True}
@@ -338,7 +343,7 @@ def _make_handler(store: Store):
                                 raise ValueError('Select a valid task ID')
                             result = {'order': reorder_item(store, item_id, position)}
                         if status == 200 and self.path in ('/api/edit', '/api/comment', '/api/assign',
-                                                           '/api/label', '/api/fields'):
+                                                           '/api/label', '/api/fields', '/api/move'):
                             result['row'] = _row(*_snapshot(store), item_id)
                     self._json(status, result)
                     return

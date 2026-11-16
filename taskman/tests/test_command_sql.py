@@ -86,6 +86,12 @@ def test_edit_changes_only_the_title_without_a_body_file(cli):
     assert _json("show", "TM-1", "--json")["body"] == "Item spec.\n"
 
 
+def test_edit_on_the_command_line_needs_a_reason(cli):
+    cli("new", "--title", "Item", "--project", "TM")
+    assert "Explain why the task changed" in cli("edit", "TM-1", "--title", "Renamed", "--reason", " ", code=2)
+    assert _json("show", "TM-1", "--json")["frontmatter"]["title"] == "Item"
+
+
 # ---- keys and projects -----------------------------------------------------
 
 

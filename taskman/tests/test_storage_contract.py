@@ -395,8 +395,19 @@ def test_edit_comments_the_reason(store):
     edited = lifecycle.edit(store, item, "Renamed", "New body", "Clarify scope")
     assert (edited.title, edited.body) == ("Renamed", "New body")
     assert edited.metadata["journal"][-1]["text"] == "Clarify scope"
-    with pytest.raises(LifecycleError, match="Explain why"):
-        lifecycle.edit(store, item, "Renamed", "New body", " ")
+    with pytest.raises(LifecycleError, match="reason for the change is text"):
+        lifecycle.edit(store, item, "Renamed", "New body", ["Clarify"])
+
+
+def test_edit_without_a_reason_adds_no_comment(store):
+    item = _new(store, "Item")
+    journal = store.get(item).metadata.get("journal") or []
+    revision = store.get(item).metadata.get("revision", 0)
+    for reason in (None, "", " "):
+        edited = lifecycle.edit(store, item, f"Renamed {reason!r}", None, reason)
+        assert edited.title == f"Renamed {reason!r}"
+        assert (edited.metadata.get("journal") or []) == journal
+    assert store.get(item).metadata["revision"] == revision + 3
 
 
 def test_edit_without_a_description_keeps_it(store):

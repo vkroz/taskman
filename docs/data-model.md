@@ -119,7 +119,7 @@ Key numbers come from the project's next number in the same transaction. Two wri
 | `consolidate`, `history` | Removed (D8, feature 261109005). |
 | `migrate`, `worktree-status` | Removed with the file backend (feature 261109005). |
 
-The UI shows comments, activity, assignee and labels in the item details. The UI can set the assignee and labels and add comments.
+The UI shows comments, activity, assignee and labels in the item details. The UI can set the assignee and labels, change the title, the description and the status of open work, and add comments.
 
 ### Output
 

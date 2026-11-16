@@ -12,7 +12,7 @@ Items have keys such as `TM-42`: the project key, then a number. A key identifie
 
 Use `epic`, `feat` (story/feature), `task`, and `bugfix` (a task that fixes a bug); a task or bugfix is a leaf. Product-level requirements and architecture live in the project's existing documents. Follow that project's document conventions and link documents from tasks rather than duplicating requirements.
 
-The UI creates tasks, adds comments, sets assignees and labels, and displays agent-written context. All lifecycle operations are available through the CLI. Taskman does not launch agents itself.
+The UI creates tasks, edits the title and description of open items in place, moves and closes them from the status field, adds comments, sets assignees and labels, and displays agent-written context. All lifecycle operations are available through the CLI. Taskman does not launch agents itself.
 
 ## Create and plan
 

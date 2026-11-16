@@ -274,7 +274,7 @@ Python code is under `taskman/src/taskman/`; plugin sources are under `plugins/t
 
 Run `taskman ui` for the local workspace. The sidebar selects a view (Attention, Active, Ready, Blocked, Drafts, Backlog or Done) and a project. Search, facet filters and the epic scope apply at once and stay in the URL. Sort orders siblings; drag an open item to change its position within its parent and project. Select a row to open its details; Back or Esc closes them. [docs/ui-design.md](docs/ui-design.md) describes the page.
 
-Create work with **New**; a top-level item needs a project key. Details show the state, blockers, close readiness and one timeline of comments and changes. **Edit** changes the title and description with a recorded reason. The menu offers **Add comment** with a kind (and a result for a verification), **Assignee and labels**, and **Delete draft** for draft leaves with no incoming dependencies. Finalized and completed work cannot be deleted. Agents finalize, move and close items through the CLI.
+Create work with **New**; a top-level item needs a project key. Details show the state, blockers, close readiness and one timeline of comments and changes. In open work, click the title, the description, the status, the assignee or the labels to change them. Each field saves when it loses focus; Esc cancels. A reason for a title or description change is optional; a given reason becomes a decision comment. The status offers only the moves that the lifecycle allows now, and Done needs all close checks. The menu offers **Add comment** with a kind (and a result for a verification) and **Delete draft** for draft leaves with no incoming dependencies. Finalized and completed work cannot be deleted. Completed work shows read-only fields. Agents finalize items through the CLI.
 
 The same operations are available from the CLI:
 
@@ -287,4 +287,4 @@ taskman reorder TASK_KEY --position 1
 taskman discard DRAFT_KEY
 ```
 
-Without `--body-file`, `edit` changes only the title and keeps the description. `browse` emits hierarchy-preserving JSON; contextual ancestors have `context: true` and do not match the query themselves. Use `show` or `context` with a key for the complete record. See [workspace design](docs/ui-design.md) for filtering semantics. In JSON, comments are in `frontmatter.journal`.
+Without `--body-file`, `edit` changes only the title and keeps the description. On the command line, `edit` needs a reason. `browse` emits hierarchy-preserving JSON; contextual ancestors have `context: true` and do not match the query themselves. Use `show` or `context` with a key for the complete record. See [workspace design](docs/ui-design.md) for filtering semantics. In JSON, comments are in `frontmatter.journal`.
