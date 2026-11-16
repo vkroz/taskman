@@ -50,7 +50,9 @@ ITEMS AND KEYS
 
   A new top-level item needs --project KEY; Taskman creates the project on
   first use. A child gets the project of its parent. Dependencies stay inside
-  one project. A command finds the item and its project from the key.
+  one project. A command finds the item and its project from the key. For
+  an unknown key, every command prints `Error: item not found: KEY` and
+  exits with code 1.
 
   A comment has a kind: decision, progress, handoff, summary or
   verification. A verification comment has a result: pass, fail or blocked.

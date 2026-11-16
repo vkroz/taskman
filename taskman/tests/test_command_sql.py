@@ -174,7 +174,7 @@ def test_assign_unassign_and_filter(cli):
     cli("unassign", "TM-1")
     assert _json("show", "TM-1", "--json")["frontmatter"]["assignee"] is None
     assert "1-100" in cli("assign", "TM-1", "x" * 101, code=2)
-    assert "item not found" in cli("assign", "TM-9", "codex", code=2)
+    assert "item not found" in cli("assign", "TM-9", "codex", code=1)
 
 
 def test_label_add_remove_and_filter(cli):

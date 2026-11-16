@@ -114,7 +114,7 @@ def dependents(
     store = open_store()
     items = _load_graph(store)
     if item_id not in items:
-        typer.echo(f"Warning: item not found: {item_id}", err=True)
+        typer.echo(f"Error: item not found: {item_id}", err=True)
         raise typer.Exit(1)
     out = [
         i for i in items.values()
@@ -134,7 +134,7 @@ def waiting_on(
     store = open_store()
     items = _load_graph(store)
     if item_id not in items:
-        typer.echo(f"Warning: item not found: {item_id}", err=True)
+        typer.echo(f"Error: item not found: {item_id}", err=True)
         raise typer.Exit(1)
     target = items[item_id]
     dependencies = set()

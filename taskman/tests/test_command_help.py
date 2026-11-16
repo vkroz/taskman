@@ -55,3 +55,7 @@ def test_help_lists_the_query_and_edit_commands() -> None:
     lifecycle = _help().split("LIFECYCLE")[1].split("INVARIANTS")[0]
     for name in ("ready", "edit", "browse", "search", "waiting-on", "dependents"):
         assert f"\n  {name} " in lifecycle or f"\n  {name}\n" in lifecycle, name
+
+
+def test_help_documents_the_error_for_an_unknown_key() -> None:
+    assert "every command prints `Error: item not found: KEY` and exits with code 1" in " ".join(_help().split())
