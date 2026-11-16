@@ -71,7 +71,26 @@ def test_older_database_gets_only_the_missing_versions(db):
     assert versions == [m.version for m in newer]
 
 
-def _indexes(conn, dialect, table: str) -> set[str]:
+def test_a_version_below_the_highest_is_applied_when_missing(db, sql_settings, monkeypatch):
+    # As when a branch with a higher version merges and deploys before a branch with a lower one.
+    import taskman.storage.sql_store as sql_store
+
+    conn, dialect = db
+    earlier = Migration(CURRENT_VERSION + 1, "earlier branch", ("CREATE TABLE earlier_probe (id INTEGER)",))
+    later = Migration(CURRENT_VERSION + 2, "later branch", ("CREATE TABLE later_probe (id INTEGER)",))
+    assert upgrade(conn, dialect, MIGRATIONS + (later,))[-1] == later.version
+    merged = MIGRATIONS + (earlier, later)
+    monkeypatch.setattr(sql_store, "MIGRATIONS", merged)
+    monkeypatch.setattr(sql_store, "CURRENT_VERSION", later.version)
+    with pytest.raises(StorageConfigError, match=f"lacks version {earlier.version}. Run: taskman db upgrade"):
+        sql_store.open_sql_store(sql_settings)
+    assert upgrade(conn, dialect, merged) == [earlier.version]
+    assert "earlier_probe" in _tables(conn, dialect)
+    assert upgrade(conn, dialect, merged) == []
+    sql_store.open_sql_store(sql_settings).close()
+
+
+def _table_indexes(conn, dialect, table: str) -> set[str]:
     if dialect.name == "sqlite":
         rows = conn.execute(dialect.sql("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ?"), (table,))
     else:
@@ -87,9 +106,9 @@ def test_a_database_at_version_3_gets_the_index_of_login_start_times(db):
             dialect.sql("INSERT INTO logins (state_hash, kind, nonce, verifier, created_at) VALUES (?, ?, ?, ?, ?)"),
             ("kept", "token", "n", "v", "2026-11-16T12:00:00+00:00"),
         )
-    assert "logins_created_at" not in _indexes(conn, dialect, "logins")
+    assert "logins_created_at" not in _table_indexes(conn, dialect, "logins")
     assert upgrade(conn, dialect) == [m.version for m in MIGRATIONS if m.version > 3]
-    assert "logins_created_at" in _indexes(conn, dialect, "logins")
+    assert "logins_created_at" in _table_indexes(conn, dialect, "logins")
     assert conn.execute("SELECT state_hash FROM logins").fetchall() == [("kept",)]
 
 

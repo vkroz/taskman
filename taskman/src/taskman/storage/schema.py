@@ -1,8 +1,9 @@
 """Versioned SQL schema for the work-item model in ``docs/data-model.md``.
 
 Each migration has a version number. ``upgrade`` applies the migrations
-above the database's recorded version, in order, in one transaction, and
-records each version in ``schema_versions``.
+that the database has not recorded, in order, in one transaction, and
+records each version in ``schema_versions``. A version can be missing below
+the highest one when branches merge in another order than their numbers.
 """
 from __future__ import annotations
 
@@ -191,9 +192,10 @@ def upgrade(conn: Any, dialect: Dialect, migrations: tuple[Migration, ...] = MIG
             raise StorageConfigError(
                 f"The database schema is at version {current}; this Taskman knows version {latest}. Upgrade Taskman."
             )
+        recorded = {row[0] for row in conn.execute("SELECT version FROM schema_versions").fetchall()}
         applied = []
         for migration in migrations:
-            if migration.version <= current:
+            if migration.version in recorded:
                 continue
             for statement in migration.statements:
                 conn.execute(statement.format(**_TYPES[dialect.name]))

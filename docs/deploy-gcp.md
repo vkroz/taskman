@@ -440,7 +440,7 @@ gcloud secrets versions disable <old version> --secret taskman-google-client-sec
 
 Set `ALLOWED_DOMAINS`, `ALLOWED_EMAILS`, or both, in `deploy/gcp/nemos-infra.env`, as comma-separated lists without spaces. `ALLOWED_DOMAINS` admits the members of a Google Workspace organization. A personal Gmail account has no Workspace domain: put its address in `ALLOWED_EMAILS`. To change who may sign in, change the lists and merge to `staging`. `deploy.sh` stops before it changes anything when `GOOGLE_CLIENT_ID` is set and `PUBLIC_URL` is empty, or both lists are empty. To turn browser login off, empty `GOOGLE_CLIENT_ID` and merge to `staging`.
 
-When browser login is on, anyone can open `/auth/token` and `/auth/cli` on the public service. Each request adds a row to the `logins` table under the database write lock, and Taskman does not limit the rate of these requests. Each new request deletes the rows of unfinished sign-ins after 1 hour and all other rows after 1 day.
+When browser login is on, anyone can open `/auth/token` and `/auth/cli` on the public service. Each request adds a row to the `logins` table under the database write lock, and Taskman does not limit the rate of these requests. Each new request deletes a row after 1 day when Google signed in a person who may use the server, and after 1 hour in all other cases, also when the sign-in returned with an error.
 
 ### Fix a failed login
 
