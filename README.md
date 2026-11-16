@@ -276,4 +276,4 @@ taskman reorder TASK_KEY --position 1
 taskman discard DRAFT_KEY
 ```
 
-Without `--body-file`, `edit` changes only the title and keeps the description. `browse` emits hierarchy-preserving JSON; contextual ancestors have `context: true` and do not match the query themselves. Use `show` or `context` with a key for the complete record. See [workspace design](docs/ui-design.md) for filtering semantics. In JSON, comments are in `frontmatter.journal`.
+Without `--body-file`, `edit` changes only the title and keeps the description. On the command line, `edit` needs a reason. `browse` emits hierarchy-preserving JSON; contextual ancestors have `context: true` and do not match the query themselves. Use `show` or `context` with a key for the complete record. See [workspace design](docs/ui-design.md) for filtering semantics. In JSON, comments are in `frontmatter.journal`.

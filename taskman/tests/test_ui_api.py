@@ -292,7 +292,8 @@ def test_edit_journals_the_store_actor_and_allows_title_only_drafts(api, store):
     lifecycle.finalize(store, key)
     error = api("/api/edit", {"id": key, "title": "Draft", "body": " ", "reason": "Empty"}, status=400)["error"]
     assert "must not be empty" in error
-    assert "Explain" in api("/api/edit", {"id": key, "title": "Draft", "body": "B", "reason": ""}, status=400)["error"]
+    assert api("/api/edit", {"id": key, "title": "Draft", "body": "B", "reason": ""})["ok"]
+    assert (store.get(key).body, store.get(key).metadata["journal"][-1]["text"]) == ("B", "Title only")
     assert "not found" in api("/api/edit", {"id": "TM-99", "title": "T", "body": "B", "reason": "R",
                                             "base_title": "T"}, status=400)["error"]
 

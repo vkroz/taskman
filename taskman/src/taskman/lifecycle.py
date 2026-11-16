@@ -423,20 +423,22 @@ def edit(store: Store, item_id: str, title: Any, body: Any, reason: Any) -> Item
     # A draft may stay title-only (decision D2); finalized work keeps a description.
     elif not isinstance(body, str) or (not body.strip() and not item.draft):
         raise LifecycleError("Description must not be empty", usage=True)
-    if not isinstance(reason, str) or not reason.strip():
-        raise LifecycleError("Explain why the task changed", usage=True)
+    # A person in the UI may leave the reason empty; the CLI still asks for one.
+    if reason is not None and not isinstance(reason, str):
+        raise LifecycleError("A reason for the change is text", usage=True)
     metadata = copy.deepcopy(item.metadata)
     metadata["title"] = title.strip()
     metadata["revision"] = _revision(item) + 1
-    metadata.setdefault("journal", []).append(
-        {
-            "kind": "decision",
-            "actor": store.actor,
-            "at": _now(),
-            "text": reason.strip(),
-            "revision": metadata["revision"],
-        }
-    )
+    if reason and reason.strip():
+        metadata.setdefault("journal", []).append(
+            {
+                "kind": "decision",
+                "actor": store.actor,
+                "at": _now(),
+                "text": reason.strip(),
+                "revision": metadata["revision"],
+            }
+        )
     item = store.save(item_id, metadata, body)
     invalidate_ancestors(store, item_id)
     return item

@@ -149,6 +149,13 @@ def test_a_request_for_the_current_state_is_no_change(server):
     assert status == 200 and "No change" in answer["no_change"]
 
 
+def test_an_edit_needs_no_reason(server):
+    key = create(server)
+    status, answer = run(server, "edit", {"item_id": key, "title": "Renamed", "body": None, "reason": ""})
+    assert status == 200 and answer["item"]["metadata"]["title"] == "Renamed"
+    assert not server.store.get(key).metadata.get("journal")
+
+
 def test_reorder_returns_the_new_order(server):
     first, second = create(server, "First"), create(server, "Second")
     assert run(server, "reorder_item", {"item_id": second, "position": 1}) == (200, {"order": [second, first]})
