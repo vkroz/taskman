@@ -1015,6 +1015,49 @@
       .d-title:focus {
         outline: none;
       }
+      .d-title-field {
+        display: block;
+        margin: 0 calc(-1 * var(--s1));
+        padding: 0 var(--s1);
+        border-radius: var(--r1);
+      }
+      .d-title-field[contenteditable]:hover,
+      .editable:hover {
+        background: var(--surface-2);
+      }
+      .d-title-field:focus,
+      .editable:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+      .editable {
+        margin: 0 calc(-1 * var(--s1));
+        padding: var(--s1);
+        border-radius: var(--r1);
+        cursor: text;
+      }
+      .editable .placeholder {
+        color: var(--text-2);
+      }
+      .edit-extras {
+        display: grid;
+        gap: var(--s2);
+      }
+      .fields {
+        display: grid;
+        grid-template-columns: 72px minmax(0, 1fr);
+        align-items: start;
+        gap: var(--s2) var(--s3);
+      }
+      .fields > .field-label {
+        padding-top: var(--s2);
+      }
+      .fields select {
+        justify-self: start;
+      }
+      #description-field {
+        width: 100%;
+      }
       .props {
         display: flex;
         flex-wrap: wrap;
@@ -1982,7 +2025,6 @@
         keyboard: [["rect", { x: 1.5, y: 4, width: 13, height: 8, rx: 1.5 }], ["path", { d: "M4.5 7h1M7.5 7h1M10.5 7h1M5 10h6" }]],
         agent: [["path", { d: "M8 2l1.5 4.5L14 8l-4.5 1.5L8 14l-1.5-4.5L2 8l4.5-1.5z" }]],
         filter: [["path", { d: "M2.5 3.5h11L9.3 8.5v4l-2.6 1.5V8.5z" }]],
-        edit: [["path", { d: "M10.5 2.5l3 3-8 8h-3v-3z" }]],
         person: [["circle", { cx: 8, cy: 5.5, r: 2.5 }], ["path", { d: "M3 13.5a5 5 0 0 1 10 0" }]],
       };
       function icon(name, label) {
@@ -3179,7 +3221,7 @@
       const panelBusy = () => {
         const selection = getSelection();
         const selected = selection && !selection.isCollapsed && preview.contains(selection.anchorNode);
-        return selected || preview.contains(document.activeElement);
+        return selected || preview.contains(document.activeElement) || !!preview.querySelector("[data-unsaved]");
       };
       /** Fetch the open item. Re-render only when it changed and the user is not reading or typing in it. */
       async function loadDetail(id, { force = false, signal } = {}) {
@@ -3256,13 +3298,17 @@
           h("button", { class: "linklike", type: "button", onclick: () => setProject(fm.project) }, fm.project));
         for (const ancestor of d.ancestors) crumbs.append(h("span", { "aria-hidden": "true" }, "›"), RefLink(ancestor.id, ancestor.title));
         out.push(crumbs);
-        out.push(h("h2", { class: "d-title", id: "detail-title", tabindex: "-1", text: fm.title }));
+        // Open work edits in place; the title and the description share the text that was saved last.
+        const live = { title: fm.title, body: d.body };
+        if (open) out.push(...titleEditor(d, live));
+        else out.push(h("h2", { class: "d-title", id: "detail-title", tabindex: "-1", text: fm.title }));
         // Property strip: only values that exist.
         const props = h("div", { class: "props" }, StateChip(row));
         if (row.draft && open) props.append(DraftChip());
-        if (fm.assignee) props.append(h("span", { class: "prop" }, Owner(fm.assignee)));
-        if ((fm.labels || []).length) props.append(h("span", { class: "prop" }, LabelChips(fm.labels, 10)));
+        if (!open && fm.assignee) props.append(h("span", { class: "prop" }, Owner(fm.assignee)));
+        if (!open && (fm.labels || []).length) props.append(h("span", { class: "prop" }, LabelChips(fm.labels, 10)));
         out.push(props);
+        if (open) out.push(propertyEditors(d));
         const meta = h("p", { class: "meta" }, "Created ", timeEl(fm.created_at));
         if (fm.created_by) meta.append(` by ${fm.created_by}`);
         if (row.updated_at && row.updated_at !== fm.created_at) meta.append(" · updated ", timeEl(row.updated_at));
@@ -3270,8 +3316,11 @@
         out.push(detailActions(d));
         if (S.missing) return out;
         if (d.close_gates) out.push(readinessCard(d));
-        const description = markdown(d.body, fm.title);
-        if (description.length) out.push(h("section", { "aria-label": "Description" }, h("div", { class: "desc description" }, description)));
+        if (open) out.push(descriptionEditor(d, live));
+        else {
+          const description = markdown(d.body, fm.title);
+          if (description.length) out.push(h("section", { "aria-label": "Description" }, h("div", { class: "desc description" }, description)));
+        }
         if (d.children.length || (open && fm.type !== "task" && !S.missing)) out.push(subItems(d));
         if (d.depends_on.length) out.push(relations("Depends on", d.depends_on));
         if (d.dependents.length) out.push(relations("Blocks", d.dependents));
@@ -3285,19 +3334,343 @@
           return h("div", { class: "actions" }, h("span", { class: "locked" }, icon("lock"), "Closed with evidence"));
         }
         const disabled = S.missing;
-        const edit = Button("Edit", { kind: "ghost", size: "sm", icon: "edit", onclick: () => openEdit(d), attrs: { disabled, id: "edit-item" } });
         const more = Button("", { kind: "ghost", size: "sm", icon: "more", title: "More actions", attrs: { disabled, "aria-haspopup": "menu", id: "more-actions" } });
         more.onclick = () => togglePopover(more, () => {
           const items = [
             ["Add comment", () => openComment(d), { icon: "plus" }],
-            ["Assignee and labels", () => openFields(d), { icon: "edit" }],
           ];
           if (fm.type !== "task") items.push(["Show only its sub-items", () => { S.epic = id; filtersChanged(); }, { icon: "filter" }]);
           if (d.can_discard) items.push("-", ["Delete draft", () => confirmDiscard(d), { danger: true }]);
           else if (fm.draft) items.push("-", [`Delete draft: ${d.discard_blocked_reason}`, () => {}, { disabled: true }]);
           menu(more, items, `Actions for ${id}`);
         });
-        return h("div", { class: "actions" }, edit, more);
+        return h("div", { class: "actions" }, more);
+      }
+      // ---- in-place editing of open work ----
+      const STATUS_NAME = { backlog: "Backlog", active: "Active", done: "Done" };
+      /** Move focus out of a field to the title heading, so the panel keys work again. */
+      const leaveField = () => $("#detail-title", preview)?.focus({ preventScroll: true });
+      let pointerDown = false;
+      document.addEventListener("pointerdown", () => { pointerDown = true; }, true);
+      for (const type of ["pointerup", "pointercancel"]) document.addEventListener(type, () => { pointerDown = false; }, true);
+      /** Run after a pointer press ends, so a field that closes does not move the target of the click away. */
+      function afterPointer(run) {
+        if (!pointerDown) return run();
+        const finish = () => {
+          for (const type of ["pointerup", "pointercancel"]) document.removeEventListener(type, finish, true);
+          setTimeout(run);
+        };
+        for (const type of ["pointerup", "pointercancel"]) document.addEventListener(type, finish, true);
+      }
+      /**
+       * Edit one field of the open item in place. It saves when focus leaves all of its parts; Esc restores the
+       * saved value. A failed save keeps the typed value, shows the error and marks the field unsaved, so a poll
+       * does not render over it.
+       */
+      function inPlace({ parts, error, read, write, save, check, onEdit, onDone, onError, leave = leaveField }) {
+        const self = { saved: read(), write, focus: () => parts[0].focus() };
+        let busy = false;
+        let again = false;
+        const inside = (node) => !!node && parts.some((part) => part.contains(node));
+        const done = () => afterPointer(() => {
+          if (!inside(document.activeElement)) onDone?.();
+        });
+        self.report = (message) => {
+          error.replaceChildren(...[message || []].flat());
+          error.hidden = !message;
+          setAttr(parts[0], "data-unsaved", message ? true : null);
+        };
+        self.commit = async () => {
+          if (busy) {
+            again = true;
+            return;
+          }
+          const problem = check?.();
+          if (problem) {
+            self.report(problem);
+            return;
+          }
+          const value = read();
+          if (value === self.saved) {
+            self.report(null);
+            done();
+            return;
+          }
+          busy = true;
+          try {
+            await save(value, self.saved);
+            self.saved = value;
+            self.report(null);
+            done();
+            afterFieldSave();
+          } catch (failure) {
+            if (!error.isConnected) toast(`Not saved: ${failure.message}`);
+            else self.report(onError?.(failure, self) || failure.message);
+          } finally {
+            busy = false;
+            if (again) {
+              again = false;
+              if (!inside(document.activeElement)) self.commit();
+            }
+          }
+        };
+        for (const part of parts) {
+          part.addEventListener("focusin", () => onEdit?.());
+          part.addEventListener("focusout", (event) => {
+            if (!inside(event.relatedTarget)) self.commit();
+          });
+          part.addEventListener("keydown", (event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            write(self.saved);
+            self.report(null);
+            leave();
+          });
+        }
+        return self;
+      }
+      /** After an in-place save: refresh the list, and render the open item again unless a field in it is in use. */
+      async function afterFieldSave() {
+        await refresh({ force: true });
+        const active = document.activeElement;
+        const editing = (preview.contains(active) && active.matches("input,textarea,select,[contenteditable=plaintext-only]"))
+          || !!preview.querySelector("[data-unsaved]");
+        if (S.item) await loadDetail(S.item, { force: !editing }).catch(() => {});
+      }
+      /** The error of a field, plus the reason for a title or description change, shown while the field is in use. */
+      function reasonRow(id) {
+        const reason = h("input", { id, name: "reason", placeholder: "Why it changed", autocomplete: "off" });
+        const error = h("span", { class: "field-error", role: "alert", hidden: true });
+        const extras = h("div", { class: "edit-extras", hidden: true },
+          error,
+          h("label", { class: "field" }, h("span", { text: "Reason for the change (optional)" }), reason,
+            h("span", { class: "hint", text: "Saves when you leave the field. A reason becomes a decision comment. Esc cancels." })));
+        return { extras, reason, error };
+      }
+      /** A 409 answer: the other text replaced what this field opened with. Offer theirs or yours. */
+      function conflictChoices(failure, field, theirs, rebase) {
+        if (failure.status !== 409) return null;
+        const current = failure.body.current;
+        const choose = (overwrite) => () => {
+          rebase(current);
+          field.focus();
+          if (overwrite) {
+            field.commit();
+            return;
+          }
+          field.write(theirs(current));
+          field.saved = theirs(current);
+          field.report(null);
+        };
+        return [h("span", { text: `Changed by ${current.actor} ${relTime(current.changed_at, true)}. Your text is kept. ` }),
+          h("button", { class: "btn sm", type: "button", onclick: choose(false) }, "Reload theirs"),
+          h("button", { class: "btn sm", type: "button", onclick: choose(true) }, "Overwrite with mine")];
+      }
+      /** The title as an editable heading. Enter saves; the heading itself stays the panel's focus target. */
+      function titleEditor(d, live) {
+        const fm = d.frontmatter;
+        const field = h("span", { class: "d-title-field", id: "title-field", role: "textbox", "aria-label": "Title",
+          contenteditable: S.missing ? null : "plaintext-only", text: fm.title });
+        const heading = h("h2", { class: "d-title", id: "detail-title", tabindex: "-1" }, field);
+        const { extras, reason, error } = reasonRow("title-reason");
+        let base = fm.title;
+        inPlace({
+          parts: [field, extras], error,
+          read: () => field.textContent.replace(/[\r\n]+/g, " ").trim(),
+          write: (value) => { field.textContent = value; },
+          save: async (value) => {
+            await api("/api/edit", { id: fm.id, title: value, reason: reason.value, base_title: base });
+            live.title = base = value;
+          },
+          onEdit: () => { extras.hidden = false; },
+          onDone: () => {
+            extras.hidden = true;
+            reason.value = "";
+          },
+          onError: (failure, self) => conflictChoices(failure, self, (current) => current.title, (current) => {
+            base = live.title = current.title;
+          }),
+        });
+        field.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          leaveField();
+        });
+        return [heading, extras];
+      }
+      /** The description: Markdown until a click or Enter turns it into a text field. */
+      function descriptionEditor(d, live) {
+        const fm = d.frontmatter;
+        const view = h("div", { class: "desc description editable", tabindex: "0", title: "Edit the description" });
+        const drawView = () => {
+          const nodes = markdown(live.body, live.title);
+          view.replaceChildren(...(nodes.length ? nodes : [h("span", { class: "placeholder", text: "Add a description" })]));
+        };
+        const editor = h("textarea", { id: "description-field", name: "body", "aria-label": "Description", rows: 10, hidden: true,
+          placeholder: "Outcome, scope and acceptance criteria" });
+        editor.value = d.body;
+        const { extras, reason, error } = reasonRow("description-reason");
+        let base = { title: live.title, body: d.body };
+        const field = inPlace({
+          parts: [editor, extras], error,
+          read: () => editor.value,
+          write: (value) => { editor.value = value; },
+          save: async (value) => {
+            await api("/api/edit", { id: fm.id, title: live.title, body: value, reason: reason.value,
+              base_title: base.title, base_body: base.body });
+            live.body = value;
+            base = { title: live.title, body: value };
+          },
+          leave: () => {
+            view.hidden = false;
+            view.focus({ preventScroll: true });
+          },
+          onDone: () => {
+            reason.value = "";
+            drawView();
+            editor.hidden = extras.hidden = true;
+            view.hidden = false;
+          },
+          onError: (failure, self) => conflictChoices(failure, self, (current) => current.body, (current) => {
+            live.title = current.title;
+            base = { title: current.title, body: current.body };
+          }),
+        });
+        const edit = () => {
+          if (S.missing) return;
+          view.hidden = true;
+          editor.hidden = extras.hidden = false;
+          editor.rows = Math.min(24, Math.max(6, editor.value.split("\n").length + 1));
+          editor.focus();
+        };
+        view.addEventListener("click", (event) => {
+          if (event.target.closest("a,button")) return;
+          const selection = getSelection();
+          if (selection && !selection.isCollapsed && view.contains(selection.anchorNode)) return;
+          edit();
+        });
+        view.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" || event.target !== view) return;
+          event.preventDefault();
+          edit();
+        });
+        editor.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey)) return;
+          event.preventDefault();
+          view.hidden = false;
+          view.focus({ preventScroll: true });
+        });
+        drawView();
+        return h("section", { "aria-label": "Description" }, view, editor, extras);
+      }
+      /** Status choices: only moves the lifecycle allows now; the others say why not. */
+      function statusOptions(d) {
+        const fm = d.frontmatter;
+        const row = d.row;
+        const failing = (d.close_gates || []).filter((gate) => !gate.ok).length;
+        const blockers = row.blockers || [];
+        const why = {
+          backlog: null,
+          active: row.draft ? "finalize first" : row.state === "blocked" ? (blockers.length ? `blocked by ${blockers.join(", ")}` : "blocked") : null,
+          done: failing ? `${plural(failing, "check")} open` : null,
+        };
+        return Object.entries(STATUS_NAME).map(([value, name]) => {
+          const refused = value !== fm.status && why[value];
+          return h("option", { value, selected: value === fm.status, disabled: !!refused }, refused ? `${name} (${refused})` : name);
+        });
+      }
+      /** Status, assignee and labels of open work. Each saves when it loses focus. */
+      function propertyEditors(d) {
+        const fm = d.frontmatter;
+        const grid = h("div", { class: "fields" });
+        const add = (label, control, error) => grid.append(h("span", { class: "field-label", text: label }),
+          h("div", { class: "field" }, control, error));
+        const enterLeaves = (input) => input.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          leaveField();
+        });
+
+        const status = h("select", { id: "status-field", name: "status", "aria-label": "Status", disabled: S.missing }, statusOptions(d));
+        const statusError = h("span", { class: "field-error", role: "alert", hidden: true });
+        inPlace({
+          parts: [status], error: statusError,
+          read: () => status.value,
+          write: (value) => { status.value = value; },
+          save: (value) => api("/api/move", { id: fm.id, status: value }),
+        });
+        add("Status", status, statusError);
+
+        const known = new Set([...Object.keys((S.data && S.data.facets.assignee) || {}), ...S.agents, S.data ? S.data.actor : ""]);
+        const assignee = h("input", { id: "assignee-field", name: "assignee", list: "assignee-names", maxlength: 100,
+          value: fm.assignee || "", placeholder: "No assignee", autocomplete: "off", "aria-label": "Assignee", disabled: S.missing });
+        const assigneeError = h("span", { class: "field-error", role: "alert", hidden: true });
+        inPlace({
+          parts: [assignee], error: assigneeError,
+          read: () => assignee.value.trim(),
+          write: (value) => { assignee.value = value; },
+          save: (value) => api("/api/assign", { id: fm.id, assignee: value || null }),
+        });
+        enterLeaves(assignee);
+        add("Assignee", [assignee, h("datalist", { id: "assignee-names" },
+          [...known].filter(Boolean).sort().map((name) => h("option", { value: name })))], assigneeError);
+
+        const labels = [...(fm.labels || [])].sort();
+        const entry = h("input", { id: "label-field", "aria-label": "Add label", placeholder: "Add label", autocomplete: "off", disabled: S.missing });
+        const tokens = h("div", { class: "tokens", role: "group", "aria-label": "Labels" });
+        const labelError = h("span", { class: "field-error", role: "alert", hidden: true });
+        const draw = () => tokens.replaceChildren(...labels.map((label) => h("span", { class: "chip" }, label,
+          h("button", { type: "button", "aria-label": `Remove label ${label}`, disabled: S.missing,
+            onmousedown: (event) => event.preventDefault(), // focus stays in the label field
+            onclick: () => {
+              labels.splice(labels.indexOf(label), 1);
+              draw();
+              entry.focus();
+            } }, icon("close")))), entry);
+        /** Lowercase and check pending label text; return the error when it is not a valid label. */
+        const addPending = () => {
+          for (const raw of entry.value.split(",")) {
+            const name = raw.trim().toLowerCase();
+            if (!name) continue;
+            if (!LABEL_RE.test(name)) return `“${raw.trim()}” is not a valid label. Use 1–50 lowercase letters, digits, - or _.`;
+            if (!labels.includes(name)) labels.push(name);
+          }
+          entry.value = "";
+          labels.sort();
+          draw();
+          return null;
+        };
+        const labelField = inPlace({
+          parts: [tokens], error: labelError, check: addPending,
+          read: () => labels.join(" "),
+          write: (value) => {
+            labels.splice(0, labels.length, ...(value ? value.split(" ") : []));
+            entry.value = "";
+            draw();
+          },
+          save: (value, saved) => {
+            const next = value ? value.split(" ") : [];
+            const before = saved ? saved.split(" ") : [];
+            return api("/api/label", { id: fm.id, add: next.filter((name) => !before.includes(name)),
+              remove: before.filter((name) => !next.includes(name)) });
+          },
+        });
+        entry.addEventListener("keydown", (event) => {
+          if ((event.key === "Enter" && !event.ctrlKey && !event.metaKey) || event.key === ",") {
+            event.preventDefault();
+            if (!entry.value.trim()) {
+              if (event.key === "Enter") leaveField();
+              return;
+            }
+            labelField.report(addPending());
+          } else if (event.key === "Backspace" && !entry.value && labels.length) {
+            labels.pop();
+            draw();
+          }
+        });
+        draw();
+        add("Labels", tokens, labelError);
+        return grid;
       }
       function readinessCard(d) {
         const gates = d.close_gates;
@@ -3458,7 +3831,7 @@
       }
 
       // =====================================================================
-      // Actions: create, edit, comment, assignee and labels, discard
+      // Actions: create, comment, discard
       // =====================================================================
       async function parentCandidates() {
         const result = await api("/api/query", { view: "", sort: "key", filters: [
@@ -3596,61 +3969,6 @@
           setTimeout(() => node.classList.remove("flash"), 2000);
         }
       }
-      function openEdit(d) {
-        const fm = d.frontmatter;
-        let base = { title: fm.title, body: d.body };
-        const title = h("input", { name: "title", maxlength: 200, value: fm.title, autocomplete: "off" });
-        const body = h("textarea", { name: "body", rows: 10 });
-        body.value = d.body;
-        const reason = h("input", { name: "reason", placeholder: "Why the item changed", autocomplete: "off" });
-        const reasonError = h("span", { class: "field-error", hidden: true });
-        const dlg = Dialog({
-          title: `Edit ${fm.id}`,
-          submit: "Save changes",
-          body: [
-            h("label", { class: "field" }, h("span", { text: "Title" }), title),
-            h("label", { class: "field" }, h("span", { text: fm.draft ? "Description (optional for a draft)" : "Description" }), body),
-            h("label", { class: "field" }, h("span", { text: "Reason for the change" }), reason, reasonError,
-              h("span", { class: "hint", text: "Saved as a decision comment. The item starts a new revision." })),
-          ],
-          initialFocus: () => title,
-          onSubmit: async () => {
-            reasonError.hidden = true;
-            if (!reason.value.trim()) {
-              reasonError.textContent = "Enter the reason for the change";
-              reasonError.hidden = false;
-              reason.focus();
-              return;
-            }
-            try {
-              await api("/api/edit", { id: fm.id, title: title.value, body: body.value, reason: reason.value,
-                base_title: base.title, base_body: base.body });
-            } catch (error) {
-              if (error.status !== 409) throw error;
-              const current = error.body.current;
-              dlg.setError([
-                h("span", { text: `Changed by ${current.actor} ${relTime(current.changed_at, true)}. Your text is kept.` }),
-                h("button", { class: "btn sm", type: "button", onclick: () => {
-                  title.value = current.title;
-                  body.value = current.body;
-                  base = { title: current.title, body: current.body };
-                  dlg.setError(null);
-                } }, "Reload theirs"),
-                h("button", { class: "btn sm", type: "button", onclick: () => {
-                  base = { title: current.title, body: current.body };
-                  dlg.setError(null);
-                  dlg.form.requestSubmit();
-                } }, "Overwrite with mine"),
-              ]);
-              return;
-            }
-            dlg.resetDirty();
-            dlg.close();
-            toast(`${fm.id} saved`);
-            await afterChange();
-          },
-        });
-      }
       function openComment(d) {
         const id = d.frontmatter.id;
         const kind = h("select", { name: "kind", "aria-label": "Kind" },
@@ -3701,75 +4019,6 @@
         kind.addEventListener("change", sync);
         sync();
         dlg.resetDirty();
-      }
-      function openFields(d) {
-        const fm = d.frontmatter;
-        const known = new Set([...Object.keys((S.data && S.data.facets.assignee) || {}), ...S.agents, S.data ? S.data.actor : ""]);
-        const listId = `assignees-${dialogSeq + 1}`;
-        const assignee = h("input", { name: "assignee", list: listId, maxlength: 100, value: fm.assignee || "",
-          placeholder: "Person or agent", autocomplete: "off" });
-        const labels = [...(fm.labels || [])];
-        const tokens = h("div", { class: "tokens" });
-        const entry = h("input", { "aria-label": "Add label", placeholder: "Add label", autocomplete: "off" });
-        const holder = h("input", { type: "hidden", name: "labels", "data-dirty-value": "" });
-        const labelError = h("span", { class: "field-error", hidden: true });
-        const draw = () => {
-          holder.dataset.dirtyValue = labels.join(" ");
-          tokens.replaceChildren(...labels.map((label) => h("span", { class: "chip" }, label,
-            h("button", { type: "button", "aria-label": `Remove label ${label}`, onclick: () => {
-              labels.splice(labels.indexOf(label), 1);
-              draw();
-              entry.focus();
-            } }, icon("close")))), entry);
-        };
-        /** Lowercase and check pending label text; return false when it is not a valid label. */
-        const addPending = () => {
-          for (const raw of entry.value.split(",")) {
-            const name = raw.trim().toLowerCase();
-            if (!name) continue;
-            if (!LABEL_RE.test(name)) {
-              labelError.textContent = `“${raw.trim()}” is not a valid label. Use 1–50 lowercase letters, digits, - or _.`;
-              labelError.hidden = false;
-              entry.focus();
-              return false;
-            }
-            if (!labels.includes(name)) labels.push(name);
-          }
-          entry.value = "";
-          labelError.hidden = true;
-          draw();
-          return true;
-        };
-        entry.addEventListener("keydown", (event) => {
-          if ((event.key === "Enter" && !event.ctrlKey && !event.metaKey) || event.key === ",") {
-            if (!entry.value.trim()) return;
-            event.preventDefault();
-            addPending();
-          } else if (event.key === "Backspace" && !entry.value && labels.length) {
-            labels.pop();
-            draw();
-          }
-        });
-        draw();
-        const dlg = Dialog({
-          title: `Assignee and labels of ${fm.id}`,
-          submit: "Save",
-          body: [
-            h("label", { class: "field" }, h("span", { text: "Assignee" }), assignee,
-              h("datalist", { id: listId }, [...known].filter(Boolean).sort().map((name) => h("option", { value: name })))),
-            h("div", { class: "field" }, h("span", { class: "field-label", text: "Labels" }), tokens, holder, labelError,
-              h("span", { class: "hint", text: "Press Enter to add a label." })),
-          ],
-          initialFocus: () => assignee,
-          onSubmit: async () => {
-            if (!addPending()) return;
-            await api("/api/fields", { id: fm.id, assignee: assignee.value.trim() || null, labels });
-            dlg.resetDirty();
-            dlg.close();
-            toast(`${fm.id} updated`);
-            await afterChange();
-          },
-        });
       }
       function confirmDiscard(d) {
         const id = d.frontmatter.id;

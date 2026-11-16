@@ -314,6 +314,32 @@ def test_lifecycle_edit_records_the_store_actor(store):
     assert edited.metadata["journal"][-1]["actor"] == store.actor == "Vlad"
 
 
+# ---- /api/move -----------------------------------------------------------------
+
+
+def test_move_changes_the_status_and_returns_the_row(api, store):
+    key = _create(api, "Item", project="TM")
+    lifecycle.finalize(store, key)
+    result = api("/api/move", {"id": key, "status": "active"})
+    assert (result["ok"], result["row"]["status"], result["row"]["state"]) == (True, "active", "active")
+    assert api("/api/move", {"id": key, "status": "active"})["message"] == f"No change: {key} already in active."
+    assert api("/api/move", {"id": key, "status": "backlog"})["row"]["status"] == "backlog"
+    lifecycle.record(store, key, "summary", "Codex", "Done.")
+    lifecycle.record(store, key, "verification", "Codex", "Passed.", "pass")
+    assert api("/api/move", {"id": key, "status": "done"})["row"]["status"] == "done"
+    assert "immutable" in api("/api/move", {"id": key, "status": "active"}, status=400)["error"]
+
+
+def test_move_reports_the_lifecycle_refusal_and_changes_nothing(api, store):
+    key = _create(api, "Draft", project="TM")
+    before = store.get(key)
+    assert "finalize" in api("/api/move", {"id": key, "status": "active"}, status=400)["error"]
+    assert "finalize the draft" in api("/api/move", {"id": key, "status": "done"}, status=400)["error"]
+    assert "Choose the status" in api("/api/move", {"id": key, "status": "closed"}, status=400)["error"]
+    assert "not found" in api("/api/move", {"id": "TM-99", "status": "active"}, status=400)["error"]
+    assert store.get(key) == before
+
+
 # ---- /api/fields ---------------------------------------------------------------
 
 

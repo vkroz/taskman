@@ -26,23 +26,32 @@ From top to bottom, the panel shows:
 
 1. The type, the key (a click copies it), Copy link, previous and next, and close.
 2. The project and the ancestors as links.
-3. The title, the state, the owner, the labels, and the creation and update times.
-4. **Edit** and a menu with Add comment, Assignee and labels, Show only its sub-items, and Delete draft. Delete draft shows only for a draft that can be discarded. Otherwise the menu gives the reason, for example "has 1 child". A done item shows "Closed with evidence" and no actions.
+3. The title, the state, the status, the owner, the labels, and the creation and update times. In open work, the title, the status, the owner and the labels are fields that you edit in place.
+4. A menu with Add comment, Show only its sub-items, and Delete draft. Delete draft shows only for a draft that can be discarded. Otherwise the menu gives the reason, for example "has 1 child". A done item shows "Closed with evidence" and no actions.
 5. Close readiness for open items: finalized ("Not finalized (draft)" for a draft), dependencies, sub-items, summary and verification for the current revision. The verdict is "Ready to close" with the `taskman close` command, or "Not closable" with the number of open checks.
-6. The description as Markdown. The page builds every node with DOM text, so item text never becomes markup. A first heading equal to the title is not repeated.
+6. The description as Markdown. The page builds every node with DOM text, so item text never becomes markup. A first heading equal to the title is not repeated. In open work, a click or Enter on the description changes it to a text field.
 7. Sub-items with a segmented progress bar, blocked items first. **Add sub-item** shows on open epics and features.
 8. Depends on and Blocks.
 9. One timeline of comments and field changes, newest first. Filters are All, Evidence, Decisions, Handoffs and Changes. Each comment shows its kind, actor, revision and time. A verification shows its result. A divider marks the start of each revision.
+
+## Edit in place
+
+Open work has no Edit button. A click on a field starts the edit, and the field saves when focus leaves it. Esc restores the saved value. Enter saves the title, the owner and the labels; Ctrl+Enter or Cmd+Enter saves the description.
+
+- **Title and description**: while you edit one of them, an optional "Reason for the change" field shows below it. A reason becomes a decision comment by the store actor. Without a reason, the change has no comment; the timeline still shows the change. A draft can have an empty description. If someone changed the title or description after the page showed it, the field keeps the typed text and offers Reload theirs or Overwrite with mine.
+- **Status**: Backlog, Active or Done. A move that the lifecycle refuses now is disabled and gives the cause, for example "Active (finalize first)" or "Done (2 checks open)". Done closes the item.
+- **Assignee**: a text field that suggests known people and agents. An empty field removes the assignee.
+- **Labels**: Enter or a comma adds a label, and the remove button or Backspace removes one. The page lowercases labels and rejects labels that do not match `^[a-z0-9_-]{1,50}$`.
+
+A failed save keeps the typed value in the field and shows the error below it. A poll does not render over a field that has an unsaved value. Completed work shows read-only fields.
 
 ## Dialogs and changes
 
 All dialogs share one component with a title, a close button and a footer. The read-only shortcut sheet has only **Done**. Ctrl+Enter or Cmd+Enter submits. When a form has changes, Esc, Cancel or a click outside asks before it discards them. A submit disables its button until the server answers, so a second submit does nothing.
 
 - **Create** has a title field, type pills, a parent picker grouped by project and a project select. A parent sets and locks the project. A new project needs a second submit to confirm. The description is optional. After create, the page expands the parent, shows and flashes the new row, and offers to copy `/tm:plan KEY`.
-- **Edit** changes the title and the description of open work. A reason is required and becomes a decision comment by the store actor. A draft can have an empty description. If someone changed the title or description after the dialog opened, the dialog keeps the typed text and offers Reload theirs or Overwrite with mine.
 - **Add comment** defaults to Progress and explains each kind. A verification requires Pass, Fail or Blocked.
 - **Delete draft** asks for confirmation. Focus then moves to the next row, or to the previous row at the end of the list.
-- **Assignee and labels** saves both in one request. The page lowercases labels and rejects labels that do not match `^[a-z0-9_-]{1,50}$`.
 
 Completed records remain read-only. Delete is limited to unreferenced draft leaves.
 
@@ -62,7 +71,7 @@ Colours are tokens for a light and a dark theme. The theme follows the system. T
 
 ## Checks
 
-`tests/ui/test_workspace_ui.py` drives Chromium through Playwright against a seeded `taskman ui` server at 1440x900 and 390x844. It checks density, row content, views and counts, projects, URL state, the detail panel, polling safety, data integrity, filters, the keyboard, create and comment, errors, the offline indicator, the mobile layout, contrast in both themes and escaping. Each test that changes data gets its own server on a copy of the seed. `tests/ui/test_workspace_css.py` checks without a browser that styles use only the tokens and the type, weight and radius scales. All these tests are marked `ui`: `uv run pytest -m ui` runs only them. The browser tests need the `ui` extra (`uv sync --extra ui`). They skip when Playwright is not installed or Chromium cannot start. With `TASKMAN_TEST_REQUIRE_BROWSER=1`, as in CI, they fail instead.
+`tests/ui/test_workspace_ui.py` drives Chromium through Playwright against a seeded `taskman ui` server at 1440x900 and 390x844. It checks density, row content, views and counts, projects, URL state, the detail panel, polling safety, data integrity, edit in place, filters, the keyboard, create and comment, errors, the offline indicator, the mobile layout, contrast in both themes and escaping. Each test that changes data gets its own server on a copy of the seed. `tests/ui/test_workspace_css.py` checks without a browser that styles use only the tokens and the type, weight and radius scales. All these tests are marked `ui`: `uv run pytest -m ui` runs only them. The browser tests need the `ui` extra (`uv sync --extra ui`). They skip when Playwright is not installed or Chromium cannot start. With `TASKMAN_TEST_REQUIRE_BROWSER=1`, as in CI, they fail instead.
 
 ## Query service
 
@@ -75,6 +84,7 @@ Implementation uses a shared Python query service for CLI and UI. `taskman brows
 - `POST /api/query` returns the projects with open counts, the item count of each view, facet counts, and the rows of one view. A row has no description, journal or internal fields. It has derived signals: state, blockers, leaf progress, latest verification, attention reason and last update. The response has an `etag`. When the request sends the same `etag`, the response is only `{etag, unchanged: true}`.
 - The views are Attention, Active, Ready, Blocked, Drafts, Backlog and Done. Attention holds open items with a failed or blocked current verification, a handoff as the latest comment, or all close gates passed. Ready holds backlog items that can start. Blocked holds finalized open items that are not ready.
 - `GET /api/show/KEY` adds ancestors, children, dependencies, dependents, the close gates and whether the item can be discarded, with the reason when it cannot. `taskman close` uses the same close gates. The response has an `etag`. `GET /api/show/KEY?etag=ETAG` with the current `etag` returns only `{etag, unchanged: true}`.
-- `POST /api/edit` with `base_title` and `base_body` returns 409 with the current text when another actor changed the title or description after the editor opened. Comments, assignee and label changes do not cause a conflict. Without `body`, `POST /api/edit` keeps the description.
+- `POST /api/edit` with `base_title` and `base_body` returns 409 with the current text when another actor changed the title or description after the editor opened. Comments, assignee and label changes do not cause a conflict. Without `body`, `POST /api/edit` keeps the description. The `reason` is optional; a reason that is not empty becomes a decision comment.
 - `POST /api/fields` sets the assignee and the labels in one transaction.
+- `POST /api/move` with `status` `backlog`, `active` or `done` moves the item, as `taskman move` does. A move to `done` closes the item through the close gates.
 - `POST /api/reorder` moves an item to a one-based `position` among its siblings, as `taskman reorder --position` does. The top-level items of each project have their own order.
