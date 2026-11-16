@@ -157,6 +157,11 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
+    Migration(
+        5,
+        "index of login start times",
+        ("CREATE INDEX logins_created_at ON logins (created_at)",),
+    ),
 )
 
 CURRENT_VERSION = MIGRATIONS[-1].version

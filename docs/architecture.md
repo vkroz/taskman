@@ -94,6 +94,6 @@ Each sign-in works one time and for 10 minutes. The one-time code works for 2 mi
 - The server has no page to list or revoke tokens. An operator does this with `taskman token list` and `taskman token revoke` on a machine that reaches the database.
 - The server does not serve the workspace page. `taskman ui` serves it on the computer of the user.
 - The server uses one database connection for all calls and does not connect again after the connection breaks. After a database restart, `/readyz` answers 503 until the server process restarts. On Cloud Run, a liveness probe on `/readyz` replaces such an instance.
-- With browser login on, anyone can open `/auth/token` and `/auth/cli` without a token. Each request adds a row to the `logins` table and deletes old rows, under the database write lock. Taskman does not limit the rate of these requests.
+- With browser login on, anyone can open `/auth/token` and `/auth/cli` without a token. Each request adds a row to the `logins` table and deletes old rows, under the database write lock. A row of an unfinished sign-in stays 1 hour; other rows stay 1 day. Taskman does not limit the rate of these requests.
 - Taskman does not read `tasks/` Markdown files from earlier versions, and imports nothing from them (decision D4).
 - There is no consolidation of completed work (decision D8).
