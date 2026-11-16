@@ -9,7 +9,9 @@ token. The CLI proves with a secret of its own (PKCE) that it started the login,
 so a stolen exchange code is useless.
 
 ``/auth/token`` signs a person in the same way and shows a personal access
-token on the page, for a machine with no browser.
+token on the page, for a machine with no browser. The page also lists the
+person's tokens. Its revoke buttons post a page key that only this page holds,
+so another site cannot make the browser revoke a token.
 """
 from __future__ import annotations
 
@@ -30,7 +32,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode, urlsplit
 
-from taskman.storage.accounts import create_token
+from taskman.storage.accounts import create_token, list_tokens, revoke_token
 from taskman.storage.sql_store import SqlStore
 from taskman.storage.store import StorageConfigError
 
@@ -41,9 +43,11 @@ EXCHANGE_TIME = timedelta(minutes=2)
 # above LOGIN_TIME + EXCHANGE_TIME, so the cleanup never removes a row that a running login still needs.
 ANONYMOUS_KEPT = timedelta(hours=1)
 SIGNED_IN_KEPT = timedelta(days=1)
+PAGE_TIME = timedelta(minutes=10)
 _STATE = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 _CHALLENGE = re.compile(r"^[A-Za-z0-9_-]{43}$")
 _ERROR_CODE = re.compile(r"^[a-z_]{1,64}$")
+_TOKEN_ID = re.compile(r"^\d{1,18}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,10 +260,13 @@ class Logins:
         })
         email = self._verified_email(_claims(str(answer.get("id_token", ""))), nonce)
         if kind == "token":
+            # The page key lets this page, and no other, revoke the person's tokens for a short time.
+            page_key = secrets.token_urlsafe(32)
             with self.store.lock():
-                self._q("UPDATE logins SET person = ? WHERE id = ?", (email, login_id))
+                self._q("UPDATE logins SET person = ?, exchange_hash = ? WHERE id = ?",
+                        (email, _fingerprint(page_key), login_id))
                 _, token = create_token(self.store, email, label or "web page", TOKEN_DAYS)
-            return "token", token_page(email, token)
+            return "token", token_page(email, token, list_tokens(self.store, email), page_key)
         code = secrets.token_urlsafe(32)
         with self.store.lock():
             self._q("UPDATE logins SET person = ?, exchange_hash = ? WHERE id = ?", (email, _fingerprint(code), login_id))
@@ -292,7 +299,7 @@ class Logins:
         with self.store.lock():
             row = self._q(
                 "SELECT id, code_challenge, label, person, finished_at FROM logins "
-                "WHERE exchange_hash = ? AND exchanged_at IS NULL",
+                "WHERE exchange_hash = ? AND kind = 'cli' AND exchanged_at IS NULL",
                 (_fingerprint(code),),
             ).fetchone()
             if row is None:
@@ -306,6 +313,29 @@ class Logins:
         _, token = create_token(self.store, person, label, TOKEN_DAYS)
         return {"token": token, "person": person}
 
+    def revoke(self, form: dict[str, str]) -> tuple[int, str]:
+        """Revoke a token of the person who signed in on the token page. Gives the status and the new page."""
+        page_key = form.get("page", "")
+        with self.store.lock():
+            row = self._q(
+                "SELECT person, finished_at FROM logins WHERE exchange_hash = ? AND kind = 'token' "
+                "AND person IS NOT NULL",
+                (_fingerprint(page_key),),
+            ).fetchone() if page_key else None
+        if row is None:
+            raise LoginError(403, "This page is not from a sign-in on this server. Open /auth/token to sign in again.")
+        person, finished_at = row
+        if _now() - datetime.fromisoformat(finished_at) > PAGE_TIME:
+            raise LoginError(403, "This page is more than 10 minutes old. Open /auth/token to sign in again.")
+        token_id = form.get("token", "")
+        if not _TOKEN_ID.match(token_id):
+            raise LoginError(400, "The form names no token.")
+        if revoke_token(self.store, int(token_id), person):
+            status, message = 200, f"Revoked token {token_id}. The next request with it is refused."
+        else:
+            status, message = 404, f"No active token of yours has the ID {token_id}."
+        return status, tokens_page(person, list_tokens(self.store, person), page_key, message)
+
 
 def page(title: str, body: str) -> str:
     return (
@@ -315,17 +345,57 @@ def page(title: str, body: str) -> str:
         "body{font:16px/1.5 system-ui,sans-serif;max-width:40rem;margin:4rem auto;padding:0 1rem;color:#1f2328}"
         "code{display:block;padding:.75rem;background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;"
         "word-break:break-all;font-size:15px}"
+        ".list{overflow-x:auto}table{border-collapse:collapse;font-size:14px}"
+        "th,td{padding:.25rem .5rem;border-bottom:1px solid #d0d7de;text-align:left;white-space:nowrap}"
         "</style></head><body>" + body + "</body></html>"
     )
 
 
-def token_page(email: str, token: str) -> str:
+def _when(value: str | None, missing: str) -> str:
+    return datetime.fromisoformat(value).strftime("%Y-%m-%d %H:%M UTC") if value else missing
+
+
+def _token_table(tokens: list[dict[str, Any]], page_key: str) -> str:
+    """The person's tokens, with a revoke button for each token that is not revoked. Never a token value."""
+    rows = []
+    for row in tokens:
+        action = "" if row["revoked_at"] else (
+            "<form method=\"post\" action=\"/auth/token/revoke\">"
+            f"<input type=\"hidden\" name=\"page\" value=\"{html.escape(page_key)}\">"
+            f"<input type=\"hidden\" name=\"token\" value=\"{row['id']}\">"
+            "<button type=\"submit\">Revoke</button></form>"
+        )
+        cells = (str(row["id"]), row["label"] or "-", _when(row["created_at"], "-"), _when(row["expires_at"], "never"),
+                 _when(row["last_used_at"], "never"), _when(row["revoked_at"], "no"))
+        rows.append("<tr>" + "".join(f"<td>{html.escape(cell)}</td>" for cell in cells) + f"<td>{action}</td></tr>")
+    return (
+        "<h2>Your tokens</h2><div class=\"list\"><table><tr><th>ID</th><th>Label</th><th>Created</th>"
+        "<th>Expires</th><th>Last used</th><th>Revoked</th><th></th></tr>" + "".join(rows) + "</table></div>"
+        "<p>Revoke a token that you no longer use, or that someone else may have. "
+        "The next request with a revoked token is refused. "
+        "This page can revoke tokens for 10 minutes after you sign in.</p>"
+    )
+
+
+def token_page(email: str, token: str, tokens: list[dict[str, Any]], page_key: str) -> str:
     return page("Taskman token", (
         f"<h1>Your Taskman token</h1><p>Signed in as {html.escape(email)}.</p>"
         f"<code>{html.escape(token)}</code>"
         "<p>Copy it now. This page does not show it again. It expires in 90 days.</p>"
         "<p>On the machine without a browser, run <b>taskman auth login --with-token</b> and paste the token.</p>"
+        + _token_table(tokens, page_key)
     ))
+
+
+def tokens_page(email: str, tokens: list[dict[str, Any]], page_key: str, message: str) -> str:
+    return page("Taskman tokens", (
+        f"<h1>Your Taskman tokens</h1><p>Signed in as {html.escape(email)}.</p>"
+        f"<p><b>{html.escape(message)}</b></p>" + _token_table(tokens, page_key)
+    ))
+
+
+def token_error_page(message: str) -> str:
+    return page("Taskman tokens", f"<h1>No token revoked</h1><p>{html.escape(message)}</p>")
 
 
 def error_page(message: str) -> str:

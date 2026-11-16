@@ -53,6 +53,15 @@ def test_help_documents_server_mode_and_the_proxy_token() -> None:
     assert "TASKMAN_TOKEN=proxy-injected" in text
 
 
+def test_help_documents_self_service_tokens() -> None:
+    text = " ".join(_help().split())
+    assert "A token is valid for 90 days." in text
+    assert "`taskman token list` shows your own tokens (ID, label, created, expires, last used, revoked)" in text
+    assert "`taskman token revoke ID` revokes one of them, also the token in use." in text
+    assert "/auth/token page shows the same list" in text and "Nobody sees or revokes another person's tokens" in text
+    assert "With `--database`, or with no server set" in text
+
+
 def test_help_lists_the_query_and_edit_commands() -> None:
     lifecycle = _help().split("LIFECYCLE")[1].split("INVARIANTS")[0]
     for name in ("ready", "edit", "browse", "search", "waiting-on", "dependents"):

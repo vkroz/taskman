@@ -454,9 +454,11 @@ When a login fails, the Taskman page or the Google page names an OAuth error cod
 
 Each person logs in from a computer with a browser, as [First login from a computer](#first-login-from-a-computer) shows. On a machine without a browser, open `https://taskman-1037430670088.us-central1.run.app/auth/token` on any computer and sign in. The page shows a personal access token one time. On the machine, run `taskman auth login --server https://taskman-1037430670088.us-central1.run.app --with-token` and paste the token. To connect an agent cloud environment, follow [Connect an agent cloud environment](../README.md#connect-an-agent-cloud-environment) in the README. Without browser login, an operator creates the token, as "Run operator commands" shows.
 
+Each person lists and revokes their own tokens with `taskman token list` and `taskman token revoke ID` against the server, or on the `/auth/token` page after the sign-in. [Manage your tokens](../README.md#manage-your-tokens) in the README gives the steps.
+
 ## Run operator commands
 
-`taskman token list`, `taskman token revoke` and `taskman token create` open the database directly. Run them on your computer through the [Cloud SQL Auth Proxy version 2](https://github.com/GoogleCloudPlatform/cloud-sql-proxy), with [uv](https://docs.astral.sh/uv/) and a checkout of this repository. You need the roles Cloud SQL Client and Secret Manager Secret Accessor; the Owner role has them. The proxy uses your Application Default Credentials: run `gcloud auth application-default login` one time.
+`taskman token list --database`, `taskman token revoke --database` and `taskman token create` open the database directly and reach the tokens of every person. Without `--database`, `token list` and `token revoke` use the server of your login and reach only your own tokens. Run them on your computer through the [Cloud SQL Auth Proxy version 2](https://github.com/GoogleCloudPlatform/cloud-sql-proxy), with [uv](https://docs.astral.sh/uv/) and a checkout of this repository. You need the roles Cloud SQL Client and Secret Manager Secret Accessor; the Owner role has them. The proxy uses your Application Default Credentials: run `gcloud auth application-default login` one time.
 
 ```bash
 cloud-sql-proxy --port 15432 nemos-infra:us-central1:nemos-pg &
@@ -464,10 +466,10 @@ export TASKMAN_BACKEND=postgres
 export TASKMAN_DATABASE_URL=postgresql://taskman@127.0.0.1:15432/taskman
 export TASKMAN_DB_PASSWORD="$(gcloud secrets versions access latest --secret taskman-db-password --project nemos-infra)"
 cd taskman
-uv run --extra postgres taskman token list
+uv run --extra postgres taskman token list --database
 ```
 
-In the same terminal, `uv run --extra postgres taskman token revoke ID` stops a token. `uv run --extra postgres taskman token create --person "ada@example.com"` creates a token in an emergency. When you are done:
+In the same terminal, `uv run --extra postgres taskman token revoke ID --database` stops a token of any person. `uv run --extra postgres taskman token create --person "ada@example.com"` creates a token in an emergency. When you are done:
 
 ```bash
 cd ..

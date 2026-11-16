@@ -82,6 +82,58 @@ def test_a_token_use_is_recorded(server):
     assert list_tokens(server.store)[0]["last_used_at"]
 
 
+# ---- a person's own tokens ------------------------------------------------
+
+
+def test_a_person_lists_only_their_own_tokens_without_values(server):
+    second_id, second = create_token(server.store, "Vlad", "laptop", days=90)
+    other_id, other = create_token(server.store, "Ada", "build-vm", days=90)
+    status, answer = call(server, "GET", "/api/v1/tokens")
+    assert status == 200
+    assert [row["id"] for row in answer["tokens"]] == [server.token_id, second_id]
+    assert set(answer["tokens"][1]) == {"id", "label", "created_at", "expires_at", "last_used_at", "revoked_at"}
+    assert answer["tokens"][1]["label"] == "laptop" and answer["tokens"][1]["revoked_at"] is None
+    assert answer["tokens"][0]["last_used_at"] and answer["tokens"][0]["expires_at"] is None
+    text = json.dumps(answer)
+    hashes = [row[0] for row in server.store.conn.execute("SELECT token_hash FROM tokens").fetchall()]
+    for secret in [server.token, second, other, *hashes]:
+        assert secret not in text
+    assert "Ada" not in text and "build-vm" not in text
+    assert [row["id"] for row in call(server, "GET", "/api/v1/tokens", token=other)[1]["tokens"]] == [other_id]
+    assert call(server, "GET", "/api/v1/tokens", token=None)[0] == 401
+
+
+def test_a_person_revokes_an_own_token_and_it_stops_working_at_once(server):
+    second_id, second = create_token(server.store, "Vlad", "laptop", days=90)
+    assert call(server, "GET", "/api/v1/whoami", token=second)[0] == 200
+    assert call(server, "POST", f"/api/v1/tokens/{second_id}/revoke", {}) == (200, {"revoked": second_id})
+    assert call(server, "GET", "/api/v1/whoami", token=second)[0] == 401
+    revoked = call(server, "GET", "/api/v1/tokens")[1]["tokens"][1]
+    assert revoked["id"] == second_id and revoked["revoked_at"]
+    status, answer = call(server, "POST", f"/api/v1/tokens/{second_id}/revoke", {})
+    assert status == 404 and answer["error"]["message"] == f"no active token of yours has the ID {second_id}"
+
+
+def test_a_person_revokes_the_token_in_use_and_the_next_request_is_refused(server):
+    assert call(server, "POST", f"/api/v1/tokens/{server.token_id}/revoke", {})[0] == 200
+    status, answer = call(server, "GET", "/api/v1/items")
+    assert status == 401 and answer["error"]["kind"] == "token"
+
+
+def test_nobody_revokes_the_token_of_another_person(server):
+    other_id, other = create_token(server.store, "Ada", days=90)
+    status, answer = call(server, "POST", f"/api/v1/tokens/{other_id}/revoke", {})
+    unknown = call(server, "POST", "/api/v1/tokens/999999/revoke", {})
+    # Another person's token and a token that does not exist get the same answer.
+    assert (status, answer["error"]["message"]) == (404, f"no active token of yours has the ID {other_id}")
+    assert unknown[0] == 404 and unknown[1]["error"]["message"] == "no active token of yours has the ID 999999"
+    assert call(server, "GET", "/api/v1/whoami", token=other) == (200, {"person": "Ada"})
+    assert list_tokens(server.store, "Ada")[0]["revoked_at"] is None
+    assert call(server, "POST", f"/api/v1/tokens/{other_id}/revoke", {}, token=None)[0] == 401
+    assert call(server, "POST", f"/api/v1/tokens/{other_id}/revoke", {}, token="tmn_wrong")[0] == 401
+    assert call(server, "POST", "/api/v1/tokens/x/revoke", {})[0] == 404
+
+
 # ---- reads ----------------------------------------------------------------
 
 
