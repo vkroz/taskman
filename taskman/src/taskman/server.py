@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 import types
 import typing
 from collections.abc import Callable
@@ -18,14 +19,16 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 
 from taskman import lifecycle
 from taskman.model.ordering import reorder_item
-from taskman.login import LoginError, Logins, error_page
-from taskman.storage.accounts import person_for_token, revoke_own_token
+from taskman.login import LoginError, Logins, error_page, token_error_page
+from taskman.storage.accounts import list_tokens, person_for_token, revoke_own_token, revoke_token
 from taskman.storage.sql_store import SqlStore
 from taskman.storage.store import Item, StorageError, item_data
 
 API = "/api/v1"
 MAX_REQUEST_BYTES = 1024 * 1024
 _ACTOR_LIMIT = 35
+_TOKEN_REVOKE = re.compile(r"^/api/v1/tokens/(\d{1,18})/revoke$")
+_TOKEN_FIELDS = ("id", "label", "created_at", "expires_at", "last_used_at", "revoked_at")
 
 OPERATIONS: dict[str, Callable] = {
     operation.__name__: operation
@@ -84,6 +87,11 @@ def _arguments(operation: Callable, given: Any) -> dict[str, Any]:
         elif not _matches(given[parameter.name], hints.get(parameter.name, Any)):
             raise _Refused(400, "request", f"wrong type for argument: {parameter.name}")
     return dict(given)
+
+
+def own_tokens(store: SqlStore, person: str) -> list[dict[str, Any]]:
+    """The tokens of ``person``, without their secrets and without the person's name."""
+    return [{field: row[field] for field in _TOKEN_FIELDS} for row in list_tokens(store, person)]
 
 
 def author_name(person: str, actor: Any) -> str:
@@ -150,15 +158,19 @@ def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None
                 raise _Refused(401, "token", "a valid token is required")
             return person
 
-        def _body(self) -> dict[str, Any]:
+        def _raw_body(self) -> bytes:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
                 length = 0
             if length <= 0 or length > MAX_REQUEST_BYTES:
                 raise _Refused(413 if length > MAX_REQUEST_BYTES else 400, "request", "invalid request size")
+            return self.rfile.read(length)
+
+        def _body(self) -> dict[str, Any]:
+            raw = self._raw_body()
             try:
-                data = json.loads(self.rfile.read(length))
+                data = json.loads(raw)
             except ValueError:
                 raise _Refused(400, "request", "the request body must be JSON") from None
             if not isinstance(data, dict):
@@ -201,6 +213,21 @@ def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None
             except Exception:  # noqa: BLE001 - the browser gets a page, never a traceback
                 self._send_page(500, error_page("The Taskman server failed."))
 
+        def _revoke_page(self) -> None:
+            """Revoke a token from the token page. The form carries the page key of the person's sign-in."""
+            try:
+                if logins is None:
+                    raise LoginError(404, "Browser login is not set up on this server. Use a personal access token.")
+                try:
+                    form = dict(parse_qsl(self._raw_body().decode("utf-8", "replace")))
+                except _Refused as exc:
+                    raise LoginError(exc.status, "The form is empty or too large.") from None
+                self._send_page(*logins.revoke(form))
+            except LoginError as exc:
+                self._send_page(exc.status, token_error_page(exc.message))
+            except Exception:  # noqa: BLE001 - the browser gets a page, never a traceback
+                self._send_page(500, token_error_page("The Taskman server failed."))
+
         def _exchange(self) -> tuple[int, dict[str, Any]]:
             if logins is None:
                 raise _Refused(404, "missing", "Browser login is not set up on this server.")
@@ -233,6 +260,8 @@ def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None
             person = self._person()
             if path == API + "/whoami":
                 return 200, {"person": person}
+            if path == API + "/tokens":
+                return 200, {"tokens": own_tokens(store, person)}
             parts = [unquote(part) for part in path[len(API) + 1:].split("/")]
             # Readers share the write lock so one answer never mixes two states.
             with store.lock():
@@ -262,6 +291,9 @@ def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None
         # ---- POST ------------------------------------------------------
 
         def do_POST(self) -> None:  # noqa: N802
+            if urlsplit(self.path).path == "/auth/token/revoke":
+                self._revoke_page()
+                return
             self._answer(self._post)
 
         def _post(self) -> tuple[int, dict[str, Any]]:
@@ -272,6 +304,13 @@ def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None
                 self._person()
                 revoke_own_token(store, self._token())
                 return 200, {}
+            revoke = _TOKEN_REVOKE.match(path)
+            if revoke:
+                # Another person's token counts as no token, so its ID tells the caller nothing.
+                token_id = int(revoke.group(1))
+                if not revoke_token(store, token_id, self._person()):
+                    raise _Refused(404, "missing", f"no active token of yours has the ID {token_id}")
+                return 200, {"revoked": token_id}
             prefix = API + "/operations/"
             if not path.startswith(prefix):
                 raise _Refused(404, "missing", f"Not found: {path}")

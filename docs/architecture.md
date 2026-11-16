@@ -49,7 +49,8 @@ Key numbers come from the project row in the same transaction, so two writers ne
 `taskman serve` listens on `127.0.0.1` and on the port in the `PORT` variable, or 8080. `--host 0.0.0.0` makes it reachable from other machines, for example in a container.
 
 - Each call under `/api/v1/` needs a token in the `Authorization: Bearer` header. A call without a valid token gets status 401 and changes nothing. `/healthz` and `/readyz` need no token.
-- `taskman token create --person NAME` creates a token and shows it one time. `taskman token list` and `taskman token revoke ID` manage tokens. These commands open the database directly, so they run on a machine that reaches the database, for example through the Cloud SQL Auth Proxy. A token expires after 90 days unless `--days` sets another period.
+- `taskman token create --person NAME` creates a token and shows it one time. `taskman token list --database` and `taskman token revoke ID --database` manage the tokens of every person. These commands open the database directly, so they run on a machine that reaches the database, for example through the Cloud SQL Auth Proxy. A token expires after 90 days unless `--days` sets another period.
+- Without `--database`, and with a server set, `taskman token list` and `taskman token revoke ID` call `/api/v1/tokens`: a person lists and revokes only their own tokens. Another person's token gets the same answer as a token that does not exist. A revoked token is refused on the next call, also when it is the token of the revoking call.
 - The CLI uses a server when `TASKMAN_SERVER_URL` is set, or after `taskman auth login`. It sends the token from `TASKMAN_TOKEN`, or the token of the saved login. Taskman reads these two variables from the environment only, never from a `.env` file, so a repository cannot send the token to another host.
 - The saved login is `~/.config/taskman/credentials.json`, with mode 0600 in a directory with mode 0700. No command prints a token.
 - The CLI sends a token over HTTPS, or over HTTP to the same machine. It does not follow redirects.
@@ -68,6 +69,8 @@ Key numbers come from the project row in the same transaction, so two writers ne
 Each sign-in works one time and for 10 minutes. The one-time code works for 2 minutes. The person's email address is the person name. The server keeps the login steps in the `logins` table, so any server instance can serve any step.
 
 `/auth/token` signs a person in the same way and shows a personal access token on the page. A machine without a browser uses it with `taskman auth login --with-token`. A copy of a token works on any machine; the owner accepted this risk for machines without a browser.
+
+The `/auth/token` page also lists the person's tokens, with a Revoke button for each. A button posts the token ID and a random page key to `/auth/token/revoke`. The server keeps only the SHA-256 fingerprint of the page key, in the login's row. It revokes a token only for the person of that login, and for 10 minutes after the sign-in. Another site cannot know the page key, so it cannot make a browser revoke a token.
 
 ## Deployment
 
@@ -91,7 +94,6 @@ Each sign-in works one time and for 10 minutes. The one-time code works for 2 mi
 ## Limits
 
 - Browser login supports Google only.
-- The server has no page to list or revoke tokens. An operator does this with `taskman token list` and `taskman token revoke` on a machine that reaches the database.
 - The server does not serve the workspace page. `taskman ui` serves it on the computer of the user.
 - The server uses one database connection for all calls and does not connect again after the connection breaks. After a database restart, `/readyz` answers 503 until the server process restarts. On Cloud Run, a liveness probe on `/readyz` replaces such an instance.
 - With browser login on, anyone can open `/auth/token` and `/auth/cli` without a token. Each request adds a row to the `logins` table and deletes old rows, under the database write lock. Taskman does not limit the rate of these requests.

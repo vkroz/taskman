@@ -158,7 +158,7 @@ taskman token create --person "Ada"         # prints a token one time; it expire
 taskman serve                               # listens on 127.0.0.1 and the port in PORT, or 8080
 ```
 
-`taskman serve --host 0.0.0.0` accepts calls from other machines. `taskman token list` shows the tokens without their secrets, and `taskman token revoke ID` stops one.
+`taskman serve --host 0.0.0.0` accepts calls from other machines. `taskman token list --database` shows the tokens of every person without their secrets, and `taskman token revoke ID --database` stops one. With no server set, `--database` is not needed.
 
 ### Run the server in a container
 
@@ -198,6 +198,17 @@ On a machine without a browser, for example a cloud virtual machine:
 An agent cloud environment sets `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` instead, as [Connect an agent cloud environment](#connect-an-agent-cloud-environment) shows. `TASKMAN_TOKEN` wins over a saved login.
 
 The person of the token is the author of each change. With `--actor claude`, the author is `claude for ada@example.com`. Taskman reads `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` from the environment only, never from a `.env` file. The address must start with `https://`, unless the server runs on the same computer. The CLI keeps its login in `~/.config/taskman/credentials.json`, which only you can read. A token expires after 90 days.
+
+### Manage your tokens
+
+Each login, each `/auth/token` page and each token of an operator is a separate token. To see your tokens and to stop one that you no longer use, or that someone else may have:
+
+```bash
+taskman token list          # ID, label, created, expires, last used, revoked
+taskman token revoke 7      # the next request with token 7 is refused
+```
+
+The `/auth/token` page shows the same list after you sign in, with a Revoke button for each token. The buttons work for 10 minutes after the sign-in. You see and revoke only your own tokens. No command or page shows the value of a token again. When you revoke the token that this computer uses, the next command fails with "refused the token": log in again.
 
 ### Connect an agent cloud environment
 

@@ -289,12 +289,67 @@ def test_token_commands_create_list_and_revoke(sqlite_env, monkeypatch):
         monkeypatch.setenv("TASKMAN_TOKEN", token)
         assert new("By Ada") == "TM-1"
         assert show("TM-1")["frontmatter"]["created_by"] == "Ada"
-        run("token", "revoke", rows[0]["id"])
+        # With a server set, the token commands go to the server: Ada revokes the token in use.
+        assert run("token", "revoke", rows[0]["id"]) == f"Revoked token {rows[0]['id']}.\n"
         assert "refused the token" in run("list", code=2)
     finally:
         running.stop()
-    assert "no active token" in run("token", "revoke", rows[0]["id"], code=1)
-    assert "revoked" in run("token", "list")
+    monkeypatch.delenv("TASKMAN_SERVER_URL")
+    monkeypatch.delenv("TASKMAN_TOKEN")
+    assert "no active token has the ID" in run("token", "revoke", rows[0]["id"], code=1)
+    listing = run("token", "list").splitlines()
+    assert listing[0].startswith(f"{rows[0]['id']}  Ada  laptop  created ") and " revoked 20" in listing[0]
+    assert listing[1].startswith(f"{running.token_id}  Other  -  created ") and listing[1].endswith("not revoked")
+
+
+def test_token_list_and_revoke_against_a_server_reach_only_your_own_tokens(remote_env):
+    from taskman.storage.accounts import create_token
+
+    laptop_id, laptop = create_token(remote_env.store, "Vlad", "laptop", days=90)
+    other_id, other = create_token(remote_env.store, "Ada", "build-vm", days=90)
+    listing = run("token", "list")
+    lines = listing.splitlines()
+    assert len(lines) == 2 and "Ada" not in listing and "build-vm" not in listing
+    assert lines[0].startswith(f"{remote_env.token_id}  -  created 20") and "expires never  last used 20" in lines[0]
+    assert lines[1].startswith(f"{laptop_id}  laptop  created 20") and "last used never  not revoked" in lines[1]
+    rows = json.loads(run("token", "list", "--json"))
+    assert [row["id"] for row in rows] == [remote_env.token_id, laptop_id] and "person" not in rows[0]
+    for secret in (remote_env.token, laptop, other):
+        assert secret not in listing and secret not in json.dumps(rows)
+
+    # Another person's token: refused like a token that does not exist, and it keeps working.
+    assert run("token", "revoke", other_id, code=1) == f"Error: no active token of yours has the ID {other_id}.\n"
+    assert RemoteStore(remote_env.url, other).whoami() == "Ada"
+
+    assert run("token", "revoke", laptop_id) == f"Revoked token {laptop_id}.\n"
+    with pytest.raises(StorageConfigError, match="refused the token"):
+        RemoteStore(remote_env.url, laptop).whoami()
+    assert " revoked 20" in run("token", "list").splitlines()[1]
+    assert "no active token of yours" in run("token", "revoke", laptop_id, code=1)
+
+    # The token in use: the revoke works, and the next command gets the usual message.
+    assert run("token", "revoke", remote_env.token_id) == f"Revoked token {remote_env.token_id}.\n"
+    assert "refused the token: it is unknown, expired or revoked" in run("token", "list", code=2)
+
+
+def test_token_commands_with_database_reach_every_token_while_a_server_is_set(remote_env):
+    from taskman.storage.accounts import create_token, list_tokens
+
+    other_id, other = create_token(remote_env.store, "Ada", "build-vm", days=90)
+    listing = run("token", "list", "--database")
+    assert "Ada  build-vm" in listing and "Vlad" in listing
+    assert [row["person"] for row in json.loads(run("token", "list", "--database", "--json"))] == ["Vlad", "Ada"]
+    assert run("token", "revoke", other_id, "--database") == f"Revoked token {other_id}.\n"
+    assert list_tokens(remote_env.store, "Ada")[0]["revoked_at"]
+    assert "no active token has the ID" in run("token", "revoke", other_id, "--database", code=1)
+
+
+def test_token_commands_against_a_server_need_a_login(sqlite_env, monkeypatch):
+    monkeypatch.setenv("TASKMAN_SERVER_URL", "http://127.0.0.1:1")
+    assert "Not logged in to http://127.0.0.1:1" in run("token", "list", code=2)
+    assert "Not logged in to http://127.0.0.1:1" in run("token", "revoke", "1", code=2)
+    monkeypatch.setenv("TASKMAN_TOKEN", "tmn_x")
+    assert "Cannot reach the Taskman server" in run("token", "list", code=2)
 
 
 def test_token_create_reports_wrong_input(sqlite_env):
