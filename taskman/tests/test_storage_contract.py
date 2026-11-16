@@ -191,6 +191,20 @@ def test_task_cannot_have_children(store):
         lifecycle.create(store, "Child", "task", task)
 
 
+def test_bugfix_is_a_leaf_type(store):
+    bugfix = _new(store, "Fix crash", "bugfix")
+    assert store.get(bugfix).type == "bugfix"
+    with pytest.raises(LifecycleError, match="bugfix = leaf invariant"):
+        lifecycle.create(store, "Child", "task", bugfix)
+    feat = _new(store, "Feature", "feat")
+    lifecycle.create(store, "Child", "bugfix", feat)
+    with pytest.raises(LifecycleError, match="has children"):
+        lifecycle.convert(store, feat, "bugfix")
+    with pytest.raises(LifecycleError, match="the type must be one of epic, feat, task, bugfix"):
+        lifecycle.create(store, "Bug", "bug", None, project="TM")
+    assert [item.type for item in store.items()] == ["bugfix", "feat", "bugfix"]
+
+
 def test_closed_parent_rejects_new_children(store):
     feat = _new(store, "Feature", "feat")
     _closed(store, feat)
@@ -619,3 +633,51 @@ def test_concurrent_comments_lose_no_updates(store, settings, sql_only):
     assert len(journal) == 30
     assert stored.metadata["revision"] == 30
     assert sorted(entry["revision"] for entry in journal) == list(range(1, 31))
+
+
+# ---- lost connections -----------------------------------------------------
+
+
+def test_a_lost_connection_is_reopened_for_the_next_transaction(store, sql_only):
+    from tests.conftest import end_connection
+
+    first = _new(store, "First")
+    end_connection(store)
+    assert [item.id for item in store.items()] == [first]
+    end_connection(store)
+    second = _new(store, "Second")
+    assert [item.id for item in store.items()] == [first, second]
+
+
+def test_a_transaction_that_loses_its_connection_is_not_tried_again(store, sql_only):
+    """Only the start of a transaction is tried again: a change cannot be written twice."""
+    from tests.conftest import end_connection
+
+    with pytest.raises(Exception):
+        with store.lock():
+            lifecycle.create(store, "Lost", "task", None, project="TM")
+            end_connection(store)
+            store.get("TM-1")
+    assert store.items() == []
+    assert _new(store, "Kept") == "TM-1"
+
+
+def test_the_start_of_a_transaction_is_tried_once_on_a_new_connection(store, settings, sql_only, monkeypatch):
+    """When the start fails on the new connection too, the error goes to the caller."""
+    from tests.conftest import end_connection
+
+    opened = []
+
+    def reopen_lost():
+        store.conn, _ = connect(settings)
+        opened.append(store.conn)
+        end_connection(store)
+        return store.conn
+
+    end_connection(store)
+    monkeypatch.setattr(store, "_reopen", reopen_lost)
+    with pytest.raises(Exception):
+        store.items()
+    # SQLite knows that a closed connection is lost and replaces it before the start.
+    # Postgres learns it only when the start fails. Either way the failed start runs once more.
+    assert len(opened) == (2 if store.dialect.name == "sqlite" else 1)

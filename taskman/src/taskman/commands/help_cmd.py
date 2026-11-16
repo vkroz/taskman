@@ -44,7 +44,8 @@ ITEMS AND KEYS
              uppercase letters or digits and starts with a letter. Numbers
              count up per project and are never used again, even after a
              discard.
-  type       epic | feat | task. Change it with `convert`.
+  type       epic | feat | task | bugfix. A bugfix is a task that fixes a
+             bug. Change the type with `convert`.
   status     backlog | active | done.
   draft      A new item is a draft until `finalize`.
 
@@ -112,8 +113,8 @@ INVARIANTS
     evidence. Summarize decisions and results before closing. Taskman
     records checks but does not run them.
 
-  - task = leaf. A `task` item has no children. To add a child to a task,
-    first `convert` it to `feat` or `epic`.
+  - task = leaf. A `task` or `bugfix` item has no children. To add a child
+    to one, first `convert` it to `feat` or `epic`.
 
   - Free type ladder. Any nesting is allowed: epic > feat > task is one
     shape; epic > task and feat > task and feat > feat are equally valid.

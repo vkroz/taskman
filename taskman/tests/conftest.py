@@ -70,6 +70,21 @@ def reset_postgres(settings: StorageSettings) -> None:
         conn.execute("CREATE SCHEMA public")
 
 
+def end_connection(store) -> None:
+    """End the store's database connection as a database restart does.
+
+    Postgres ends the server process of the connection; the store learns of it
+    at its next statement. A SQLite connection ends only when it is closed.
+    """
+    if store.dialect.name == "sqlite":
+        store.conn.close()
+        return
+    import psycopg
+
+    with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as conn:
+        conn.execute("SELECT pg_terminate_backend(%s)", (store.conn.info.backend_pid,))
+
+
 @pytest.fixture(params=["sqlite", "postgres"])
 def sql_settings(request, tmp_path) -> StorageSettings:
     """Settings for an empty database of each SQL dialect."""

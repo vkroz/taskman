@@ -59,6 +59,12 @@ def test_help_lists_the_query_and_edit_commands() -> None:
         assert f"\n  {name} " in lifecycle or f"\n  {name}\n" in lifecycle, name
 
 
+def test_help_describes_the_bugfix_type() -> None:
+    text = _help()
+    assert "epic | feat | task | bugfix" in text
+    assert "A `task` or `bugfix` item has no children" in text
+
+
 def test_help_documents_the_error_for_an_unknown_key() -> None:
     assert "every command prints `Error: item not found: KEY` and exits with code 1" in " ".join(_help().split())
 
