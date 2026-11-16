@@ -82,7 +82,7 @@ A Taskman server keeps these two entities. A CLI that opens a database directly 
 | Person | A name of 1 to 60 characters, unique, and the time of creation. |
 | Token | The person, a SHA-256 fingerprint of the token, a label, and the times of creation, expiry, last use and revocation. The token text is not stored. |
 
-A person who signs in with Google has the email address as the name. The server also keeps a short-lived `logins` record for each browser login: hashes of its state and one-time code, and the checks of the login. It holds no token.
+A person who signs in with Google has the email address as the name. The server also keeps a short-lived `logins` record for each browser login: hashes of its state and one-time code, and the checks of the login. It holds no token. Each new login deletes a record after 1 day when Google signed in a person who may use the server, and after 1 hour in all other cases, also when the sign-in returned with an error.
 
 On a server, the author of a change is the person of the token. When the caller gives `--actor NAME`, the author is `NAME for <person>`.
 

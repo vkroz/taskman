@@ -31,7 +31,7 @@ With a server, the CLI does none of these steps itself. It sends the operation a
 
 - **SQLite.** One database file. The default is `~/.local/share/taskman/taskman.db`, shared by all repositories of the user.
 - **Postgres 16.** The driver is psycopg 3, installed with the `postgres` extra. Taskman connects with a URL, or through a unix socket directory, for example the Cloud SQL socket `/cloudsql/<connection name>` on Cloud Run. The password comes from an environment variable or a mounted secret file. No error message shows a password or a URL.
-- **Schema versions.** `taskman db upgrade` applies the missing schema versions in order, in one transaction, and records each version. A store refuses a database with an older or a newer schema version.
+- **Schema versions.** `taskman db upgrade` applies the missing schema versions in order, in one transaction, and records each version. A version below the highest recorded one is also applied when it is missing. A store refuses a database with an older or a newer schema version, or with a missing version.
 
 ## Concurrency
 
@@ -94,6 +94,6 @@ Each sign-in works one time and for 10 minutes. The one-time code works for 2 mi
 - The server has no page to list or revoke tokens. An operator does this with `taskman token list` and `taskman token revoke` on a machine that reaches the database.
 - The server does not serve the workspace page. `taskman ui` serves it on the computer of the user.
 - The server uses one database connection for all calls and does not connect again after the connection breaks. After a database restart, `/readyz` answers 503 until the server process restarts. On Cloud Run, a liveness probe on `/readyz` replaces such an instance.
-- With browser login on, anyone can open `/auth/token` and `/auth/cli` without a token. Each request adds a row to the `logins` table and deletes old rows, under the database write lock. Taskman does not limit the rate of these requests.
+- With browser login on, anyone can open `/auth/token` and `/auth/cli` without a token. Each request adds a row to the `logins` table and deletes old rows, under the database write lock. A row stays 1 day when Google signed in a person who may use the server, and 1 hour in all other cases. A sign-in that returns with an error, or that fails a later check, stays 1 hour. Taskman does not limit the rate of these requests.
 - Taskman does not read `tasks/` Markdown files from earlier versions, and imports nothing from them (decision D4).
 - There is no consolidation of completed work (decision D8).

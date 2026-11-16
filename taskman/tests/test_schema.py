@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 from taskman.cli import app
 from taskman.storage.schema import CURRENT_VERSION, MIGRATIONS, Migration, database_version, upgrade
+from taskman.storage.settings import StorageSettings
 from taskman.storage.sql import connect, transaction
 from taskman.storage.store import StorageConfigError
 
@@ -68,6 +69,59 @@ def test_older_database_gets_only_the_missing_versions(db):
     assert "upgrade_probe" in _tables(conn, dialect)
     versions = [row[0] for row in conn.execute("SELECT version FROM schema_versions ORDER BY version").fetchall()]
     assert versions == [m.version for m in newer]
+
+
+def test_a_version_below_the_highest_is_applied_when_missing(db, sql_settings, monkeypatch):
+    # As when a branch with a higher version merges and deploys before a branch with a lower one.
+    import taskman.storage.sql_store as sql_store
+
+    conn, dialect = db
+    earlier = Migration(CURRENT_VERSION + 1, "earlier branch", ("CREATE TABLE earlier_probe (id INTEGER)",))
+    later = Migration(CURRENT_VERSION + 2, "later branch", ("CREATE TABLE later_probe (id INTEGER)",))
+    assert upgrade(conn, dialect, MIGRATIONS + (later,))[-1] == later.version
+    merged = MIGRATIONS + (earlier, later)
+    monkeypatch.setattr(sql_store, "MIGRATIONS", merged)
+    monkeypatch.setattr(sql_store, "CURRENT_VERSION", later.version)
+    with pytest.raises(StorageConfigError, match=f"lacks version {earlier.version}. Run: taskman db upgrade"):
+        sql_store.open_sql_store(sql_settings)
+    assert upgrade(conn, dialect, merged) == [earlier.version]
+    assert "earlier_probe" in _tables(conn, dialect)
+    assert upgrade(conn, dialect, merged) == []
+    sql_store.open_sql_store(sql_settings).close()
+
+
+def _table_indexes(conn, dialect, table: str) -> set[str]:
+    if dialect.name == "sqlite":
+        rows = conn.execute(dialect.sql("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ?"), (table,))
+    else:
+        rows = conn.execute(dialect.sql("SELECT indexname FROM pg_indexes WHERE tablename = ?"), (table,))
+    return {row[0] for row in rows.fetchall()}
+
+
+def test_a_database_at_version_3_gets_the_index_of_login_start_times(db):
+    conn, dialect = db
+    upgrade(conn, dialect, tuple(m for m in MIGRATIONS if m.version <= 3))
+    with transaction(conn, dialect):
+        conn.execute(
+            dialect.sql("INSERT INTO logins (state_hash, kind, nonce, verifier, created_at) VALUES (?, ?, ?, ?, ?)"),
+            ("kept", "token", "n", "v", "2026-11-16T12:00:00+00:00"),
+        )
+    assert "logins_created_at" not in _table_indexes(conn, dialect, "logins")
+    assert upgrade(conn, dialect) == [m.version for m in MIGRATIONS if m.version > 3]
+    assert "logins_created_at" in _table_indexes(conn, dialect, "logins")
+    assert conn.execute("SELECT state_hash FROM logins").fetchall() == [("kept",)]
+
+
+def test_the_login_cleanup_uses_the_index_of_login_start_times(tmp_path):
+    # SQLite only: Postgres scans a small table in place of its index.
+    conn, dialect = connect(StorageSettings("sqlite", sqlite_path=tmp_path / "plan.db"))
+    upgrade(conn, dialect)
+    plan = conn.execute(
+        "EXPLAIN QUERY PLAN DELETE FROM logins WHERE created_at < ? AND (finished_at IS NULL OR created_at < ?)",
+        ("a", "b"),
+    ).fetchall()
+    conn.close()
+    assert any("logins_created_at" in row[-1] for row in plan), plan
 
 
 def test_database_newer_than_taskman_is_refused(db):
@@ -223,10 +277,10 @@ def test_upgrade_from_version_3_allows_bugfix_and_keeps_every_row(db):
         with transaction(conn, dialect):
             conn.execute(q(_ITEM), ("TM", 4, "bugfix", "Too early", "backlog", None, now, "pytest", now))
 
-    assert upgrade(conn, dialect) == [4]
+    assert upgrade(conn, dialect) == [m.version for m in MIGRATIONS if m.version > 3]
 
     assert _rows(conn) == rows
-    assert _indexes(conn, dialect) == indexes
+    assert indexes <= _indexes(conn, dialect)  # version 4 keeps every index; later versions may add some
     with transaction(conn, dialect):
         conn.execute(q(_ITEM), ("TM", 4, "bugfix", "Fix crash", "backlog", 1, now, "pytest", now))
         bugfix = conn.execute("SELECT id FROM items WHERE type = 'bugfix'").fetchone()[0]
@@ -265,7 +319,7 @@ def test_a_new_connection_reads_the_upgraded_type_rule(sql_settings):
         other, _ = connect(sql_settings)
         try:
             other.execute("SELECT COUNT(*) FROM items").fetchone()
-            assert upgrade(conn, dialect) == [4]
+            assert upgrade(conn, dialect) == [m.version for m in MIGRATIONS if m.version > 3]
             now = "2026-11-16T00:00:00+00:00"
             with transaction(other, dialect):
                 other.execute(dialect.sql(_ITEM), ("TM", 4, "bugfix", "Fix", "backlog", None, now, "pytest", now))
