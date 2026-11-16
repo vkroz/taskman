@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -229,3 +230,46 @@ def test_the_server_works_over_each_database(sql_settings):
         assert [row["person"] for row in list_tokens(running.store)] == ["Vlad"]
     finally:
         running.stop()
+
+
+def test_the_server_reconnects_after_the_database_ends_its_connection(sql_settings):
+    """After a database restart, /readyz, reads and writes work again in the same process."""
+    from taskman.storage.schema import upgrade
+    from taskman.storage.sql import connect
+    from tests.conftest import RunningServer, end_connection
+
+    conn, dialect = connect(sql_settings)
+    try:
+        upgrade(conn, dialect)
+    finally:
+        conn.close()
+    running = RunningServer(sql_settings)
+    try:
+        key = create(running, "Before")
+        end_connection(running.store)
+        assert call(running, "GET", "/readyz", token=None) == (200, {"ok": True})
+        end_connection(running.store)
+        assert call(running, "GET", f"/api/v1/items/{key}")[1]["item"]["metadata"]["title"] == "Before"
+        end_connection(running.store)
+        create(running, "After")
+        assert [item["metadata"]["title"] for item in call(running, "GET", "/api/v1/items")[1]["items"]] == [
+            "Before", "After"]
+    finally:
+        running.stop()
+
+
+def test_not_ready_while_the_database_is_away_and_ready_when_it_is_back(server):
+    """A reconnect that fails answers 503; the next request after the database returns reconnects."""
+    from tests.conftest import end_connection
+
+    path = server.store.conn.execute("PRAGMA database_list").fetchone()[2]
+    away = path + ".away"
+    end_connection(server.store)
+    os.rename(path, away)
+    try:
+        assert call(server, "GET", "/readyz", token=None)[0] == 503
+        assert call(server, "GET", "/api/v1/items")[0] == 500
+    finally:
+        os.rename(away, path)
+    assert call(server, "GET", "/readyz", token=None) == (200, {"ok": True})
+    assert call(server, "GET", "/api/v1/items") == (200, {"items": []})

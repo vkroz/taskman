@@ -95,6 +95,21 @@ def _cannot_open(exc: Exception, *secrets: str | None) -> StorageConfigError:
     return StorageConfigError(f"Cannot open the Taskman database: {reason}")
 
 
+def is_lost(conn: Any, dialect: Dialect) -> bool:
+    """Whether a connection is closed or broken, so that no statement can run on it.
+
+    psycopg marks a connection closed when the server ends it, at the first
+    statement after that. A SQLite connection is lost only when it was closed.
+    """
+    if dialect is SQLITE:
+        try:
+            conn.total_changes
+        except sqlite3.ProgrammingError:
+            return True
+        return False
+    return conn.closed
+
+
 @contextmanager
 def transaction(conn: Any, dialect: Dialect) -> Iterator[None]:
     """Run the block in one transaction that holds the database write lock.
