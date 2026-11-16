@@ -59,7 +59,9 @@ ITEMS AND KEYS
   Nobody can change or delete a comment.
 
   Each change to a field writes an activity entry with its author and time.
-  The author is the --actor value, or the git user.name.
+  The author is the --actor value. Without it, the author is the person of
+  the token on a server, or the git user.name with a local database. On a
+  server, --actor NAME gives the author `NAME for <person>`.
 
 ================================================================================
 LIFECYCLE
