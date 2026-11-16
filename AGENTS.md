@@ -14,6 +14,8 @@ This repository ships the `taskman` marketplace for Codex and Claude Code and it
 
 This repository's work items are project `TASKMAN` on the Taskman server that [docs/deploy-gcp.md](docs/deploy-gcp.md#use-the-server) names in "Use the server". Before work, run `taskman auth status`. Stop if it does not print `Logged in to` that server.
 
+Work only in this repository. Any change to another repository needs the owner's approval first. Taskman development needs no other repository; such a need signals unwanted coupling.
+
 `taskman/` is the Python 3.11+ CLI. `src/taskman/commands/` implements Typer commands. Commands use the storage interface in `src/taskman/storage/store.py` and check lifecycle rules through `src/taskman/lifecycle.py`. `src/taskman/storage/sql_store.py` is the SQL backend (SQLite and Postgres) for the model in `docs/data-model.md`; `settings.py`, `sql.py` and `schema.py` beside it hold the settings, connections and schema versions. `tests/` mirrors those behaviors with pytest; `tests/test_storage_contract.py` holds the cases every SQL backend must pass.
 
 `taskman/Dockerfile`, `.github/workflows/` and `deploy/gcp/` hold the image, the continuous integration (CI) and the deployment to Google Cloud; each push to `staging` deploys to `nemos-infra` (`docs/adrs/0001-deploy-the-server-to-google-cloud.md`).
