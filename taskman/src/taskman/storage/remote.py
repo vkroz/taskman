@@ -121,6 +121,14 @@ class RemoteStore:
         """Revoke the token of this store on the server."""
         self._request("POST", "/api/v1/logout", {})
 
+    def tokens(self) -> list[dict[str, Any]]:
+        """The tokens of the person of this store's token, without their values."""
+        return self._request("GET", "/api/v1/tokens")["tokens"]
+
+    def revoke_token(self, token_id: int) -> None:
+        """Revoke one of the person's own tokens. Another person's token is refused as missing."""
+        self._request("POST", f"/api/v1/tokens/{token_id}/revoke", {})
+
     def exchange(self, code: str, verifier: str) -> dict[str, str]:
         """Trade a one-time login code for a token. Needs no token."""
         return self._request("POST", "/auth/exchange", {"code": code, "verifier": verifier})

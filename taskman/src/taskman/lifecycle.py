@@ -18,6 +18,9 @@ _PROJECT_KEY = re.compile(r"^[A-Z][A-Z0-9]{1,9}$")
 _LABEL = re.compile(r"^[a-z0-9_-]{1,50}$")
 
 IMMUTABLE = "closed items are immutable; create a linked follow-up task"
+ITEM_TYPES = ("epic", "feat", "task", "bugfix")
+# Leaf types have no children.
+LEAF_TYPES = ("task", "bugfix")
 JOURNAL_KINDS = ("decision", "progress", "handoff", "summary", "verification")
 RESULTS = ("pass", "fail", "blocked")
 
@@ -45,6 +48,11 @@ def _now() -> str:
 
 def _revision(item: Item) -> int:
     return int(item.metadata.get("revision", 0))
+
+
+def _known_type(item_type: str) -> None:
+    if item_type not in ITEM_TYPES:
+        raise LifecycleError(f"the type must be one of {', '.join(ITEM_TYPES)}, got: {item_type!r}", usage=True)
 
 
 def _require(store: Store, item_id: str, *, usage: bool) -> Item:
@@ -124,6 +132,7 @@ def create(
     project: str | None = None,
 ) -> Item:
     """Create a backlog draft. A child belongs to its parent's project."""
+    _known_type(item_type)
     if project is not None and not _PROJECT_KEY.match(project):
         raise LifecycleError(
             "a project key has 2-10 uppercase letters and digits and starts with a letter", usage=True
@@ -136,9 +145,9 @@ def create(
             raise LifecycleError("a child belongs to the project of its parent", usage=True)
         if parent.status == "done":
             raise LifecycleError("closed parents are immutable; create a follow-up task")
-        if parent.type == "task":
+        if parent.type in LEAF_TYPES:
             raise LifecycleError(
-                f"cannot add child to a task ({parent_id}): task = leaf invariant. "
+                f"cannot add child to a {parent.type} ({parent_id}): {parent.type} = leaf invariant. "
                 f"Convert the parent first with: taskman convert {parent_id} feat"
             )
     item = store.create(
@@ -301,16 +310,17 @@ def move(store: Store, item_id: str, target_status: str) -> Item:
 
 @served
 def convert(store: Store, item_id: str, target_type: str) -> Item:
+    _known_type(target_type)
     item = _require(store, item_id, usage=False)
     if item.status == "done":
         raise LifecycleError(IMMUTABLE, usage=True)
     if item.type == target_type:
         raise NoChange(f"No change: {item_id} already typed {target_type}.")
-    if target_type == "task":
+    if target_type in LEAF_TYPES:
         children = [other for other in store.items() if other.parent_id == item_id]
         if children:
             names = ", ".join(sorted(child.id for child in children))
-            raise LifecycleError(f"cannot convert {item_id} to task — has children: {names}")
+            raise LifecycleError(f"cannot convert {item_id} to {target_type} — has children: {names}")
     store.set_type(item_id, target_type)
     item = store.get(item_id)
     metadata = copy.deepcopy(item.metadata)

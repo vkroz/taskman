@@ -5,7 +5,7 @@ from typing import Optional
 
 import typer
 
-_ACTOR_HELP = "Author of the change. Default: git user.name."
+_ACTOR_HELP = "Author of the change. Default: the person of the token on a server, the git user.name with a local database."
 
 
 def mutating(command):

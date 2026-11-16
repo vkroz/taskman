@@ -44,20 +44,25 @@ ITEMS AND KEYS
              uppercase letters or digits and starts with a letter. Numbers
              count up per project and are never used again, even after a
              discard.
-  type       epic | feat | task. Change it with `convert`.
+  type       epic | feat | task | bugfix. A bugfix is a task that fixes a
+             bug. Change the type with `convert`.
   status     backlog | active | done.
   draft      A new item is a draft until `finalize`.
 
   A new top-level item needs --project KEY; Taskman creates the project on
   first use. A child gets the project of its parent. Dependencies stay inside
-  one project. A command finds the item and its project from the key.
+  one project. A command finds the item and its project from the key. For
+  an unknown key, every command prints `Error: item not found: KEY` and
+  exits with code 1.
 
   A comment has a kind: decision, progress, handoff, summary or
   verification. A verification comment has a result: pass, fail or blocked.
   Nobody can change or delete a comment.
 
   Each change to a field writes an activity entry with its author and time.
-  The author is the --actor value, or the git user.name.
+  The author is the --actor value. Without it, the author is the person of
+  the token on a server, or the git user.name with a local database. On a
+  server, --actor NAME gives the author `NAME for <person>`.
 
 ================================================================================
 LIFECYCLE
@@ -108,8 +113,8 @@ INVARIANTS
     evidence. Summarize decisions and results before closing. Taskman
     records checks but does not run them.
 
-  - task = leaf. A `task` item has no children. To add a child to a task,
-    first `convert` it to `feat` or `epic`.
+  - task = leaf. A `task` or `bugfix` item has no children. To add a child
+    to one, first `convert` it to `feat` or `epic`.
 
   - Free type ladder. Any nesting is allowed: epic > feat > task is one
     shape; epic > task and feat > task and feat > feat are equally valid.
@@ -158,6 +163,16 @@ ENVIRONMENT
   server and a token in ~/.config/taskman/credentials.json. Later commands
   use that server. `--with-token` reads a personal access token from stdin
   instead. `taskman auth status` and `taskman auth logout` manage the login.
+
+  A token is valid for 90 days. Against a server, `taskman token list` shows
+  your own tokens (ID, label, created, expires, last used, revoked) and
+  `taskman token revoke ID` revokes one of them, also the token in use. The
+  server's /auth/token page shows the same list, with a revoke button for
+  each token. Nobody sees or revokes another person's tokens through the
+  server, and no command or page shows a token's value again. With
+  `--database`, or with no server set, `taskman token list` and `taskman
+  token revoke` use the database directly: an operator lists and revokes the
+  tokens of every person. `taskman token create` always uses the database.
 
   Browser login on the server needs TASKMAN_GOOGLE_CLIENT_ID,
   TASKMAN_GOOGLE_CLIENT_SECRET (or _FILE), TASKMAN_PUBLIC_URL, and

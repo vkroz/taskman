@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -79,6 +80,58 @@ def test_the_database_keeps_no_token_text(server):
 def test_a_token_use_is_recorded(server):
     call(server, "GET", "/api/v1/items")
     assert list_tokens(server.store)[0]["last_used_at"]
+
+
+# ---- a person's own tokens ------------------------------------------------
+
+
+def test_a_person_lists_only_their_own_tokens_without_values(server):
+    second_id, second = create_token(server.store, "Vlad", "laptop", days=90)
+    other_id, other = create_token(server.store, "Ada", "build-vm", days=90)
+    status, answer = call(server, "GET", "/api/v1/tokens")
+    assert status == 200
+    assert [row["id"] for row in answer["tokens"]] == [server.token_id, second_id]
+    assert set(answer["tokens"][1]) == {"id", "label", "created_at", "expires_at", "last_used_at", "revoked_at"}
+    assert answer["tokens"][1]["label"] == "laptop" and answer["tokens"][1]["revoked_at"] is None
+    assert answer["tokens"][0]["last_used_at"] and answer["tokens"][0]["expires_at"] is None
+    text = json.dumps(answer)
+    hashes = [row[0] for row in server.store.conn.execute("SELECT token_hash FROM tokens").fetchall()]
+    for secret in [server.token, second, other, *hashes]:
+        assert secret not in text
+    assert "Ada" not in text and "build-vm" not in text
+    assert [row["id"] for row in call(server, "GET", "/api/v1/tokens", token=other)[1]["tokens"]] == [other_id]
+    assert call(server, "GET", "/api/v1/tokens", token=None)[0] == 401
+
+
+def test_a_person_revokes_an_own_token_and_it_stops_working_at_once(server):
+    second_id, second = create_token(server.store, "Vlad", "laptop", days=90)
+    assert call(server, "GET", "/api/v1/whoami", token=second)[0] == 200
+    assert call(server, "POST", f"/api/v1/tokens/{second_id}/revoke", {}) == (200, {"revoked": second_id})
+    assert call(server, "GET", "/api/v1/whoami", token=second)[0] == 401
+    revoked = call(server, "GET", "/api/v1/tokens")[1]["tokens"][1]
+    assert revoked["id"] == second_id and revoked["revoked_at"]
+    status, answer = call(server, "POST", f"/api/v1/tokens/{second_id}/revoke", {})
+    assert status == 404 and answer["error"]["message"] == f"no active token of yours has the ID {second_id}"
+
+
+def test_a_person_revokes_the_token_in_use_and_the_next_request_is_refused(server):
+    assert call(server, "POST", f"/api/v1/tokens/{server.token_id}/revoke", {})[0] == 200
+    status, answer = call(server, "GET", "/api/v1/items")
+    assert status == 401 and answer["error"]["kind"] == "token"
+
+
+def test_nobody_revokes_the_token_of_another_person(server):
+    other_id, other = create_token(server.store, "Ada", days=90)
+    status, answer = call(server, "POST", f"/api/v1/tokens/{other_id}/revoke", {})
+    unknown = call(server, "POST", "/api/v1/tokens/999999/revoke", {})
+    # Another person's token and a token that does not exist get the same answer.
+    assert (status, answer["error"]["message"]) == (404, f"no active token of yours has the ID {other_id}")
+    assert unknown[0] == 404 and unknown[1]["error"]["message"] == "no active token of yours has the ID 999999"
+    assert call(server, "GET", "/api/v1/whoami", token=other) == (200, {"person": "Ada"})
+    assert list_tokens(server.store, "Ada")[0]["revoked_at"] is None
+    assert call(server, "POST", f"/api/v1/tokens/{other_id}/revoke", {}, token=None)[0] == 401
+    assert call(server, "POST", f"/api/v1/tokens/{other_id}/revoke", {}, token="tmn_wrong")[0] == 401
+    assert call(server, "POST", "/api/v1/tokens/x/revoke", {})[0] == 404
 
 
 # ---- reads ----------------------------------------------------------------
@@ -236,3 +289,64 @@ def test_the_server_works_over_each_database(sql_settings):
         assert [row["person"] for row in list_tokens(running.store)] == ["Vlad"]
     finally:
         running.stop()
+
+
+def test_a_bugfix_is_created_and_takes_no_children(server):
+    key = create(server, "Fix crash", item_type="bugfix")
+    assert call(server, "GET", f"/api/v1/items/{key}")[1]["item"]["metadata"]["type"] == "bugfix"
+    status, answer = run(server, "create", {"title": "Child", "item_type": "task", "parent_id": key})
+    assert status == 422 and "bugfix = leaf invariant" in answer["error"]["message"]
+    assert run(server, "convert", {"item_id": key, "target_type": "task"})[0] == 200
+    assert run(server, "convert", {"item_id": key, "target_type": "bugfix"})[0] == 200
+
+
+def test_an_unknown_type_is_a_rule_error(server):
+    key = create(server)
+    for operation, arguments in (("create", {"title": "Bug", "item_type": "bug", "parent_id": None, "project": "TM"}),
+                                 ("convert", {"item_id": key, "target_type": "bug"})):
+        status, answer = run(server, operation, arguments)
+        assert status == 422 and answer["error"]["usage"] is True
+        assert answer["error"]["message"] == "the type must be one of epic, feat, task, bugfix, got: 'bug'"
+    assert [item.type for item in server.store.items()] == ["task"]
+
+def test_the_server_reconnects_after_the_database_ends_its_connection(sql_settings):
+    """After a database restart, /readyz, reads and writes work again in the same process."""
+    from taskman.storage.schema import upgrade
+    from taskman.storage.sql import connect
+    from tests.conftest import RunningServer, end_connection
+
+    conn, dialect = connect(sql_settings)
+    try:
+        upgrade(conn, dialect)
+    finally:
+        conn.close()
+    running = RunningServer(sql_settings)
+    try:
+        key = create(running, "Before")
+        end_connection(running.store)
+        assert call(running, "GET", "/readyz", token=None) == (200, {"ok": True})
+        end_connection(running.store)
+        assert call(running, "GET", f"/api/v1/items/{key}")[1]["item"]["metadata"]["title"] == "Before"
+        end_connection(running.store)
+        create(running, "After")
+        assert [item["metadata"]["title"] for item in call(running, "GET", "/api/v1/items")[1]["items"]] == [
+            "Before", "After"]
+    finally:
+        running.stop()
+
+
+def test_not_ready_while_the_database_is_away_and_ready_when_it_is_back(server):
+    """A reconnect that fails answers 503; the next request after the database returns reconnects."""
+    from tests.conftest import end_connection
+
+    path = server.store.conn.execute("PRAGMA database_list").fetchone()[2]
+    away = path + ".away"
+    end_connection(server.store)
+    os.rename(path, away)
+    try:
+        assert call(server, "GET", "/readyz", token=None)[0] == 503
+        assert call(server, "GET", "/api/v1/items")[0] == 500
+    finally:
+        os.rename(away, path)
+    assert call(server, "GET", "/readyz", token=None) == (200, {"ok": True})
+    assert call(server, "GET", "/api/v1/items") == (200, {"items": []})

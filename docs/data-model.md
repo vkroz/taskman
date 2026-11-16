@@ -27,12 +27,12 @@ Work is centered on items, not on repositories (decision M5). A command that nam
 | Field | Rule |
 | --- | --- |
 | key | `<project key>-<number>`, for example `TM-42`. Unique in the database. Taskman never gives a number to a second item, also after a discard. |
-| type | `epic`, `feat` or `task`. |
+| type | `epic`, `feat`, `task` or `bugfix`. A `bugfix` is a task that fixes a bug. |
 | title | 1 to 200 characters. |
 | description | Markdown text. This is the requirements text. It replaces the file body. |
 | status | `backlog`, `active` or `done`. `done` means the item is complete. Status is a field of the item: `move` and `close` change its value. Nothing moves between tables. |
 | draft | True when the item is new. `finalize` sets it to false. |
-| parent | A work item in the same project, or none. A `task` has no children. |
+| parent | A work item in the same project, or none. A `task` or `bugfix` has no children. |
 | rank | The position among siblings. Lower rank shows first. The top-level items of one project are siblings. |
 | revision | An integer that starts at 0. See "Revision". |
 | assignee | A person or an agent name, for example `claude-code`. Optional. 1 to 100 characters. |
@@ -48,7 +48,7 @@ A comment replaces a journal entry.
 | --- | --- |
 | kind | `decision`, `progress`, `handoff`, `summary` or `verification`. |
 | result | `pass`, `fail` or `blocked`. Only a `verification` comment has a result, and it must have one. |
-| author | 1 to 100 characters: the `--actor` value, or the git `user.name` (decision M1). |
+| author | 1 to 100 characters: the `--actor` value. Without it, the person of the token on a server, or the git `user.name` with a local database (decision M1). |
 | text | Markdown text. It must not be empty. |
 | revision | The item revision when Taskman stored the comment. |
 | created | The time of the comment. |
@@ -68,7 +68,7 @@ Taskman writes one activity entry for each change to a work item.
 | item | The work item. |
 | field | The changed field: `created`, `title`, `description`, `status`, `draft`, `type`, `rank`, `assignee`, `labels` or `dependencies`. |
 | old value, new value | The values before and after the change. For `description`, Taskman stores the full old and new text. |
-| author | Who made the change: the `--actor` value, or the git `user.name` (decision M1). |
+| author | Who made the change: the `--actor` value. Without it, the person of the token on a server, or the git `user.name` with a local database (decision M1). |
 | time | The time of the change. |
 
 A comment does not make an activity entry. The comment itself is the record.
@@ -82,7 +82,7 @@ A Taskman server keeps these two entities. A CLI that opens a database directly 
 | Person | A name of 1 to 60 characters, unique, and the time of creation. |
 | Token | The person, a SHA-256 fingerprint of the token, a label, and the times of creation, expiry, last use and revocation. The token text is not stored. |
 
-A person who signs in with Google has the email address as the name. The server also keeps a short-lived `logins` record for each browser login: hashes of its state and one-time code, and the checks of the login. It holds no token.
+A person who signs in with Google has the email address as the name. The server also keeps a short-lived `logins` record for each browser login: hashes of its state and of its one-time code or token-page key, and the checks of the login. It holds no token. Each new login deletes a record after 1 day when Google signed in a person who may use the server, and after 1 hour in all other cases, also when the sign-in returned with an error.
 
 On a server, the author of a change is the person of the token. When the caller gives `--actor NAME`, the author is `NAME for <person>`.
 
@@ -97,7 +97,7 @@ Each rule of epic requirement R1 applies to the SQL model as follows.
 | Immutability | The change of status to `done` is the last change to an item. After it, the item accepts no change and no comment: no field, link, label, assignee or rank changes (decision M2). |
 | Revision | The revision increases by 1 when the description, type or dependencies change, and when a `decision` or `progress` comment is added. When an item gets a new revision, a new child, a discarded child, or a status change, the revision of each ancestor increases by 1. Assignee, labels and rank do not change the revision. |
 | Cycles | `depend` refuses a link that makes a cycle, with parent completion included. |
-| Task is a leaf | A `task` can not have children. `convert` to `task` is refused when the item has children. |
+| Task is a leaf | A `task` or `bugfix` can not have children. `convert` to `task` or `bugfix` is refused when the item has children. |
 | Discard | Only a draft with no children and no item that depends on it can be discarded. Discard deletes the item with its comments, links, labels and activity. The key number is not used again. |
 | Rank | `reorder` moves an open item among its siblings. A top-level item moves only among the top-level items of its project. A done item keeps its rank. Moving one item does not change the rank of a done sibling. |
 | Readiness | An item is ready when it is not done, and the item and all its ancestors are finalized, not done, and have no unfinished dependency. |
@@ -161,7 +161,7 @@ The location of an item is `<backend>:<key>`, for example `sqlite:TM-42`. The `p
 
 ## Decisions
 
-- **M1 Author of a change (agreed Nov 9, 2026).** Every command that changes an item accepts an optional `--actor NAME`. Without it, the author is the git `user.name`. The author goes into the activity entry and into comments.
+- **M1 Author of a change (agreed Nov 9, 2026).** Every command that changes an item accepts an optional `--actor NAME`. Without it, the author is the person of the token on a server, or the git `user.name` with a local database. The author goes into the activity entry and into comments.
 - **M2 Done items (agreed Nov 9, 2026).** The change of status to `done` is the last change to an item. After it, nothing changes: not fields, links, labels, assignee, rank or comments. Today the UI can still reorder done items; that stops.
 - **M3 `record` becomes `comment` (agreed Nov 9, 2026).** The new name matches the model. Feature 261109005 moved the plugin skills to `comment` and kept `record` as an alias for older plugin installs.
 - **M4 JSON shape (agreed Nov 9, 2026).** `show --json` and `context` keep today's keys, with comments in `frontmatter.journal`. A Jira-like shape (for example `fields` and `comments`) is not planned; feature 261109005 kept this shape.

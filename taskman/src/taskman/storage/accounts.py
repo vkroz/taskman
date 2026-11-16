@@ -72,13 +72,15 @@ def person_for_token(store: SqlStore, token: str) -> str | None:
     return person
 
 
-def list_tokens(store: SqlStore) -> list[dict[str, Any]]:
-    """Every token without its secret, oldest first."""
+def list_tokens(store: SqlStore, person: str | None = None) -> list[dict[str, Any]]:
+    """Every token without its secret, oldest first. With ``person``, only the tokens of that person."""
+    where, params = (" WHERE p.name = ?", (person,)) if person is not None else ("", ())
     with store.lock():
         rows = _q(
             store,
             "SELECT t.id, p.name, t.label, t.created_at, t.expires_at, t.last_used_at, t.revoked_at "
-            "FROM tokens t JOIN persons p ON p.id = t.person_id ORDER BY t.id",
+            f"FROM tokens t JOIN persons p ON p.id = t.person_id{where} ORDER BY t.id",
+            params,
         ).fetchall()
     fields = ("id", "person", "label", "created_at", "expires_at", "last_used_at", "revoked_at")
     return [dict(zip(fields, row)) for row in rows]
@@ -91,11 +93,15 @@ def revoke_own_token(store: SqlStore, token: str) -> None:
            (datetime.now(timezone.utc).isoformat(), _fingerprint(token)))
 
 
-def revoke_token(store: SqlStore, token_id: int) -> bool:
-    """Revoke a token. Returns ``False`` when no active token has this ID."""
+def revoke_token(store: SqlStore, token_id: int, person: str | None = None) -> bool:
+    """Revoke a token. Returns ``False`` when no active token has this ID.
+
+    With ``person``, only a token of that person: the token of another person counts as no token.
+    """
     with store.lock():
-        row = _q(store, "SELECT revoked_at FROM tokens WHERE id = ?", (token_id,)).fetchone()
-        if row is None or row[0]:
+        row = _q(store, "SELECT t.revoked_at, p.name FROM tokens t JOIN persons p ON p.id = t.person_id "
+                 "WHERE t.id = ?", (token_id,)).fetchone()
+        if row is None or row[0] or (person is not None and row[1] != person):
             return False
         _q(store, "UPDATE tokens SET revoked_at = ? WHERE id = ?",
            (datetime.now(timezone.utc).isoformat(), token_id))

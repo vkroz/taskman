@@ -22,7 +22,7 @@ One deployment runs at a time, in push order. A new push does not cancel a runni
 
 After a fix, push to `staging`. To run a deployment again without a new commit, open its run in the Actions tab and select "Re-run all jobs". GitHub shows "Run workflow" only when the workflow file is on the default branch, and `main` has no deployment files.
 
-The service runs `taskman serve` on port 8080, with 1 CPU (central processing unit), 512 MiB (mebibytes) of memory, 0 to 3 instances and a request timeout of 120 seconds. Each instance keeps one database connection and does not connect again after it breaks, for example after a Cloud SQL restart. `/readyz` then answers 503. A liveness probe calls `/readyz` every 30 seconds, and after 3 failures Cloud Run replaces the instance.
+The service runs `taskman serve` on port 8080, with 1 CPU (central processing unit), 512 MiB (mebibytes) of memory, 0 to 3 instances and a request timeout of 120 seconds. Each instance keeps one database connection. When the connection breaks, for example after a Cloud SQL restart, the next call opens a new connection. `/readyz` answers 503 only while the database is away. A liveness probe calls `/readyz` every 30 seconds, and after 3 failures Cloud Run replaces the instance.
 
 ## Set up the environment once
 
@@ -440,7 +440,7 @@ gcloud secrets versions disable <old version> --secret taskman-google-client-sec
 
 Set `ALLOWED_DOMAINS`, `ALLOWED_EMAILS`, or both, in `deploy/gcp/nemos-infra.env`, as comma-separated lists without spaces. `ALLOWED_DOMAINS` admits the members of a Google Workspace organization. A personal Gmail account has no Workspace domain: put its address in `ALLOWED_EMAILS`. To change who may sign in, change the lists and merge to `staging`. `deploy.sh` stops before it changes anything when `GOOGLE_CLIENT_ID` is set and `PUBLIC_URL` is empty, or both lists are empty. To turn browser login off, empty `GOOGLE_CLIENT_ID` and merge to `staging`.
 
-When browser login is on, anyone can open `/auth/token` and `/auth/cli` on the public service. Each request adds a row to the `logins` table under the database write lock, and Taskman does not limit the rate of these requests.
+When browser login is on, anyone can open `/auth/token` and `/auth/cli` on the public service. Each request adds a row to the `logins` table under the database write lock, and Taskman does not limit the rate of these requests. Each new request deletes a row after 1 day when Google signed in a person who may use the server, and after 1 hour in all other cases, also when the sign-in returned with an error.
 
 ### Fix a failed login
 
@@ -454,9 +454,11 @@ When a login fails, the Taskman page or the Google page names an OAuth error cod
 
 Each person logs in from a computer with a browser, as [First login from a computer](#first-login-from-a-computer) shows. On a machine without a browser, open `https://taskman-1037430670088.us-central1.run.app/auth/token` on any computer and sign in. The page shows a personal access token one time. On the machine, run `taskman auth login --server https://taskman-1037430670088.us-central1.run.app --with-token` and paste the token. To connect an agent cloud environment, follow [Connect an agent cloud environment](../README.md#connect-an-agent-cloud-environment) in the README. Without browser login, an operator creates the token, as "Run operator commands" shows.
 
+Each person lists and revokes their own tokens with `taskman token list` and `taskman token revoke ID` against the server, or on the `/auth/token` page after the sign-in. [Manage your tokens](../README.md#manage-your-tokens) in the README gives the steps.
+
 ## Run operator commands
 
-`taskman token list`, `taskman token revoke` and `taskman token create` open the database directly. Run them on your computer through the [Cloud SQL Auth Proxy version 2](https://github.com/GoogleCloudPlatform/cloud-sql-proxy), with [uv](https://docs.astral.sh/uv/) and a checkout of this repository. You need the roles Cloud SQL Client and Secret Manager Secret Accessor; the Owner role has them. The proxy uses your Application Default Credentials: run `gcloud auth application-default login` one time.
+`taskman token list --database`, `taskman token revoke --database` and `taskman token create` open the database directly and reach the tokens of every person. Without `--database`, `token list` and `token revoke` use the server of your login and reach only your own tokens. Run them on your computer through the [Cloud SQL Auth Proxy version 2](https://github.com/GoogleCloudPlatform/cloud-sql-proxy), with [uv](https://docs.astral.sh/uv/) and a checkout of this repository. You need the roles Cloud SQL Client and Secret Manager Secret Accessor; the Owner role has them. The proxy uses your Application Default Credentials: run `gcloud auth application-default login` one time.
 
 ```bash
 cloud-sql-proxy --port 15432 nemos-infra:us-central1:nemos-pg &
@@ -464,10 +466,10 @@ export TASKMAN_BACKEND=postgres
 export TASKMAN_DATABASE_URL=postgresql://taskman@127.0.0.1:15432/taskman
 export TASKMAN_DB_PASSWORD="$(gcloud secrets versions access latest --secret taskman-db-password --project nemos-infra)"
 cd taskman
-uv run --extra postgres taskman token list
+uv run --extra postgres taskman token list --database
 ```
 
-In the same terminal, `uv run --extra postgres taskman token revoke ID` stops a token. `uv run --extra postgres taskman token create --person "ada@example.com"` creates a token in an emergency. When you are done:
+In the same terminal, `uv run --extra postgres taskman token revoke ID --database` stops a token of any person. `uv run --extra postgres taskman token create --person "ada@example.com"` creates a token in an emergency. When you are done:
 
 ```bash
 cd ..

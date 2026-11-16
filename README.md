@@ -62,7 +62,7 @@ taskman move TASK_ID active
 
 `list` and `ready` show items in the order that you set in the UI or with `taskman reorder`. Items of one project stay together. Each parent comes before its children. Siblings follow their position. The text output of `list` groups the items by status and keeps this order in each group.
 
-A story uses type `feat`. Taskman permits other nesting shapes; `task` is always a leaf. Independent tasks can run in parallel. Each agent reads `context` and records its contribution through the CLI. Taskman does not launch coding agents itself.
+A story uses type `feat`. Taskman permits other nesting shapes; `task` and `bugfix` are always leaves. Independent tasks can run in parallel. Each agent reads `context` and records its contribution through the CLI. Taskman does not launch coding agents itself.
 
 ## Record work and verify
 
@@ -74,7 +74,7 @@ taskman comment TASK_ID --kind verification --result pass --actor "Claude Code" 
 taskman close TASK_ID
 ```
 
-`record` is an alias of `comment`. Every command that changes an item accepts `--actor NAME`; without it, the author is your git `user.name`. `comment` takes its text from `--body TEXT` or from `--body-file FILE`; `--body-file -` reads stdin. Comment on significant choices, their reasons and changes to scope. The completion summary should explain what changed, why, and any limits. Verification comments should name the checks, commands, results and source revision or relevant working-tree changes. Distinguish executed tests from source inspection and another agent's report.
+`record` is an alias of `comment`. Every command that changes an item accepts `--actor NAME`; without it, the author is the person of the token on a server, or your git `user.name` with a local database. `comment` takes its text from `--body TEXT` or from `--body-file FILE`; `--body-file -` reads stdin. Comment on significant choices, their reasons and changes to scope. The completion summary should explain what changed, why, and any limits. Verification comments should name the checks, commands, results and source revision or relevant working-tree changes. Distinguish executed tests from source inspection and another agent's report.
 
 Open requirements may be refined to achieve the agreed outcome. Changes to the description, dependencies, type or children, and new decision or progress comments, invalidate earlier completion evidence. Close requires a current summary, a current passing verification, and completed dependencies and descendants. A recorded pass is the agent's assertion: Taskman does not run tests or prove that assertion.
 
@@ -158,7 +158,7 @@ taskman token create --person "Ada"         # prints a token one time; it expire
 taskman serve                               # listens on 127.0.0.1 and the port in PORT, or 8080
 ```
 
-`taskman serve --host 0.0.0.0` accepts calls from other machines. `taskman token list` shows the tokens without their secrets, and `taskman token revoke ID` stops one.
+`taskman serve --host 0.0.0.0` accepts calls from other machines. `taskman token list --database` shows the tokens of every person without their secrets, and `taskman token revoke ID --database` stops one. With no server set, `--database` is not needed.
 
 ### Run the server in a container
 
@@ -198,6 +198,17 @@ On a machine without a browser, for example a cloud virtual machine:
 An agent cloud environment sets `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` instead, as [Connect an agent cloud environment](#connect-an-agent-cloud-environment) shows. `TASKMAN_TOKEN` wins over a saved login.
 
 The person of the token is the author of each change. With `--actor claude`, the author is `claude for ada@example.com`. Taskman reads `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` from the environment only, never from a `.env` file. The address must start with `https://`, unless the server runs on the same computer. The CLI keeps its login in `~/.config/taskman/credentials.json`, which only you can read. A token expires after 90 days.
+
+### Manage your tokens
+
+Each login, each `/auth/token` page and each token of an operator is a separate token. To see your tokens and to stop one that you no longer use, or that someone else may have:
+
+```bash
+taskman token list          # ID, label, created, expires, last used, revoked
+taskman token revoke 7      # the next request with token 7 is refused
+```
+
+The `/auth/token` page shows the same list after you sign in, with a Revoke button for each token. The buttons work for 10 minutes after the sign-in. You see and revoke only your own tokens. No command or page shows the value of a token again. When you revoke the token that this computer uses, the next command fails with "refused the token": log in again.
 
 ### Connect an agent cloud environment
 

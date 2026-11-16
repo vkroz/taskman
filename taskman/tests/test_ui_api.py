@@ -175,6 +175,19 @@ def test_query_etag_reports_unchanged_until_data_changes(seeded):
     assert changed["etag"] != first["etag"] and "rows" in changed
 
 
+def test_create_filter_and_show_a_bugfix(api):
+    bugfix = _create(api, "Fix crash", type="bugfix", project="TM")
+    _create(api, "Other", project="TM")
+    query = api.query(view="drafts", project="TM", filters=[{"field": "type", "op": "eq", "value": "bugfix"}])
+    assert [(row["id"], row["type"], row["progress"]) for row in query["rows"]] == [(bugfix, "bugfix", None)]
+    assert api.query(view="drafts", project="TM")["facets"]["type"] == {"bugfix": 1, "task": 1}
+    assert api(f"/api/show/{bugfix}")["frontmatter"]["type"] == "bugfix"
+    error = api("/api/items", {"title": "Child", "type": "task", "body": "", "parent": bugfix}, status=400)["error"]
+    assert "bugfix = leaf invariant" in error
+    assert "Invalid task type" in api("/api/items", {"title": "Bug", "type": "bug", "body": "", "project": "TM"},
+                                      status=400)["error"]
+
+
 def test_query_rejects_unknown_view_sort_and_filters(seeded):
     assert "Unknown view" in seeded("/api/query", {"view": "current"}, status=400)["error"]
     assert "Unknown sort" in seeded("/api/query", {"sort": "journal"}, status=400)["error"]

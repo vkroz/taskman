@@ -7,13 +7,14 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import stat
 import threading
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import pytest
 
@@ -223,6 +224,124 @@ def test_a_cancelled_google_sign_in_is_reported(login_server):
     assert status == 400 and "access_denied" in body
 
 
+@pytest.fixture
+def logins_db(sql_settings):
+    """The login steps over an upgraded, empty database of each SQL dialect."""
+    from taskman.login import Logins
+    from taskman.storage.schema import upgrade
+    from taskman.storage.sql import connect
+    from taskman.storage.sql_store import open_sql_store
+
+    conn, dialect = connect(sql_settings)
+    try:
+        upgrade(conn, dialect)
+    finally:
+        conn.close()
+    store = open_sql_store(sql_settings, actor="server")
+    yield Logins(store, settings())
+    store.close()
+
+
+def _add_login(logins, name: str, created_at: datetime, finished_at: datetime | None = None,
+               person: str | None = None) -> None:
+    with logins.store.lock():
+        logins._q(
+            "INSERT INTO logins (state_hash, kind, nonce, verifier, created_at, finished_at, person) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (name, "token", "n", "v", created_at.isoformat(), finished_at and finished_at.isoformat(), person),
+        )
+
+
+def test_a_new_login_removes_anonymous_rows_after_one_hour_and_signed_in_rows_after_one_day(logins_db, monkeypatch):
+    import taskman.login
+
+    now = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(taskman.login, "_now", lambda: now)
+    tick = timedelta(microseconds=1)
+    hour, day = now - timedelta(hours=1), now - timedelta(days=1)
+    ada = "ada@example.com"
+    _add_login(logins_db, "unfinished at the hour", hour)
+    _add_login(logins_db, "unfinished past the hour", hour - tick)
+    # A callback with an error or a bad code finishes a row but signs in nobody.
+    _add_login(logins_db, "failed at the hour", hour, hour)
+    _add_login(logins_db, "failed past the hour", hour - tick, hour)
+    _add_login(logins_db, "signed in past the hour", hour - tick, hour, ada)
+    _add_login(logins_db, "signed in at the day", day, day, ada)
+    _add_login(logins_db, "signed in past the day", day - tick, day, ada)
+    logins_db.start("token", {})
+    rows = logins_db._q("SELECT state_hash FROM logins WHERE nonce = 'n' ORDER BY state_hash").fetchall()
+    assert [row[0] for row in rows] == [
+        "failed at the hour", "signed in at the day", "signed in past the hour", "unfinished at the hour",
+    ]
+    assert logins_db._q("SELECT COUNT(*) FROM logins").fetchone()[0] == 5
+
+
+def test_the_cleanup_keeps_the_rows_of_running_logins(login_server, google):
+    verifier = "v" * 50
+    authorize = start_cli_login(login_server, verifier)
+    # The person returns from Google 9 minutes later; another login started in between.
+    nine = (datetime.now(timezone.utc) - timedelta(minutes=9)).isoformat()
+    login_server.store.conn.execute("UPDATE logins SET created_at = ?", (nine,))
+    start_cli_login(login_server, port=50001)
+    status, headers, _ = callback(login_server, google.sign_in(authorize))
+    assert status == 302
+    code = parse_qs(urlsplit(headers["Location"]).query)["code"][0]
+    # The CLI trades its code 1 minute later, after one more login started.
+    one = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    login_server.store.conn.execute("UPDATE logins SET finished_at = ? WHERE finished_at IS NOT NULL", (one,))
+    start_cli_login(login_server, port=50002)
+    status, answer = post(f"{login_server.url}/auth/exchange", {"code": code, "verifier": verifier})
+    assert status == 200 and answer["person"] == "ada@example.com"
+
+
+def _age_logins(server, minutes: int) -> None:
+    old = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+    server.store.conn.execute("UPDATE logins SET created_at = ?, finished_at = ?", (old, old))
+
+
+@pytest.mark.parametrize("answer", [{"error": "access_denied"}, {"code": "bogus"}, {}])
+def test_a_sign_in_that_ends_without_a_person_is_gone_after_one_hour(login_server, answer):
+    # Anyone can take the state from the Location header and end the sign-in with an error.
+    status, headers, _ = get(f"{login_server.url}/auth/token")
+    state = parse_qs(urlsplit(headers["Location"]).query)["state"][0]
+    assert callback(login_server, {"state": state, **answer})[0] in (400, 500, 502)
+    _age_logins(login_server, 61)
+    get(f"{login_server.url}/auth/token")
+    assert login_server.store.conn.execute("SELECT COUNT(*) FROM logins").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("kind", ["token", "cli"])
+def test_a_signed_in_login_stays_one_day(login_server, google, kind):
+    if kind == "token":
+        authorize = get(f"{login_server.url}/auth/token")[1]["Location"]
+        assert callback(login_server, google.sign_in(authorize))[0] == 200
+    else:
+        assert callback(login_server, google.sign_in(start_cli_login(login_server)))[0] == 302
+    _age_logins(login_server, 23 * 60)
+    get(f"{login_server.url}/auth/token")
+    rows = login_server.store.conn.execute("SELECT person FROM logins ORDER BY id").fetchall()
+    assert [row[0] for row in rows] == ["ada@example.com", None]
+
+
+def test_a_sign_in_that_is_not_allowed_is_gone_after_one_hour(login_server, google):
+    authorize = start_cli_login(login_server)
+    status, _, body = callback(login_server, google.sign_in(authorize, email="eve@elsewhere.example"))
+    assert status == 403 and "may not use this Taskman server" in body
+    _age_logins(login_server, 61)
+    start_cli_login(login_server, port=50001)
+    assert login_server.store.conn.execute("SELECT COUNT(*) FROM logins").fetchone()[0] == 1
+
+
+def test_an_unfinished_sign_in_older_than_one_hour_is_gone_after_a_new_login(login_server, google):
+    authorize = start_cli_login(login_server)
+    old = (datetime.now(timezone.utc) - timedelta(minutes=61)).isoformat()
+    login_server.store.conn.execute("UPDATE logins SET created_at = ?", (old,))
+    start_cli_login(login_server, port=50001)
+    assert login_server.store.conn.execute("SELECT COUNT(*) FROM logins").fetchone()[0] == 1
+    status, _, body = callback(login_server, google.sign_in(authorize))
+    assert status == 400 and "unknown or already used" in body
+
+
 class RefusingTokenEndpoint:
     """A local token endpoint that refuses each code exchange with one answer, as Google does.
 
@@ -332,10 +451,134 @@ def test_the_token_page_shows_a_personal_access_token_one_time(login_server, goo
     assert list_tokens(login_server.store)[-1]["label"] == "build-vm"
 
 
+def token_page(server, google, email: str = "ada@example.com") -> str:
+    """The token page after a sign-in on /auth/token."""
+    _, headers, _ = get(f"{server.url}/auth/token")
+    status, _, body = callback(server, google.sign_in(headers["Location"], email=email))
+    assert status == 200, body
+    return body
+
+
+def page_key(body: str) -> str:
+    return re.search(r'name="page" value="([^"]+)"', body).group(1)
+
+
+def post_form(url: str, form: dict[str, str]) -> tuple[int, dict, str]:
+    request = urllib.request.Request(url, data=urlencode(form).encode(), method="POST")
+    request.add_header("Content-Type", "application/x-www-form-urlencoded")
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, dict(response.headers), response.read().decode()
+    except urllib.error.HTTPError as exc:
+        return exc.code, dict(exc.headers), exc.read().decode()
+
+
+def whoami(server, token: str) -> int:
+    request = urllib.request.Request(f"{server.url}/api/v1/whoami")
+    request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+
+
+def test_the_token_page_lists_only_the_tokens_of_the_person_without_values(login_server, google):
+    from taskman.storage.accounts import create_token
+
+    laptop_id, laptop = create_token(login_server.store, "ada@example.com", "laptop", days=90)
+    _, other = create_token(login_server.store, "bob@team.example", "bob-vm", days=90)
+    body = token_page(login_server, google)
+    rows = list_tokens(login_server.store, "ada@example.com")
+    assert [row["id"] for row in rows] == [laptop_id, rows[1]["id"]]
+    for row in rows:
+        assert f'<tr><td>{row["id"]}</td><td>{row["label"]}</td><td>20' in body
+        assert f'name="token" value="{row["id"]}"' in body
+    assert "<th>Created</th><th>Expires</th><th>Last used</th><th>Revoked</th>" in body
+    hashes = [row[0] for row in login_server.store.conn.execute("SELECT token_hash FROM tokens").fetchall()]
+    for secret in [laptop, other, *hashes]:
+        assert secret not in body
+    assert "bob" not in body and 'action="/auth/token/revoke"' in body
+    # The page key is not the stored fingerprint of the login.
+    assert page_key(body) not in str(login_server.store.conn.execute("SELECT * FROM logins").fetchall())
+
+
+def test_the_token_page_revokes_a_token_of_the_person(login_server, google):
+    from taskman.storage.accounts import create_token
+
+    laptop_id, laptop = create_token(login_server.store, "ada@example.com", "laptop", days=90)
+    body = token_page(login_server, google)
+    new_token = re.search(r"<code>(tmn_[^<]+)</code>", body).group(1)
+    status, headers, after = post_form(f"{login_server.url}/auth/token/revoke",
+                                       {"page": page_key(body), "token": str(laptop_id)})
+    assert status == 200 and f"Revoked token {laptop_id}." in after
+    assert headers["Cache-Control"] == "no-store" and "default-src 'none'" in headers["Content-Security-Policy"]
+    assert whoami(login_server, laptop) == 401 and whoami(login_server, new_token) == 200
+    assert new_token not in after and f'name="token" value="{laptop_id}"' not in after
+    assert list_tokens(login_server.store, "ada@example.com")[0]["revoked_at"]
+    # A second click on the same button changes nothing and says so.
+    status, _, again = post_form(f"{login_server.url}/auth/token/revoke",
+                                 {"page": page_key(body), "token": str(laptop_id)})
+    assert status == 404 and f"No active token of yours has the ID {laptop_id}." in again
+    # The token that the page itself created can be revoked too.
+    new_id = list_tokens(login_server.store, "ada@example.com")[-1]["id"]
+    assert post_form(f"{login_server.url}/auth/token/revoke", {"page": page_key(body), "token": str(new_id)})[0] == 200
+    assert whoami(login_server, new_token) == 401
+
+
+def test_the_token_page_cannot_revoke_the_token_of_another_person(login_server, google):
+    from taskman.storage.accounts import create_token
+
+    other_id, other = create_token(login_server.store, "bob@team.example", "bob-vm", days=90)
+    body = token_page(login_server, google)
+    status, _, after = post_form(f"{login_server.url}/auth/token/revoke", {"page": page_key(body), "token": str(other_id)})
+    assert status == 404 and f"No active token of yours has the ID {other_id}." in after and "bob" not in after
+    assert whoami(login_server, other) == 200
+
+
+@pytest.mark.parametrize("form", [{}, {"token": "1"}, {"page": "forged", "token": "1"}])
+def test_a_revoke_without_the_key_of_a_signed_in_page_is_refused(login_server, google, form):
+    """Another site can post the form, but it cannot know the page key: nothing is revoked."""
+    token_page(login_server, google)
+    status, _, body = post_form(f"{login_server.url}/auth/token/revoke", form)
+    assert status in (400, 403) and "No token revoked" in body
+    assert all(row["revoked_at"] is None for row in list_tokens(login_server.store))
+
+
+def test_a_revoke_with_a_cli_login_code_is_refused(login_server, google):
+    """The exchange code of a CLI login is no page key, and a page key is no exchange code."""
+    _, headers, _ = callback(login_server, google.sign_in(start_cli_login(login_server)))
+    code = parse_qs(urlsplit(headers["Location"]).query)["code"][0]
+    assert post_form(f"{login_server.url}/auth/token/revoke", {"page": code, "token": "1"})[0] == 403
+    key = page_key(token_page(login_server, google))
+    status, answer = post(f"{login_server.url}/auth/exchange", {"code": key, "verifier": "v" * 50})
+    assert status == 400 and "unknown or already used" in answer["error"]["message"]
+    assert list_tokens(login_server.store)[0]["revoked_at"] is None
+
+
+def test_the_token_page_revokes_for_ten_minutes_after_the_sign_in(login_server, google):
+    body = token_page(login_server, google)
+    old = (datetime.now(timezone.utc) - timedelta(minutes=11)).isoformat()
+    login_server.store.conn.execute("UPDATE logins SET finished_at = ?", (old,))
+    token_id = list_tokens(login_server.store)[-1]["id"]
+    status, _, after = post_form(f"{login_server.url}/auth/token/revoke", {"page": page_key(body), "token": str(token_id)})
+    assert status == 403 and "more than 10 minutes old" in after
+    assert list_tokens(login_server.store)[-1]["revoked_at"] is None
+
+
+def test_a_revoke_form_without_a_token_id_is_refused(login_server, google):
+    key = page_key(token_page(login_server, google))
+    for token in ("", "x", "-1", "1" * 19):
+        status, _, body = post_form(f"{login_server.url}/auth/token/revoke", {"page": key, "token": token})
+        assert status == 400 and "names no token" in body, token
+
+
 def test_login_pages_without_login_settings(server):
     status, _, body = get(f"{server.url}/auth/cli?port=50000")
     assert status == 404 and "not set up" in body
     assert post(f"{server.url}/auth/exchange", {"code": "x", "verifier": "y"})[0] == 404
+    status, _, body = post_form(f"{server.url}/auth/token/revoke", {"page": "x", "token": "1"})
+    assert status == 404 and "not set up" in body
 
 
 def test_a_failure_inside_login_gives_a_page_without_details(login_server, monkeypatch):

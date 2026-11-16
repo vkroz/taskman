@@ -7,22 +7,23 @@ updates and activity entries, new journal entries become comments, and
 
 One connection serves the store. ``lock()`` runs a lifecycle operation in
 one transaction that holds the database write lock; a write outside
-``lock()`` runs in a transaction of its own.
+``lock()`` runs in a transaction of its own. A store opened from settings
+reopens a closed or broken connection when a transaction starts.
 """
 from __future__ import annotations
 
 import re
 import subprocess
 import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
 from taskman.model.yaml_io import emit_frontmatter
-from taskman.storage.schema import CURRENT_VERSION
+from taskman.storage.schema import CURRENT_VERSION, MIGRATIONS
 from taskman.storage.settings import StorageSettings
-from taskman.storage.sql import SQLITE, Dialect, connect, transaction
+from taskman.storage.sql import SQLITE, Dialect, connect, is_lost, transaction
 from taskman.storage.store import Item, StorageConfigError, StorageError
 
 _KEY = re.compile(r"^([A-Z][A-Z0-9]{1,9})-([1-9][0-9]*)$")
@@ -48,7 +49,7 @@ def default_actor() -> str:
 def open_sql_store(settings: StorageSettings, actor: str | None = None) -> SqlStore:
     conn, dialect = connect(settings, create=False)
     try:
-        return SqlStore(conn, dialect, actor)
+        return SqlStore(conn, dialect, actor, reopen=lambda: connect(settings, create=False)[0])
     except BaseException:
         conn.close()
         raise
@@ -70,14 +71,23 @@ def _text(field: str, value: Any) -> str | None:
 
 
 class SqlStore:
-    def __init__(self, conn: Any, dialect: Dialect, actor: str | None = None) -> None:
+    def __init__(self, conn: Any, dialect: Dialect, actor: str | None = None,
+                 reopen: Callable[[], Any] | None = None) -> None:
         self.conn = conn
         self.dialect = dialect
+        # Opens a new connection to the same database; without it a lost connection stays lost.
+        self._reopen = reopen
         self.actor = actor or default_actor()
         self._mutex = threading.RLock()
         self._depth = 0
         with self._read():
-            version = self._schema_version()
+            versions = self._schema_versions()
+        version = max(versions, default=0)
+        missing = [m.version for m in MIGRATIONS if m.version not in versions and m.version < version]
+        if missing:
+            raise StorageConfigError(
+                f"The database schema lacks version {', '.join(map(str, missing))}. Run: taskman db upgrade"
+            )
         if version < CURRENT_VERSION:
             raise StorageConfigError(
                 f"The database schema is at version {version}; Taskman needs version {CURRENT_VERSION}. "
@@ -92,17 +102,40 @@ class SqlStore:
     def close(self) -> None:
         self.conn.close()
 
-    def _schema_version(self) -> int:
-        """The applied schema version, or 0 without a schema. Reads only: no lock, no DDL."""
+    def _schema_versions(self) -> set[int]:
+        """The applied schema versions, empty without a schema. Reads only: no lock, no DDL."""
         if self.dialect is SQLITE:
             exists = self._q("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_versions'").fetchone()
         else:
             exists = self._q("SELECT to_regclass('schema_versions')").fetchone()[0]
         if not exists:
-            return 0
-        return self._q("SELECT MAX(version) FROM schema_versions").fetchone()[0] or 0
+            return set()
+        return {row[0] for row in self._q("SELECT version FROM schema_versions").fetchall()}
 
     # ---- transactions --------------------------------------------------
+
+    def _begin(self, start: Callable[[Any], Any]) -> None:
+        """Run ``start``, the first statements of a transaction, on a working connection.
+
+        A closed or broken connection is replaced first. When ``start`` fails because
+        the connection was lost, it runs once more on a new connection. No statement
+        of the transaction has run yet, so the second try cannot repeat a change.
+        A transaction that fails after its start is never tried again.
+        """
+        if self._reopen is not None and is_lost(self.conn, self.dialect):
+            self._reconnect()
+        try:
+            start(self.conn)
+        except Exception:
+            if self._reopen is None or not is_lost(self.conn, self.dialect):
+                raise
+            self._reconnect()
+            start(self.conn)
+
+    def _reconnect(self) -> None:
+        """Replace the lost connection. If the database is still down, the error goes to the caller."""
+        self.conn.close()
+        self.conn = self._reopen()
 
     @contextmanager
     def lock(self) -> Iterator[None]:
@@ -115,7 +148,8 @@ class SqlStore:
                 finally:
                     self._depth -= 1
                 return
-            with transaction(self.conn, self.dialect):
+            with ExitStack() as stack:
+                self._begin(lambda conn: stack.enter_context(transaction(conn, self.dialect)))
                 self._depth = 1
                 try:
                     yield
@@ -129,7 +163,9 @@ class SqlStore:
             if self._depth:
                 yield
                 return
-            self.conn.execute("BEGIN" if self.dialect is SQLITE else "BEGIN ISOLATION LEVEL REPEATABLE READ")
+            self._begin(lambda conn: conn.execute(
+                "BEGIN" if self.dialect is SQLITE else "BEGIN ISOLATION LEVEL REPEATABLE READ"
+            ))
             self._depth = 1
             try:
                 yield
