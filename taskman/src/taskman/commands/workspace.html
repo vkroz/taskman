@@ -3569,9 +3569,12 @@
         const row = d.row;
         const failing = (d.close_gates || []).filter((gate) => !gate.ok).length;
         const blockers = row.blockers || [];
+        // The move rule needs the item and each ancestor finalized, and their dependencies done.
+        const drafts = ((d.close_gates || []).find((gate) => gate.check === "finalized") || { refs: [] }).refs;
         const why = {
           backlog: null,
-          active: row.draft ? "finalize first" : row.state === "blocked" ? (blockers.length ? `blocked by ${blockers.join(", ")}` : "blocked") : null,
+          active: row.draft ? "finalize first" : drafts.length ? `finalize ${drafts.join(", ")} first`
+            : row.state === "blocked" ? (blockers.length ? `blocked by ${blockers.join(", ")}` : "blocked") : null,
           done: failing ? `${plural(failing, "check")} open` : null,
         };
         return Object.entries(STATUS_NAME).map(([value, name]) => {
@@ -3619,14 +3622,19 @@
         const entry = h("input", { id: "label-field", "aria-label": "Add label", placeholder: "Add label", autocomplete: "off", disabled: S.missing });
         const tokens = h("div", { class: "tokens", role: "group", "aria-label": "Labels" });
         const labelError = h("span", { class: "field-error", role: "alert", hidden: true });
-        const draw = () => tokens.replaceChildren(...labels.map((label) => h("span", { class: "chip" }, label,
-          h("button", { type: "button", "aria-label": `Remove label ${label}`, disabled: S.missing,
-            onmousedown: (event) => event.preventDefault(), // focus stays in the label field
-            onclick: () => {
-              labels.splice(labels.indexOf(label), 1);
-              draw();
-              entry.focus();
-            } }, icon("close")))), entry);
+        /** Replace only the chips: the entry stays in place, so it keeps focus while labels change. */
+        const draw = () => {
+          for (const chip of tokens.querySelectorAll(".chip")) chip.remove();
+          if (entry.parentNode !== tokens) tokens.append(entry);
+          entry.before(...labels.map((label) => h("span", { class: "chip" }, label,
+            h("button", { type: "button", "aria-label": `Remove label ${label}`, disabled: S.missing,
+              onmousedown: (event) => event.preventDefault(), // focus stays in the label field
+              onclick: () => {
+                labels.splice(labels.indexOf(label), 1);
+                draw();
+                entry.focus();
+              } }, icon("close")))));
+        };
         /** Lowercase and check pending label text; return the error when it is not a valid label. */
         const addPending = () => {
           for (const raw of entry.value.split(",")) {

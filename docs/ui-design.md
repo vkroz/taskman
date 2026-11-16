@@ -1,6 +1,6 @@
 # Taskman workspace design
 
-The workspace is one HTML file with no build step and no external files. It works offline. It shows what Taskman derives, not raw fields: state, blockers, leaf progress, latest verification and close readiness. Agents finalize, move and close items through the CLI. The page shows whether an item can close and why not.
+The workspace is one HTML file with no build step and no external files. It works offline. It shows what Taskman derives, not raw fields: state, blockers, leaf progress, latest verification and close readiness. Agents finalize items through the CLI. People and agents move and close open items from the status field of the item panel, or through the CLI. The page shows whether an item can close and why not.
 
 ## Layout
 
@@ -39,7 +39,7 @@ From top to bottom, the panel shows:
 Open work has no Edit button. A click on a field starts the edit, and the field saves when focus leaves it. Esc restores the saved value. Enter saves the title, the owner and the labels; Ctrl+Enter or Cmd+Enter saves the description.
 
 - **Title and description**: while you edit one of them, an optional "Reason for the change" field shows below it. A reason becomes a decision comment by the store actor. Without a reason, the change has no comment; the timeline still shows the change. A draft can have an empty description. If someone changed the title or description after the page showed it, the field keeps the typed text and offers Reload theirs or Overwrite with mine.
-- **Status**: Backlog, Active or Done. A move that the lifecycle refuses now is disabled and gives the cause, for example "Active (finalize first)" or "Done (2 checks open)". Done closes the item.
+- **Status**: Backlog, Active or Done. A move that the lifecycle refuses now is disabled and gives the cause, for example "Active (finalize first)", "Active (finalize TM-4 first)" for a draft ancestor, "Active (blocked by TM-7)" or "Done (2 checks open)". Done closes the item.
 - **Assignee**: a text field that suggests known people and agents. An empty field removes the assignee.
 - **Labels**: Enter or a comma adds a label, and the remove button or Backspace removes one. The page lowercases labels and rejects labels that do not match `^[a-z0-9_-]{1,50}$`.
 

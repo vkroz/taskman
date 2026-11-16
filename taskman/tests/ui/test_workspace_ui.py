@@ -718,6 +718,62 @@ def test_status_assignee_and_labels_save_in_place(rw, desktop):
     expect(desktop.locator("#preview .state")).to_contain_text("Active")
 
 
+def test_labels_typed_in_a_row_keep_focus_and_esc_cancels_them(rw, desktop):
+    visit(desktop, rw, "/?item=RES-5")
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    labels = []
+    desktop.on("request", lambda request: labels.append(request) if request.url.endswith("/api/label") else None)
+    entry = desktop.locator("#label-field")
+    chips = desktop.locator("#preview .tokens .chip")
+    entry.click()
+    # Real keystrokes: j and c are page shortcuts, so they must reach the field.
+    desktop.keyboard.type("jobs,cost")
+    desktop.keyboard.press("Enter")
+    expect(chips).to_have_text(["bug", "cost", "jobs", "ui"])
+    expect(entry).to_be_focused()
+    expect(entry).to_have_value("")
+    desktop.keyboard.press("Backspace")
+    expect(chips).to_have_text(["bug", "cost", "jobs"])
+    expect(entry).to_be_focused()
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    expect(desktop.locator("dialog[open]")).to_have_count(0)
+    desktop.keyboard.press("Escape")
+    expect(chips).to_have_text(["bug", "ui"])
+    desktop.wait_for_timeout(300)
+    assert labels == []
+    assert rw.api("/api/show/RES-5")["frontmatter"]["labels"] == ["bug", "ui"]
+
+    entry.click()
+    desktop.keyboard.type("docs,jobs")
+    desktop.keyboard.press("Enter")
+    desktop.keyboard.press("Tab")
+    eventually(lambda: rw.api("/api/show/RES-5")["frontmatter"]["labels"] == ["bug", "docs", "jobs", "ui"])
+    assert len(labels) == 1
+
+
+def test_status_field_names_the_ancestor_that_refuses_the_move(rw, desktop, tmp_path):
+    draft_parent = rw.api("/api/items", {"title": "Draft feature", "type": "feat", "project": "TM"})["id"]
+    under_draft = rw.api("/api/items", {"title": "Under a draft", "type": "task", "parent": draft_parent, "body": "Spec."})["id"]
+    under_blocked = rw.api("/api/items", {"title": "Under a blocked feature", "type": "task", "parent": "TM-11",
+                                          "body": "Spec."})["id"]
+    agent = agent_store(tmp_path)
+    try:
+        with agent.lock():
+            lifecycle.finalize(agent, under_draft)
+            lifecycle.finalize(agent, under_blocked)
+    finally:
+        agent.close()
+    active = "#status-field option[value=active]"
+    visit(desktop, rw, f"/?item={under_draft}")
+    expect(detail_key(desktop)).to_have_text(under_draft)
+    expect(desktop.locator(active)).to_be_disabled()
+    expect(desktop.locator(active)).to_have_text(f"Active (finalize {draft_parent} first)")
+    visit(desktop, rw, f"/?item={under_blocked}")
+    expect(detail_key(desktop)).to_have_text(under_blocked)
+    expect(desktop.locator(active)).to_be_disabled()
+    expect(desktop.locator(active)).to_have_text("Active (blocked by TM-6)")
+
+
 def test_failed_save_keeps_the_text_and_shows_the_error(rw, desktop, tmp_path):
     visit(desktop, rw, "/?item=RES-5")
     expect(detail_key(desktop)).to_have_text("RES-5")
