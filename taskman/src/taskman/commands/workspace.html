@@ -2823,6 +2823,10 @@
         const value = (row) => (field === "id" ? row.id : String(row[field] ?? "").toLowerCase());
         const sorted = [...rows].sort((a, b) => {
           if (field === "id") return keyCompare(a.id, b.id);
+          if (field === "type") {  // The type order of the type filter, not the names: Bugfix comes last.
+            const rank = (row) => (row.type in TYPE_NAME ? Object.keys(TYPE_NAME).indexOf(row.type) : 99);
+            return rank(a) - rank(b) || keyCompare(a.id, b.id);
+          }
           const x = value(a);
           const y = value(b);
           return x < y ? -1 : x > y ? 1 : keyCompare(a.id, b.id);

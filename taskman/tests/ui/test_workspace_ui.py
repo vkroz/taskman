@@ -934,6 +934,25 @@ def test_filters_and_sort(ro, desktop):
     expect(detail_key(desktop)).to_have_text("TM-10")
 
 
+def test_sort_by_type_follows_the_type_order_in_a_flat_view(rw, desktop, tmp_path):
+    # TASKMAN-39: the Ready view sorts in the browser; Bugfix comes last, as in the type filter.
+    keys = {kind: rw.api("/api/items", {"title": kind.title(), "type": kind, "project": "SORT", "body": "Spec."})["id"]
+            for kind in ("bugfix", "task", "feat", "epic")}
+    agent = agent_store(tmp_path)
+    try:
+        with agent.lock():
+            for key in keys.values():
+                lifecycle.finalize(agent, key)
+    finally:
+        agent.close()
+    visit(desktop, rw, "/?view=ready&project=SORT&sort=type")
+    expect(desktop.locator("#rows .row")).to_have_count(4)
+    assert row_ids(desktop) == [keys[k] for k in ("epic", "feat", "task", "bugfix")]
+    visit(desktop, rw, "/?view=ready&project=SORT&sort=type&desc=1")
+    expect(desktop.locator("#rows .row")).to_have_count(4)
+    assert row_ids(desktop) == [keys[k] for k in ("bugfix", "task", "feat", "epic")]
+
+
 # ---- 10. keyboard (P0-11) ----
 
 
