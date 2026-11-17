@@ -3400,6 +3400,7 @@
         const self = { saved: read(), write, focus: () => parts[0].focus() };
         let busy = false;
         let again = false;
+        let saving; // the value of the running save
         const inside = (node) => !!node && parts.some((part) => part.contains(node));
         const done = () => afterPointer(() => {
           if (!inside(document.activeElement)) onDone?.();
@@ -3426,6 +3427,7 @@
             return;
           }
           busy = true;
+          saving = value;
           try {
             await save(value, self.saved);
             self.saved = value;
@@ -3451,7 +3453,8 @@
           part.addEventListener("keydown", (event) => {
             if (event.key !== "Escape") return;
             event.preventDefault();
-            write(self.saved);
+            // While a save runs, Esc keeps its value: the saved value is the one it replaces.
+            write(busy ? saving : self.saved);
             self.report(null);
             leave();
           });

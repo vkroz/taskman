@@ -777,6 +777,29 @@ def test_status_assignee_and_labels_save_in_place(rw, desktop):
     expect(desktop.locator("#preview .state")).to_contain_text("Active")
 
 
+def test_esc_during_a_running_save_keeps_the_value_that_is_saved(rw, desktop):
+    # TASKMAN-43: Esc while a save is running restores the value being saved and does not send a second save.
+    visit(desktop, rw, "/?item=RES-5")
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    sent, held = [], []
+    desktop.on("request", lambda request: sent.append(request.post_data) if request.url.endswith("/api/assign") else None)
+    desktop.route("**/api/assign", lambda route: held.append(route))
+    assignee = desktop.locator("#assignee-field")
+    assignee.fill("Codex")
+    assignee.press("Enter")
+    eventually(lambda: desktop.wait_for_timeout(50) or held)
+    assignee.fill("Nobody")
+    assignee.press("Escape")
+    expect(assignee).to_have_value("Codex")
+    held[0].continue_()
+    eventually(lambda: rw.api("/api/show/RES-5")["frontmatter"]["assignee"] == "Codex")
+    desktop.wait_for_timeout(500)
+    desktop.unroute("**/api/assign")
+    assert len(sent) == 1 and len(held) == 1, sent
+    assert rw.api("/api/show/RES-5")["frontmatter"]["assignee"] == "Codex"
+    expect(assignee).to_have_value("Codex")
+
+
 def test_labels_typed_in_a_row_keep_focus_and_esc_cancels_them(rw, desktop):
     visit(desktop, rw, "/?item=RES-5")
     expect(detail_key(desktop)).to_have_text("RES-5")
