@@ -43,7 +43,7 @@ Open work has no Edit button. A click on a field starts the edit, and the field 
 - **Assignee**: a text field that suggests known people and agents. An empty field removes the assignee.
 - **Labels**: Enter or a comma adds a label, and the remove button or Backspace removes one. The page lowercases labels and rejects labels that do not match `^[a-z0-9_-]{1,50}$`.
 
-A failed save keeps the typed value in the field and shows the error below it. A poll does not render over a field that has an unsaved value. Completed work shows read-only fields.
+A failed save keeps the typed value in the field and shows the error below it. A poll does not render over a field that has an unsaved value. Opening another item while a field shows a failed save asks first: Discard and open, or Cancel. Esc during a running save keeps the value that is being saved. Completed work shows read-only fields.
 
 ## Dialogs and changes
 
