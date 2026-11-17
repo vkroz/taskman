@@ -344,6 +344,21 @@ def test_token_commands_with_database_reach_every_token_while_a_server_is_set(re
     assert "no active token has the ID" in run("token", "revoke", other_id, "--database", code=1)
 
 
+def test_token_create_with_a_server_set_refuses_and_names_the_token_page(remote_env):
+    # TASKMAN-41: without --database, nothing goes to the local database; the error names the server's page.
+    from taskman.storage.accounts import list_tokens
+
+    before = list_tokens(remote_env.store)
+    error = run("token", "create", "--person", "Ada", code=2)
+    assert error == (f"Error: a server is set ({remote_env.url}), and `token create` does not use it. Get your token "
+                     f"on {remote_env.url}/auth/token. To create a token in the database of the storage settings, "
+                     "add --database.\n")
+    assert list_tokens(remote_env.store) == before
+    token = run("token", "create", "--person", "Ada", "--label", "build-vm", "--database").splitlines()[-1]
+    assert token.startswith("tmn_")
+    assert [row["person"] for row in list_tokens(remote_env.store)] == [row["person"] for row in before] + ["Ada"]
+
+
 def test_token_commands_against_a_server_need_a_login(sqlite_env, monkeypatch):
     monkeypatch.setenv("TASKMAN_SERVER_URL", "http://127.0.0.1:1")
     assert "Not logged in to http://127.0.0.1:1" in run("token", "list", code=2)

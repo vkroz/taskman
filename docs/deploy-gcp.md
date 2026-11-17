@@ -458,7 +458,7 @@ Each person lists and revokes their own tokens with `taskman token list` and `ta
 
 ## Run operator commands
 
-`taskman token list --database`, `taskman token revoke --database` and `taskman token create` open the database directly and reach the tokens of every person. Without `--database`, `token list` and `token revoke` use the server of your login and reach only your own tokens. Run them on your computer through the [Cloud SQL Auth Proxy version 2](https://github.com/GoogleCloudPlatform/cloud-sql-proxy), with [uv](https://docs.astral.sh/uv/) and a checkout of this repository. You need the roles Cloud SQL Client and Secret Manager Secret Accessor; the Owner role has them. The proxy uses your Application Default Credentials: run `gcloud auth application-default login` one time.
+`taskman token list --database`, `taskman token revoke --database` and `taskman token create --database` open the database directly and reach the tokens of every person. Without `--database`, `token list` and `token revoke` use the server of your login and reach only your own tokens. Run them on your computer through the [Cloud SQL Auth Proxy version 2](https://github.com/GoogleCloudPlatform/cloud-sql-proxy), with [uv](https://docs.astral.sh/uv/) and a checkout of this repository. You need the roles Cloud SQL Client and Secret Manager Secret Accessor; the Owner role has them. The proxy uses your Application Default Credentials: run `gcloud auth application-default login` one time.
 
 ```bash
 cloud-sql-proxy --port 15432 nemos-infra:us-central1:nemos-pg &
@@ -469,7 +469,7 @@ cd taskman
 uv run --extra postgres taskman token list --database
 ```
 
-In the same terminal, `uv run --extra postgres taskman token revoke ID --database` stops a token of any person. `uv run --extra postgres taskman token create --person "ada@example.com"` creates a token in an emergency. When you are done:
+In the same terminal, `uv run --extra postgres taskman token revoke ID --database` stops a token of any person. `uv run --extra postgres taskman token create --person "ada@example.com" --database` creates a token in an emergency. When you are done:
 
 ```bash
 cd ..

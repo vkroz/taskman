@@ -130,10 +130,27 @@ def token_create(
     person: str = typer.Option(..., "--person", help="Name of the person the token stands for."),
     label: str = typer.Option("", "--label", help="Where the token is used, for example a machine name."),
     days: int = typer.Option(90, "--days", help="Days until the token expires."),
+    database: bool = typer.Option(False, "--database", help="Create it in the database of the storage settings. "
+                                  "Needed when a server is set."),
 ) -> None:
-    """Create a token for a person. The token is shown one time."""
-    from taskman.storage.accounts import create_token
+    """Create a token for a person in the database. The token is shown one time.
 
+    With a server set, a person gets a token on the server's /auth/token page.
+    """
+    from taskman.storage.accounts import create_token
+    from taskman.storage.remote import server_url
+
+    try:
+        server = "" if database else server_url()
+    except StorageConfigError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(2) from None
+    if server:
+        # The server has no command to create a token: this would write to a local database, not to the server.
+        typer.echo(f"Error: a server is set ({server}), and `token create` does not use it. Get your token on "
+                   f"{server}/auth/token. To create a token in the database of the storage settings, add --database.",
+                   err=True)
+        raise typer.Exit(2)
     with _database() as store:
         token_id, token = create_token(store, person, label, days)
     typer.echo(f"Token {token_id} for {person.strip()}, valid for {days} days. Store it now; it is not shown again.", err=True)
