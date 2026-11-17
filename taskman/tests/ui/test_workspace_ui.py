@@ -879,6 +879,90 @@ def test_failed_save_keeps_the_text_and_shows_the_error(rw, desktop, tmp_path):
     assert rw.api("/api/show/RES-5")["frontmatter"]["status"] == "backlog"
 
 
+def test_status_choices_follow_a_title_save_while_the_status_field_has_focus(rw, desktop, tmp_path):
+    # TASKMAN-40: a title change makes the evidence old, so Done stops being a choice at once, not after a poll.
+    key = rw.api("/api/items", {"title": "Close me later", "type": "task", "project": "TM", "body": "Spec."})["id"]
+    agent = agent_store(tmp_path)
+    try:
+        with agent.lock():
+            lifecycle.finalize(agent, key)
+    finally:
+        agent.close()
+    rw.api("/api/comment", {"id": key, "kind": "summary", "text": "Done."})
+    rw.api("/api/comment", {"id": key, "kind": "verification", "text": "Checked.", "result": "pass"})
+    desktop.clock.install()  # no poll renders the panel during the test
+    visit(desktop, rw, f"/?item={key}")
+    expect(detail_key(desktop)).to_have_text(key)
+    done = desktop.locator("#status-field option[value=done]")
+    expect(done).to_be_enabled()
+    title = desktop.locator("#title-field")
+    title.click()
+    title.fill("Renamed after the evidence")
+    desktop.locator("#status-field").focus()  # the title saves; the panel is in use, so it is not rendered again
+    eventually(lambda: rw.api(f"/api/show/{key}")["frontmatter"]["title"] == "Renamed after the evidence")
+    assert any(not gate["ok"] for gate in rw.api(f"/api/show/{key}")["close_gates"])
+    expect(done).to_be_disabled()
+    expect(done).to_contain_text("open")
+    expect(desktop.locator("#status-field")).to_be_focused()
+    expect(desktop.locator("#status-field")).to_have_value("backlog")
+
+
+def test_reload_theirs_in_the_description_also_shows_their_title(rw, desktop):
+    # TASKMAN-40: the title heading follows the text that 'Reload theirs' takes from the server.
+    visit(desktop, rw, "/?item=RES-5")
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    desktop.click("#preview .description")
+    desktop.request.post(rw.base + "/api/edit", headers=HEADERS, data=json.dumps(
+        {"id": "RES-5", "title": "Their title", "body": "Their body\n", "reason": "Other edit"}))
+    desktop.fill("#description-field", "My body\n")
+    desktop.locator("#description-field").blur()
+    alert = desktop.locator("#preview .edit-extras", has=desktop.locator("#description-reason")).locator("[role=alert]")
+    alert.get_by_role("button", name="Reload theirs").click()
+    expect(desktop.locator("#description-field")).to_have_value("Their body\n")
+    expect(desktop.locator("#title-field")).to_have_text("Their title")
+    # The title field now starts from their title: a later title edit saves with no conflict.
+    title = desktop.locator("#title-field")
+    title.click()
+    title.fill("Mine after theirs")
+    title.blur()
+    eventually(lambda: rw.api("/api/show/RES-5")["frontmatter"]["title"] == "Mine after theirs")
+    assert rw.api("/api/show/RES-5")["body"] == "Their body\n"
+
+
+def test_opening_another_item_asks_before_it_drops_a_failed_save(rw, desktop):
+    # TASKMAN-40: a field that shows a failed save keeps its text until the person chooses to discard it.
+    visit(desktop, rw, "/?view=ready&item=RES-5")
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    other = next(key for key in row_ids(desktop) if key != "RES-5")
+    title = desktop.locator("#title-field")
+    desktop.route("**/api/edit", lambda route: route.fulfill(
+        status=400, content_type="application/json", body=json.dumps({"error": "The database is not reachable"})))
+    title.click()
+    title.fill("Typed while offline")
+    title.blur()
+    expect(title).to_have_attribute("data-unsaved", "")
+    row(desktop, other).locator(".title").click()
+    dialog = desktop.locator("dialog[open]")
+    expect(dialog).to_contain_text(f"Title of RES-5 was not saved. Opening {other} discards your text.")
+    dialog.get_by_role("button", name="Cancel").click()
+    expect(dialog).to_have_count(0)
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    expect(title).to_have_text("Typed while offline")
+    # The panel's next and previous buttons, like j and k, ask the same way.
+    desktop.locator("#preview .d-head").get_by_title("Next item (j)").click()
+    expect(dialog).to_contain_text("Title of RES-5 was not saved.")
+    dialog.get_by_role("button", name="Cancel").click()
+    expect(detail_key(desktop)).to_have_text("RES-5")
+
+    row(desktop, other).locator(".title").click()
+    dialog.get_by_role("button", name=f"Discard and open {other}").click()
+    expect(dialog).to_have_count(0)
+    expect(detail_key(desktop)).to_have_text(other)
+    assert f"item={other}" in desktop.url
+    desktop.unroute("**/api/edit")
+    assert rw.api("/api/show/RES-5")["frontmatter"]["title"] != "Typed while offline"
+
+
 def test_closing_from_the_status_field_makes_the_item_read_only(rw, desktop, tmp_path):
     key = rw.api("/api/items", {"title": "Close me", "type": "task", "project": "TM", "body": "Spec."})["id"]
     agent = agent_store(tmp_path)

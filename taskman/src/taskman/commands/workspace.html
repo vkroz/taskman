@@ -3177,7 +3177,22 @@
         $("#app").classList.add("has-detail");
       }
       /** Open an item: push a history entry when the panel was closed, so Back closes it. */
-      async function openItem(id, { focus = false } = {}) {
+      async function openItem(id, { focus = false, discard = false } = {}) {
+        const unsaved = !discard && id !== S.item && preview.querySelector("[data-unsaved]");
+        if (unsaved) {
+          const field = unsaved.getAttribute("aria-label") || "A field";
+          const dlg = Dialog({
+            title: "Discard the unsaved change?",
+            submit: `Discard and open ${id}`,
+            danger: true,
+            body: [h("p", { text: `${field} of ${S.item} was not saved. Opening ${id} discards your text.` })],
+            onSubmit: async () => {
+              dlg.close();
+              await openItem(id, { focus, discard: true });
+            },
+          });
+          return;
+        }
         const wasOpen = !!S.item;
         S.item = id;
         writeURL(wasOpen ? "replace" : "push");
@@ -3262,7 +3277,10 @@
         S.missing = false;
         if (!changed) return;
         S.detail = result;
-        if (!force && panelBusy()) return; // retried on the next poll
+        if (!force && panelBusy()) {
+          refreshStatusChoices(result);
+          return; // retried on the next poll
+        }
         S.detailSig = signature;
         renderDetail(force);
       }
@@ -3485,7 +3503,7 @@
         const heading = h("h2", { class: "d-title", id: "detail-title", tabindex: "-1" }, field);
         const { extras, reason, error } = reasonRow("title-reason");
         let base = fm.title;
-        inPlace({
+        const title = inPlace({
           parts: [field, extras], error,
           read: () => field.textContent.replace(/[\r\n]+/g, " ").trim(),
           write: (value) => { field.textContent = value; },
@@ -3502,6 +3520,13 @@
             base = live.title = current.title;
           }),
         });
+        /** Another field took a newer title from the server: show it, unless this field holds typed text. */
+        live.showTitle = (value) => {
+          if (field.contains(document.activeElement) || field.hasAttribute("data-unsaved")) return;
+          base = value;
+          title.write(value);
+          title.saved = value;
+        };
         field.addEventListener("keydown", (event) => {
           if (event.key !== "Enter") return;
           event.preventDefault();
@@ -3544,6 +3569,7 @@
           },
           onError: (failure, self) => conflictChoices(failure, self, (current) => current.body, (current) => {
             live.title = current.title;
+            live.showTitle?.(current.title);
             base = { title: current.title, body: current.body };
           }),
         });
@@ -3592,6 +3618,14 @@
           const refused = value !== fm.status && why[value];
           return h("option", { value, selected: value === fm.status, disabled: !!refused }, refused ? `${name} (${refused})` : name);
         });
+      }
+      /** Replace the status choices of a panel that is not rendered again, unless the status field holds a failed save. */
+      function refreshStatusChoices(d) {
+        const status = $("#status-field", preview);
+        if (!status || status.hasAttribute("data-unsaved") || d.frontmatter.status === "done") return;
+        const value = status.value;
+        status.replaceChildren(...statusOptions(d));
+        status.value = value;
       }
       /** Status, assignee and labels of open work. Each saves when it loses focus. */
       function propertyEditors(d) {
