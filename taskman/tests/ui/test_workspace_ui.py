@@ -1373,7 +1373,8 @@ def test_a_person_revokes_an_own_token_on_the_token_page(sqlite_env, chromium):
         page.on("console", lambda message: messages.append(message.text))
         page.goto(f"{server.url}/auth/callback?state={query['state']}&code={query['code']}")
         laptop_row = page.locator("tr", has=page.locator("td", has_text="laptop"))
-        laptop_row.get_by_role("button", name="Revoke").click()
+        # TASKMAN-35: the accessible name of the button names its token.
+        laptop_row.get_by_role("button", name=f"Revoke token {laptop_id} (laptop)", exact=True).click()
         page.get_by_text(f"Revoked token {laptop_id}.").wait_for()
         assert laptop_row.get_by_role("button").count() == 0
         request = urllib.request.Request(f"{server.url}/api/v1/whoami", headers={"Authorization": f"Bearer {laptop}"})

@@ -494,6 +494,8 @@ def test_the_token_page_lists_only_the_tokens_of_the_person_without_values(login
     for row in rows:
         assert f'<tr><td>{row["id"]}</td><td>{row["label"]}</td><td>20' in body
         assert f'name="token" value="{row["id"]}"' in body
+        # TASKMAN-35: each Revoke button names its token for a screen reader.
+        assert f'aria-label="Revoke token {row["id"]} ({row["label"]})">Revoke</button>' in body
     assert "<th>Created</th><th>Expires</th><th>Last used</th><th>Revoked</th>" in body
     hashes = [row[0] for row in login_server.store.conn.execute("SELECT token_hash FROM tokens").fetchall()]
     for secret in [laptop, other, *hashes]:
