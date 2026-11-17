@@ -359,11 +359,13 @@ def _token_table(tokens: list[dict[str, Any]], page_key: str) -> str:
     """The person's tokens, with a revoke button for each token that is not revoked. Never a token value."""
     rows = []
     for row in tokens:
+        # A screen reader names each button by its token, not only "Revoke".
+        name = f"Revoke token {row['id']}" + (f" ({row['label']})" if row["label"] else "")
         action = "" if row["revoked_at"] else (
             "<form method=\"post\" action=\"/auth/token/revoke\">"
             f"<input type=\"hidden\" name=\"page\" value=\"{html.escape(page_key)}\">"
             f"<input type=\"hidden\" name=\"token\" value=\"{row['id']}\">"
-            "<button type=\"submit\">Revoke</button></form>"
+            f"<button type=\"submit\" aria-label=\"{html.escape(name)}\">Revoke</button></form>"
         )
         cells = (str(row["id"]), row["label"] or "-", _when(row["created_at"], "-"), _when(row["expires_at"], "never"),
                  _when(row["last_used_at"], "never"), _when(row["revoked_at"], "no"))

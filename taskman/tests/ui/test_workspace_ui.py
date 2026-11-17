@@ -350,6 +350,35 @@ def test_space_between_key_and_title(rw, chromium, width):
             assert k["bottom"] <= t["top"], (key, k, t)
 
 
+@pytest.mark.parametrize("width", [1440, 390])
+def test_space_between_key_and_title_in_related_items(rw, chromium, tmp_path, width):
+    # TASKMAN-38: keys of 12 and 13 characters in Sub-items, Depends on and Blocks keep 8px before the title.
+    epic = rw.api("/api/items", {"title": "Parent", "type": "epic", "project": "LONGESTKEY"})["id"]
+    kids = [rw.api("/api/items", {"title": f"Child {n}", "type": "task", "parent": epic})["id"] for n in range(11)]
+    agent = agent_store(tmp_path)
+    try:
+        with agent.lock():
+            lifecycle.set_dependencies(agent, kids[0], [kids[-1]])
+            lifecycle.set_dependencies(agent, kids[1], [kids[0]])
+    finally:
+        agent.close()
+    rel = KEY_AND_TITLE.replace("r.dataset.id", "r.dataset.ref")
+    context, page = _page(chromium, {**MOBILE, "viewport": {"width": width, "height": 844}} if width < 720 else
+                          {"viewport": {"width": width, "height": 900}})
+    try:
+        visit(page, rw, f"/?view=drafts&item={epic}")
+        expect(page.locator(".rel-item").first).to_be_visible()
+        rows = page.eval_on_selector_all(".rel-item", rel)
+        visit(page, rw, f"/?view=drafts&item={kids[0]}")
+        expect(page.locator("section[aria-label=Blocks] .rel-item")).to_be_visible()
+        rows += page.eval_on_selector_all(".rel-item", rel)
+    finally:
+        context.close()
+    assert {"LONGESTKEY-2", "LONGESTKEY-12", "LONGESTKEY-3"} <= {key for key, _, _ in rows}
+    for key, k, t in rows:
+        assert t["left"] - k["right"] >= 7.5, (key, k, t)
+
+
 # ---- 3. views and counts (P0-7) ----
 
 
@@ -748,6 +777,55 @@ def test_status_assignee_and_labels_save_in_place(rw, desktop):
     expect(desktop.locator("#preview .state")).to_contain_text("Active")
 
 
+def test_text_typed_while_a_save_reloads_the_item_is_kept(rw, desktop):
+    # TASKMAN-44: the reload after a save does not replace a field that the user started to type in.
+    visit(desktop, rw, "/?item=RES-5")
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    held, release = [], []
+    assignee = desktop.locator("#assignee-field")
+    assignee.fill("Codex")
+    # A forced reload asks without an etag; a poll asks with one and passes.
+    desktop.route("**/api/show/RES-5*", lambda route: route.continue_() if release or "etag=" in route.request.url
+                  else held.append(route))
+    assignee.press("Enter")
+    eventually(lambda: rw.api("/api/show/RES-5")["frontmatter"]["assignee"] == "Codex")
+    eventually(lambda: desktop.wait_for_timeout(50) or held)
+    entry = desktop.locator("#label-field")
+    entry.fill("Backend")
+    release.append(True)
+    with desktop.expect_response(lambda r: "/api/show/RES-5" in r.url and "etag=" not in r.url):
+        for route in held:
+            route.continue_()
+    desktop.wait_for_timeout(100)  # the page renders after the response arrives
+    desktop.unroute("**/api/show/RES-5*")
+    expect(entry).to_have_value("Backend")
+    entry.press("Enter")
+    expect(desktop.locator("#preview .tokens .chip")).to_have_text(["backend", "bug", "ui"])
+
+
+def test_esc_during_a_running_save_keeps_the_value_that_is_saved(rw, desktop):
+    # TASKMAN-43: Esc while a save is running restores the value being saved and does not send a second save.
+    visit(desktop, rw, "/?item=RES-5")
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    sent, held = [], []
+    desktop.on("request", lambda request: sent.append(request.post_data) if request.url.endswith("/api/assign") else None)
+    desktop.route("**/api/assign", lambda route: held.append(route))
+    assignee = desktop.locator("#assignee-field")
+    assignee.fill("Codex")
+    assignee.press("Enter")
+    eventually(lambda: desktop.wait_for_timeout(50) or held)
+    assignee.fill("Nobody")
+    assignee.press("Escape")
+    expect(assignee).to_have_value("Codex")
+    held[0].continue_()
+    eventually(lambda: rw.api("/api/show/RES-5")["frontmatter"]["assignee"] == "Codex")
+    desktop.wait_for_timeout(500)
+    desktop.unroute("**/api/assign")
+    assert len(sent) == 1 and len(held) == 1, sent
+    assert rw.api("/api/show/RES-5")["frontmatter"]["assignee"] == "Codex"
+    expect(assignee).to_have_value("Codex")
+
+
 def test_labels_typed_in_a_row_keep_focus_and_esc_cancels_them(rw, desktop):
     visit(desktop, rw, "/?item=RES-5")
     expect(detail_key(desktop)).to_have_text("RES-5")
@@ -850,6 +928,90 @@ def test_failed_save_keeps_the_text_and_shows_the_error(rw, desktop, tmp_path):
     assert rw.api("/api/show/RES-5")["frontmatter"]["status"] == "backlog"
 
 
+def test_status_choices_follow_a_title_save_while_the_status_field_has_focus(rw, desktop, tmp_path):
+    # TASKMAN-40: a title change makes the evidence old, so Done stops being a choice at once, not after a poll.
+    key = rw.api("/api/items", {"title": "Close me later", "type": "task", "project": "TM", "body": "Spec."})["id"]
+    agent = agent_store(tmp_path)
+    try:
+        with agent.lock():
+            lifecycle.finalize(agent, key)
+    finally:
+        agent.close()
+    rw.api("/api/comment", {"id": key, "kind": "summary", "text": "Done."})
+    rw.api("/api/comment", {"id": key, "kind": "verification", "text": "Checked.", "result": "pass"})
+    desktop.clock.install()  # no poll renders the panel during the test
+    visit(desktop, rw, f"/?item={key}")
+    expect(detail_key(desktop)).to_have_text(key)
+    done = desktop.locator("#status-field option[value=done]")
+    expect(done).to_be_enabled()
+    title = desktop.locator("#title-field")
+    title.click()
+    title.fill("Renamed after the evidence")
+    desktop.locator("#status-field").focus()  # the title saves; the panel is in use, so it is not rendered again
+    eventually(lambda: rw.api(f"/api/show/{key}")["frontmatter"]["title"] == "Renamed after the evidence")
+    assert any(not gate["ok"] for gate in rw.api(f"/api/show/{key}")["close_gates"])
+    expect(done).to_be_disabled()
+    expect(done).to_contain_text("open")
+    expect(desktop.locator("#status-field")).to_be_focused()
+    expect(desktop.locator("#status-field")).to_have_value("backlog")
+
+
+def test_reload_theirs_in_the_description_also_shows_their_title(rw, desktop):
+    # TASKMAN-40: the title heading follows the text that 'Reload theirs' takes from the server.
+    visit(desktop, rw, "/?item=RES-5")
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    desktop.click("#preview .description")
+    desktop.request.post(rw.base + "/api/edit", headers=HEADERS, data=json.dumps(
+        {"id": "RES-5", "title": "Their title", "body": "Their body\n", "reason": "Other edit"}))
+    desktop.fill("#description-field", "My body\n")
+    desktop.locator("#description-field").blur()
+    alert = desktop.locator("#preview .edit-extras", has=desktop.locator("#description-reason")).locator("[role=alert]")
+    alert.get_by_role("button", name="Reload theirs").click()
+    expect(desktop.locator("#description-field")).to_have_value("Their body\n")
+    expect(desktop.locator("#title-field")).to_have_text("Their title")
+    # The title field now starts from their title: a later title edit saves with no conflict.
+    title = desktop.locator("#title-field")
+    title.click()
+    title.fill("Mine after theirs")
+    title.blur()
+    eventually(lambda: rw.api("/api/show/RES-5")["frontmatter"]["title"] == "Mine after theirs")
+    assert rw.api("/api/show/RES-5")["body"] == "Their body\n"
+
+
+def test_opening_another_item_asks_before_it_drops_a_failed_save(rw, desktop):
+    # TASKMAN-40: a field that shows a failed save keeps its text until the person chooses to discard it.
+    visit(desktop, rw, "/?view=ready&item=RES-5")
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    other = next(key for key in row_ids(desktop) if key != "RES-5")
+    title = desktop.locator("#title-field")
+    desktop.route("**/api/edit", lambda route: route.fulfill(
+        status=400, content_type="application/json", body=json.dumps({"error": "The database is not reachable"})))
+    title.click()
+    title.fill("Typed while offline")
+    title.blur()
+    expect(title).to_have_attribute("data-unsaved", "")
+    row(desktop, other).locator(".title").click()
+    dialog = desktop.locator("dialog[open]")
+    expect(dialog).to_contain_text(f"Title of RES-5 was not saved. Opening {other} discards your text.")
+    dialog.get_by_role("button", name="Cancel").click()
+    expect(dialog).to_have_count(0)
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    expect(title).to_have_text("Typed while offline")
+    # The panel's next and previous buttons, like j and k, ask the same way.
+    desktop.locator("#preview .d-head").get_by_title("Next item (j)").click()
+    expect(dialog).to_contain_text("Title of RES-5 was not saved.")
+    dialog.get_by_role("button", name="Cancel").click()
+    expect(detail_key(desktop)).to_have_text("RES-5")
+
+    row(desktop, other).locator(".title").click()
+    dialog.get_by_role("button", name=f"Discard and open {other}").click()
+    expect(dialog).to_have_count(0)
+    expect(detail_key(desktop)).to_have_text(other)
+    assert f"item={other}" in desktop.url
+    desktop.unroute("**/api/edit")
+    assert rw.api("/api/show/RES-5")["frontmatter"]["title"] != "Typed while offline"
+
+
 def test_closing_from_the_status_field_makes_the_item_read_only(rw, desktop, tmp_path):
     key = rw.api("/api/items", {"title": "Close me", "type": "task", "project": "TM", "body": "Spec."})["id"]
     agent = agent_store(tmp_path)
@@ -903,6 +1065,25 @@ def test_filters_and_sort(ro, desktop):
     desktop.fill("#search", "TM-10")
     desktop.press("#search", "Enter")
     expect(detail_key(desktop)).to_have_text("TM-10")
+
+
+def test_sort_by_type_follows_the_type_order_in_a_flat_view(rw, desktop, tmp_path):
+    # TASKMAN-39: the Ready view sorts in the browser; Bugfix comes last, as in the type filter.
+    keys = {kind: rw.api("/api/items", {"title": kind.title(), "type": kind, "project": "SORT", "body": "Spec."})["id"]
+            for kind in ("bugfix", "task", "feat", "epic")}
+    agent = agent_store(tmp_path)
+    try:
+        with agent.lock():
+            for key in keys.values():
+                lifecycle.finalize(agent, key)
+    finally:
+        agent.close()
+    visit(desktop, rw, "/?view=ready&project=SORT&sort=type")
+    expect(desktop.locator("#rows .row")).to_have_count(4)
+    assert row_ids(desktop) == [keys[k] for k in ("epic", "feat", "task", "bugfix")]
+    visit(desktop, rw, "/?view=ready&project=SORT&sort=type&desc=1")
+    expect(desktop.locator("#rows .row")).to_have_count(4)
+    assert row_ids(desktop) == [keys[k] for k in ("bugfix", "task", "feat", "epic")]
 
 
 # ---- 10. keyboard (P0-11) ----
@@ -1218,7 +1399,8 @@ def test_a_person_revokes_an_own_token_on_the_token_page(sqlite_env, chromium):
         page.on("console", lambda message: messages.append(message.text))
         page.goto(f"{server.url}/auth/callback?state={query['state']}&code={query['code']}")
         laptop_row = page.locator("tr", has=page.locator("td", has_text="laptop"))
-        laptop_row.get_by_role("button", name="Revoke").click()
+        # TASKMAN-35: the accessible name of the button names its token.
+        laptop_row.get_by_role("button", name=f"Revoke token {laptop_id} (laptop)", exact=True).click()
         page.get_by_text(f"Revoked token {laptop_id}.").wait_for()
         assert laptop_row.get_by_role("button").count() == 0
         request = urllib.request.Request(f"{server.url}/api/v1/whoami", headers={"Authorization": f"Bearer {laptop}"})

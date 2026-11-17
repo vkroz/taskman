@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 
+from taskman.lifecycle import ITEM_TYPES
 from taskman.model.ordering import apply_order
 from taskman.storage.store import Item, Store, key_order
 
@@ -118,6 +119,9 @@ def query(
             return (0, row.get("order", 0), key_order(row["id"]))
         if sort == "id":
             return (0, 0, key_order(row["id"]))
+        if sort == "type":  # The type order of the type filter, not the names: Bugfix comes last.
+            kind = row["metadata"].get("type")
+            return (0, ITEM_TYPES.index(kind) if kind in ITEM_TYPES else len(ITEM_TYPES), key_order(row["id"]))
         value = field_value(row, sort)
         # Numeric priorities and revisions should not sort lexicographically.
         if isinstance(value, (int, float)) or (

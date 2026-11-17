@@ -188,6 +188,15 @@ def test_create_filter_and_show_a_bugfix(api):
                                       status=400)["error"]
 
 
+def test_sort_by_type_follows_the_type_order_not_the_names(api):
+    # TASKMAN-39: epic, feat, task, bugfix, as in the type filter; descending reverses it.
+    keys = {kind: _create(api, kind.title(), type=kind, project="TM") for kind in ("bugfix", "task", "feat", "epic")}
+    rows = api.query(view="drafts", project="TM", sort="type")["rows"]
+    assert [row["id"] for row in rows] == [keys[k] for k in ("epic", "feat", "task", "bugfix")]
+    rows = api.query(view="drafts", project="TM", sort="type", descending=True)["rows"]
+    assert [row["id"] for row in rows] == [keys[k] for k in ("bugfix", "task", "feat", "epic")]
+
+
 def test_query_rejects_unknown_view_sort_and_filters(seeded):
     assert "Unknown view" in seeded("/api/query", {"view": "current"}, status=400)["error"]
     assert "Unknown sort" in seeded("/api/query", {"sort": "journal"}, status=400)["error"]

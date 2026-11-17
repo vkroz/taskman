@@ -1,8 +1,11 @@
 """Connections and transactions for the sqlite and postgres backends."""
 from __future__ import annotations
 
+import os
 import re
+import socket
 import sqlite3
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -14,6 +17,8 @@ from taskman.storage.store import StorageConfigError
 
 # Transaction-scoped advisory lock key: the database write lock on Postgres.
 _WRITE_LOCK = 0x746D7367  # "tmsg"
+# Seconds that the first statement of a Postgres transaction can wait for an answer.
+BEGIN_TIMEOUT = 5.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +115,49 @@ def is_lost(conn: Any, dialect: Dialect) -> bool:
     return conn.closed
 
 
+def begin(conn: Any, dialect: Dialect, statement: str) -> None:
+    """Run the first statement of a transaction; on Postgres, end the connection after :data:`BEGIN_TIMEOUT`.
+
+    A connection that dropped with no FIN or RST gives no answer, and a read
+    waits for the operating system's TCP timeout. The timer shuts down the
+    socket, a TCP or a Unix socket, so the read fails and psycopg marks the
+    connection closed. The caller then treats it as lost.
+    """
+    if dialect is SQLITE:
+        conn.execute(statement)
+        return
+    guard = threading.Lock()
+    finished = fired = False
+
+    def expire() -> None:
+        nonlocal fired
+        with guard:
+            if finished:
+                return  # the answer came first: do not end a working connection
+            fired = True
+            try:
+                with socket.socket(fileno=os.dup(conn.pgconn.socket)) as sock:
+                    sock.shutdown(socket.SHUT_RDWR)
+            except Exception:  # noqa: BLE001 - a connection that is already closed has nothing to end
+                pass
+
+    timer = threading.Timer(BEGIN_TIMEOUT, expire)
+    timer.daemon = True
+    timer.start()
+    try:
+        conn.execute(statement)
+    finally:
+        with guard:
+            finished = True
+        timer.cancel()
+    if fired:
+        # The answer came as the timer ended the socket: the connection is not usable.
+        conn.close()
+        import psycopg
+
+        raise psycopg.OperationalError(f"no answer from the database within {BEGIN_TIMEOUT} seconds")
+
+
 @contextmanager
 def transaction(conn: Any, dialect: Dialect) -> Iterator[None]:
     """Run the block in one transaction that holds the database write lock.
@@ -119,7 +167,7 @@ def transaction(conn: Any, dialect: Dialect) -> Iterator[None]:
     each later statement sees the rows of writers that committed before it.
     Both wait at most 30 seconds for the lock.
     """
-    conn.execute("BEGIN IMMEDIATE" if dialect is SQLITE else "BEGIN ISOLATION LEVEL READ COMMITTED")
+    begin(conn, dialect, "BEGIN IMMEDIATE" if dialect is SQLITE else "BEGIN ISOLATION LEVEL READ COMMITTED")
     try:
         if dialect is POSTGRES:
             conn.execute("SET LOCAL lock_timeout = '30s'")

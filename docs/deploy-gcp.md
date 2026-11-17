@@ -22,7 +22,7 @@ One deployment runs at a time, in push order. A new push does not cancel a runni
 
 After a fix, push to `staging`. To run a deployment again without a new commit, open its run in the Actions tab and select "Re-run all jobs". GitHub shows "Run workflow" only when the workflow file is on the default branch, and `main` has no deployment files.
 
-The service runs `taskman serve` on port 8080, with 1 CPU (central processing unit), 512 MiB (mebibytes) of memory, 0 to 3 instances and a request timeout of 120 seconds. Each instance keeps one database connection. When the connection breaks, for example after a Cloud SQL restart, the next call opens a new connection. `/readyz` answers 503 only while the database is away. A liveness probe calls `/readyz` every 30 seconds, and after 3 failures Cloud Run replaces the instance.
+The service runs `taskman serve` on port 8080, with 1 CPU (central processing unit), 512 MiB (mebibytes) of memory, 0 to 3 instances and a request timeout of 120 seconds. Each instance keeps one database connection. When the connection breaks, for example after a Cloud SQL restart, the next call opens a new connection. A connection that drops with no signal is found within 5 seconds. The first `/readyz` after such a drop can fail one probe. `/readyz` answers 503 only while the database is away. A liveness probe calls `/readyz` every 30 seconds, and after 3 failures Cloud Run replaces the instance.
 
 ## Set up the environment once
 
@@ -458,7 +458,7 @@ Each person lists and revokes their own tokens with `taskman token list` and `ta
 
 ## Run operator commands
 
-`taskman token list --database`, `taskman token revoke --database` and `taskman token create` open the database directly and reach the tokens of every person. Without `--database`, `token list` and `token revoke` use the server of your login and reach only your own tokens. Run them on your computer through the [Cloud SQL Auth Proxy version 2](https://github.com/GoogleCloudPlatform/cloud-sql-proxy), with [uv](https://docs.astral.sh/uv/) and a checkout of this repository. You need the roles Cloud SQL Client and Secret Manager Secret Accessor; the Owner role has them. The proxy uses your Application Default Credentials: run `gcloud auth application-default login` one time.
+`taskman token list --database`, `taskman token revoke --database` and `taskman token create --database` open the database directly and reach the tokens of every person. Without `--database`, `token list` and `token revoke` use the server of your login and reach only your own tokens. Run them on your computer through the [Cloud SQL Auth Proxy version 2](https://github.com/GoogleCloudPlatform/cloud-sql-proxy), with [uv](https://docs.astral.sh/uv/) and a checkout of this repository. You need the roles Cloud SQL Client and Secret Manager Secret Accessor; the Owner role has them. The proxy uses your Application Default Credentials: run `gcloud auth application-default login` one time.
 
 ```bash
 cloud-sql-proxy --port 15432 nemos-infra:us-central1:nemos-pg &
@@ -469,7 +469,7 @@ cd taskman
 uv run --extra postgres taskman token list --database
 ```
 
-In the same terminal, `uv run --extra postgres taskman token revoke ID --database` stops a token of any person. `uv run --extra postgres taskman token create --person "ada@example.com"` creates a token in an emergency. When you are done:
+In the same terminal, `uv run --extra postgres taskman token revoke ID --database` stops a token of any person. `uv run --extra postgres taskman token create --person "ada@example.com" --database` creates a token in an emergency. When you are done:
 
 ```bash
 cd ..

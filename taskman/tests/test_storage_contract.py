@@ -673,11 +673,15 @@ def test_a_transaction_that_loses_its_connection_is_not_tried_again(store, sql_o
     assert _new(store, "Kept") == "TM-1"
 
 
-def test_the_start_of_a_transaction_is_tried_once_on_a_new_connection(store, settings, sql_only, monkeypatch):
-    """When the start fails on the new connection too, the error goes to the caller."""
+def test_the_start_of_a_transaction_is_tried_again_with_backoff(store, settings, sql_only, monkeypatch):
+    """When the start fails on each new connection, the error goes to the caller after the last delay."""
+    from types import SimpleNamespace
+
+    from taskman.storage import sql_store
     from tests.conftest import end_connection
 
-    opened = []
+    opened, waits = [], []
+    monkeypatch.setattr(sql_store, "time", SimpleNamespace(sleep=waits.append))
 
     def reopen_lost():
         store.conn, _ = connect(settings)
@@ -690,5 +694,6 @@ def test_the_start_of_a_transaction_is_tried_once_on_a_new_connection(store, set
     with pytest.raises(Exception):
         store.items()
     # SQLite knows that a closed connection is lost and replaces it before the start.
-    # Postgres learns it only when the start fails. Either way the failed start runs once more.
-    assert len(opened) == (2 if store.dialect.name == "sqlite" else 1)
+    # Postgres learns it only when the start fails. Either way each delay comes before one more try.
+    assert waits == list(sql_store.RETRY_DELAYS)
+    assert len(opened) == len(sql_store.RETRY_DELAYS) + (1 if store.dialect.name == "sqlite" else 0)
