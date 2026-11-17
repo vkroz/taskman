@@ -350,6 +350,35 @@ def test_space_between_key_and_title(rw, chromium, width):
             assert k["bottom"] <= t["top"], (key, k, t)
 
 
+@pytest.mark.parametrize("width", [1440, 390])
+def test_space_between_key_and_title_in_related_items(rw, chromium, tmp_path, width):
+    # TASKMAN-38: keys of 12 and 13 characters in Sub-items, Depends on and Blocks keep 8px before the title.
+    epic = rw.api("/api/items", {"title": "Parent", "type": "epic", "project": "LONGESTKEY"})["id"]
+    kids = [rw.api("/api/items", {"title": f"Child {n}", "type": "task", "parent": epic})["id"] for n in range(11)]
+    agent = agent_store(tmp_path)
+    try:
+        with agent.lock():
+            lifecycle.set_dependencies(agent, kids[0], [kids[-1]])
+            lifecycle.set_dependencies(agent, kids[1], [kids[0]])
+    finally:
+        agent.close()
+    rel = KEY_AND_TITLE.replace("r.dataset.id", "r.dataset.ref")
+    context, page = _page(chromium, {**MOBILE, "viewport": {"width": width, "height": 844}} if width < 720 else
+                          {"viewport": {"width": width, "height": 900}})
+    try:
+        visit(page, rw, f"/?view=drafts&item={epic}")
+        expect(page.locator(".rel-item").first).to_be_visible()
+        rows = page.eval_on_selector_all(".rel-item", rel)
+        visit(page, rw, f"/?view=drafts&item={kids[0]}")
+        expect(page.locator("section[aria-label=Blocks] .rel-item")).to_be_visible()
+        rows += page.eval_on_selector_all(".rel-item", rel)
+    finally:
+        context.close()
+    assert {"LONGESTKEY-2", "LONGESTKEY-12", "LONGESTKEY-3"} <= {key for key, _, _ in rows}
+    for key, k, t in rows:
+        assert t["left"] - k["right"] >= 7.5, (key, k, t)
+
+
 # ---- 3. views and counts (P0-7) ----
 
 
