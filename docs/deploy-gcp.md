@@ -22,7 +22,7 @@ One deployment runs at a time, in push order. A new push does not cancel a runni
 
 After a fix, push to `staging`. To run a deployment again without a new commit, open its run in the Actions tab and select "Re-run all jobs". GitHub shows "Run workflow" only when the workflow file is on the default branch, and `main` has no deployment files.
 
-The service runs `taskman serve` on port 8080, with 1 CPU (central processing unit), 512 MiB (mebibytes) of memory, 0 to 3 instances and a request timeout of 120 seconds. Each instance keeps one database connection. When the connection breaks, for example after a Cloud SQL restart, the next call opens a new connection. `/readyz` answers 503 only while the database is away. A liveness probe calls `/readyz` every 30 seconds, and after 3 failures Cloud Run replaces the instance.
+The service runs `taskman serve` on port 8080, with 1 CPU (central processing unit), 512 MiB (mebibytes) of memory, 0 to 3 instances and a request timeout of 120 seconds. Each instance keeps one database connection. When the connection breaks, for example after a Cloud SQL restart, the next call opens a new connection. A connection that drops with no signal is found within 5 seconds. The first `/readyz` after such a drop can fail one probe. `/readyz` answers 503 only while the database is away. A liveness probe calls `/readyz` every 30 seconds, and after 3 failures Cloud Run replaces the instance.
 
 ## Set up the environment once
 
