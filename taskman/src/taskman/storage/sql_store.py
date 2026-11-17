@@ -8,13 +8,15 @@ updates and activity entries, new journal entries become comments, and
 One connection serves the store. ``lock()`` runs a lifecycle operation in
 one transaction that holds the database write lock; a write outside
 ``lock()`` runs in a transaction of its own. A store opened from settings
-reopens a closed or broken connection when a transaction starts.
+reopens a closed or broken connection when a transaction starts, and tries
+the start again after a lost connection, with exponential backoff.
 """
 from __future__ import annotations
 
 import re
 import subprocess
 import threading
+import time
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
@@ -23,9 +25,11 @@ from typing import Any
 from taskman.model.yaml_io import emit_frontmatter
 from taskman.storage.schema import CURRENT_VERSION, MIGRATIONS
 from taskman.storage.settings import StorageSettings
-from taskman.storage.sql import SQLITE, Dialect, connect, is_lost, transaction
+from taskman.storage.sql import SQLITE, Dialect, begin, connect, is_lost, transaction
 from taskman.storage.store import Item, StorageConfigError, StorageError
 
+# Seconds to wait before each new try to start a transaction after a lost connection.
+RETRY_DELAYS = (0.5, 1.0, 2.0)
 _KEY = re.compile(r"^([A-Z][A-Z0-9]{1,9})-([1-9][0-9]*)$")
 # Item data that only dedicated operations or the database itself change.
 _READ_ONLY = ("id", "project", "type", "status", "created_at", "created_by", "changed_at")
@@ -118,19 +122,24 @@ class SqlStore:
         """Run ``start``, the first statements of a transaction, on a working connection.
 
         A closed or broken connection is replaced first. When ``start`` fails because
-        the connection was lost, it runs once more on a new connection. No statement
-        of the transaction has run yet, so the second try cannot repeat a change.
+        the connection was lost, or the new connection does not open, the store waits
+        each of :data:`RETRY_DELAYS` in turn and tries again on a new connection. No
+        statement of the transaction has run yet, so a new try cannot repeat a change.
         A transaction that fails after its start is never tried again.
         """
-        if self._reopen is not None and is_lost(self.conn, self.dialect):
-            self._reconnect()
-        try:
+        if self._reopen is None:
             start(self.conn)
-        except Exception:
-            if self._reopen is None or not is_lost(self.conn, self.dialect):
-                raise
-            self._reconnect()
-            start(self.conn)
+            return
+        for delay in (*RETRY_DELAYS, None):
+            try:
+                if is_lost(self.conn, self.dialect):
+                    self._reconnect()
+                start(self.conn)
+                return
+            except Exception:
+                if delay is None or not is_lost(self.conn, self.dialect):
+                    raise
+                time.sleep(delay)
 
     def _reconnect(self) -> None:
         """Replace the lost connection. If the database is still down, the error goes to the caller."""
@@ -163,8 +172,8 @@ class SqlStore:
             if self._depth:
                 yield
                 return
-            self._begin(lambda conn: conn.execute(
-                "BEGIN" if self.dialect is SQLITE else "BEGIN ISOLATION LEVEL REPEATABLE READ"
+            self._begin(lambda conn: begin(
+                conn, self.dialect, "BEGIN" if self.dialect is SQLITE else "BEGIN ISOLATION LEVEL REPEATABLE READ"
             ))
             self._depth = 1
             try:
