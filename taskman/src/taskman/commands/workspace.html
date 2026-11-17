@@ -3338,6 +3338,13 @@
         if (row.draft && open) props.append(DraftChip());
         if (!open && fm.assignee) props.append(h("span", { class: "prop" }, Owner(fm.assignee)));
         if (!open && (fm.labels || []).length) props.append(h("span", { class: "prop" }, LabelChips(fm.labels, 10)));
+        if (!open && (fm.repositories || []).length) {
+          props.append(h("span", { class: "prop", "data-repositories": "", text: `Repositories: ${fm.repositories.join(", ")}` }));
+        } else if (!open && d.inherited_repositories) {
+          const inherited = d.inherited_repositories;
+          props.append(h("span", { class: "prop", "data-repositories": "",
+            text: `Repositories: ${inherited.addresses.join(", ")} (from ${inherited.from})` }));
+        }
         out.push(props);
         if (open) out.push(propertyEditors(d));
         const meta = h("p", { class: "meta" }, "Created ", timeEl(fm.created_at));
@@ -3730,6 +3737,22 @@
         });
         draw();
         add("Labels", tokens, labelError);
+
+        // Repositories: remote addresses, separated by spaces or commas. Without own ones, the item inherits.
+        const inherited = d.inherited_repositories;
+        const repositories = h("input", { id: "repositories-field", name: "repositories", autocomplete: "off",
+          value: (fm.repositories || []).join(", "), "aria-label": "Repositories", disabled: S.missing,
+          placeholder: inherited ? `${inherited.addresses.join(", ")} (from ${inherited.from})` : "github.com/owner/name" });
+        const repositoriesError = h("span", { class: "field-error", role: "alert", hidden: true });
+        const repositoryList = (value) => value.split(/[\s,]+/).filter(Boolean);
+        inPlace({
+          parts: [repositories], error: repositoriesError,
+          read: () => repositoryList(repositories.value).join(", "),
+          write: (value) => { repositories.value = value; },
+          save: (value) => api("/api/repositories", { id: fm.id, repositories: repositoryList(value) }),
+        });
+        enterLeaves(repositories);
+        add("Repositories", repositories, repositoriesError);
         return grid;
       }
       function readinessCard(d) {
@@ -3823,6 +3846,8 @@
             if (removed.length) parts.push(`removed ${removed.length === 1 ? "label" : "labels"} ${removed.join(", ")}`);
             return `${who} ${parts.join(" and ") || "changed labels"}`;
           }
+          case "repositories":
+            return a.new ? `${who} set the repositories to ${a.new}` : `${who} removed the repositories`;
           case "title":
             return `${who} renamed it to “${a.new}”`;
           case "description":

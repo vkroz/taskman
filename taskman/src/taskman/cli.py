@@ -28,7 +28,7 @@ from taskman.commands.auth import auth_app
 from taskman.commands.show import show as _show
 from taskman.commands.ui import ui as _ui
 from taskman.commands.validate import validate as _validate
-from taskman.commands.context import activity, assign, comment, context, update, depend, discard, label, unassign
+from taskman.commands.context import activity, assign, comment, context, update, depend, discard, label, repo, unassign
 from taskman.model.locking import mutating
 from taskman.storage.settings import load_env_file
 from taskman.storage.remote import remote_settings, server_url
@@ -111,6 +111,7 @@ app.command("record", help="Alias of `comment`.")(_storage_errors(mutating(comme
 app.command("assign")(_storage_errors(mutating(assign)))
 app.command("unassign")(_storage_errors(mutating(unassign)))
 app.command("label")(_storage_errors(mutating(label)))
+app.command("repo")(_storage_errors(mutating(repo)))
 app.command("activity")(_storage_errors(activity))
 app.command("depend")(_storage_errors(mutating(depend)))
 app.command("discard")(_storage_errors(mutating(discard)))

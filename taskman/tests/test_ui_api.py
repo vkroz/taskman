@@ -391,6 +391,31 @@ def test_fields_are_atomic_and_validated(api, store):
     assert "immutable" in api("/api/fields", {"id": key, "assignee": "bob", "labels": []}, status=400)["error"]
 
 
+# ---- /api/repositories -------------------------------------------------------
+
+
+def test_repositories_save_normalized_and_show_what_a_child_inherits(api, store):
+    parent = _create(api, "Parent", project="TM")
+    lifecycle.convert(store, parent, "feat")
+    child = _create(api, "Child", parent=parent)
+    result = api("/api/repositories", {"id": parent, "repositories": ["git@github.com:o/r.git", "github.com/o/s"]})
+    assert result["ok"] and result["row"]["id"] == parent
+    assert api(f"/api/show/{parent}")["frontmatter"]["repositories"] == ["github.com/o/r", "github.com/o/s"]
+    assert api(f"/api/show/{parent}")["inherited_repositories"] is None
+    assert api(f"/api/show/{child}")["inherited_repositories"] == {"from": parent,
+                                                                   "addresses": ["github.com/o/r", "github.com/o/s"]}
+    assert api("/api/repositories", {"id": parent, "repositories": ["github.com/o/s", "github.com/o/r"]})["ok"]
+    assert [a["field"] for a in store.activity(parent)].count("repositories") == 1
+
+
+def test_repositories_are_validated(api, store):
+    key = _create(api, "Item", project="TM")
+    assert "remote address" in api("/api/repositories", {"id": key, "repositories": ["/tmp/repo"]}, status=400)["error"]
+    assert "list" in api("/api/repositories", {"id": key, "repositories": "github.com/o/r"}, status=400)["error"]
+    assert "not found" in api("/api/repositories", {"id": "TM-9", "repositories": []}, status=400)["error"]
+    assert store.get(key).metadata["repositories"] == []
+
+
 # ---- per-project order ------------------------------------------------------------
 
 

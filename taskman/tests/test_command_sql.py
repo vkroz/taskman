@@ -195,6 +195,35 @@ def test_label_add_remove_and_filter(cli):
     assert [row["id"] for row in _json("browse", "--where", "labels=db")] == ["TM-1"]
 
 
+def test_repo_sets_shows_inherits_and_clears(cli):
+    cli("new", "--type", "feat", "--title", "Feat", "--project", "TM")
+    cli("new", "--title", "Task", "--parent", "TM-1")
+    assert cli("repo", "TM-1").strip() == "Repositories of TM-1: none"
+    out = cli("repo", "TM-1", "git@github.com:vkroz/taskman.git", "https://github.com/vkroz/other")
+    assert out.strip() == "Repositories of TM-1: github.com/vkroz/other, github.com/vkroz/taskman"
+    assert cli("repo", "TM-2").strip() == (
+        "Repositories of TM-2, inherited from TM-1: github.com/vkroz/other, github.com/vkroz/taskman"
+    )
+    assert "unchanged" in cli("repo", "TM-1", "github.com/vkroz/taskman", "github.com/vkroz/other")
+    assert "remote address" in cli("repo", "TM-1", "/Users/me/taskman", code=2)
+    assert "not both" in cli("repo", "TM-1", "github.com/o/r", "--clear", code=2)
+    assert "item not found" in cli("repo", "TM-9", "github.com/o/r", code=1)
+
+    inherited = {"from": "TM-1", "addresses": ["github.com/vkroz/other", "github.com/vkroz/taskman"]}
+    shown = _json("show", "TM-2", "--json")
+    assert (shown["frontmatter"]["repositories"], shown["inherited_repositories"]) == ([], inherited)
+    assert "Repositories inherited from TM-1: github.com/vkroz/other, github.com/vkroz/taskman" in cli("show", "TM-2")
+    context = _json("context", "TM-2")["item"]
+    assert (context["frontmatter"]["repositories"], context["inherited_repositories"]) == ([], inherited)
+    rows = {row["id"]: row for row in _json("list", "--json")}
+    assert (rows["TM-1"]["repositories"], rows["TM-1"]["inherited_repositories"]) == (inherited["addresses"], None)
+    assert (rows["TM-2"]["repositories"], rows["TM-2"]["inherited_repositories"]) == ([], inherited)
+
+    assert cli("repo", "TM-1", "--clear").strip() == "Repositories of TM-1: none"
+    assert _json("show", "TM-2", "--json")["inherited_repositories"] is None
+    assert [e["field"] for e in _json("activity", "TM-1", "--json")].count("repositories") == 2
+
+
 # ---- activity and context --------------------------------------------------
 
 

@@ -37,6 +37,7 @@ Work is centered on items, not on repositories (decision M5). A command that nam
 | revision | An integer that starts at 0. See "Revision". |
 | assignee | A person or an agent name, for example `claude-code`. Optional. 1 to 100 characters. |
 | labels | A set of labels. Each label has 1 to 50 characters: lowercase letters, digits, `-` and `_`. |
+| repositories | A set of git remote addresses: the code that the work is about. Taskman stores each address as host and path, without scheme, user, port or `.git`, for example `github.com/vkroz/taskman`. Taskman refuses a local path, a relative path and `localhost`, because they name a different place on each machine. An item without own repositories inherits the repositories of its nearest ancestor that has them. |
 | created | Time and author of the creation. |
 | changed | Time of the last change to any field, comment, link or label. |
 
@@ -66,7 +67,7 @@ Taskman writes one activity entry for each change to a work item.
 | Field | Rule |
 | --- | --- |
 | item | The work item. |
-| field | The changed field: `created`, `title`, `description`, `status`, `draft`, `type`, `rank`, `assignee`, `labels` or `dependencies`. |
+| field | The changed field: `created`, `title`, `description`, `status`, `draft`, `type`, `rank`, `assignee`, `labels`, `repositories` or `dependencies`. |
 | old value, new value | The values before and after the change. For `description`, Taskman stores the full old and new text. |
 | author | Who made the change: the `--actor` value. Without it, the person of the token on a server, or the git `user.name` with a local database (decision M1). |
 | time | The time of the change. |
@@ -94,11 +95,11 @@ Each rule of epic requirement R1 applies to the SQL model as follows.
 | --- | --- |
 | Drafts | A new item has draft true. `finalize` sets it to false. A draft can not become active or done. An item can not become active when an ancestor is a draft. `edit` accepts an empty description only while the item is a draft. Without a description, `edit` keeps the current one. |
 | Close gates | `close` needs: no open descendant, no unfinished dependency on the item or an ancestor, a `summary` comment at the current revision, and the latest `verification` comment at the current revision with result `pass`. |
-| Immutability | The change of status to `done` is the last change to an item. After it, the item accepts no change and no comment: no field, link, label, assignee or rank changes (decision M2). |
-| Revision | The revision increases by 1 when the description, type or dependencies change, and when a `decision` or `progress` comment is added. When an item gets a new revision, a new child, a discarded child, or a status change, the revision of each ancestor increases by 1. Assignee, labels and rank do not change the revision. |
+| Immutability | The change of status to `done` is the last change to an item. After it, the item accepts no change and no comment: no field, link, label, repository, assignee or rank changes (decision M2). |
+| Revision | The revision increases by 1 when the description, type, dependencies or repositories change, and when a `decision` or `progress` comment is added. When an item gets a new revision, a new child, a discarded child, or a status change, the revision of each ancestor increases by 1. Assignee, labels and rank do not change the revision. |
 | Cycles | `depend` refuses a link that makes a cycle, with parent completion included. |
 | Task is a leaf | A `task` or `bugfix` can not have children. `convert` to `task` or `bugfix` is refused when the item has children. |
-| Discard | Only a draft with no children and no item that depends on it can be discarded. Discard deletes the item with its comments, links, labels and activity. The key number is not used again. |
+| Discard | Only a draft with no children and no item that depends on it can be discarded. Discard deletes the item with its comments, links, labels, repositories and activity. The key number is not used again. |
 | Rank | `reorder` moves an open item among its siblings. A top-level item moves only among the top-level items of its project. A done item keeps its rank. Moving one item does not change the rank of a done sibling. |
 | Readiness | An item is ready when it is not done, and the item and all its ancestors are finalized, not done, and have no unfinished dependency. |
 
@@ -114,12 +115,12 @@ Key numbers come from the project's next number in the same transaction. Two wri
 | --- | --- |
 | `new`, `finalize`, `update`, `edit`, `depend`, `move`, `convert`, `close`, `discard`, `reorder`, `list`, `show`, `context`, `ready`, `dependents`, `waiting-on`, `search`, `browse`, `ui` | Same commands. They accept and print keys such as `TM-42`. `new` without `--parent` needs `--project KEY`. Listing commands accept `--project KEY`. |
 | `record` | `comment` adds a comment with the same options (`--kind`, `--actor`, `--result`, and `--body` or `--body-file`). `record` remains an alias for older plugin installs; the plugin skills use `comment`. |
-| none | `assign KEY NAME`, `unassign KEY`, `label KEY --add L --remove L`, `activity KEY`. `list`, `browse` and the UI filter by assignee and label. |
+| none | `assign KEY NAME`, `unassign KEY`, `label KEY --add L --remove L`, `repo KEY [ADDRESS...]`, `activity KEY`. `list`, `browse` and the UI filter by assignee and label. |
 | `validate` | Checks dependency links for unknown keys and cycles. |
 | `consolidate`, `history` | Removed (D8, feature 261109005). |
 | `migrate`, `worktree-status` | Removed with the file backend (feature 261109005). |
 
-The UI shows comments, activity, assignee and labels in the item details. The UI can set the assignee and labels, change the title, the description and the status of open work, and add comments.
+The UI shows comments, activity, assignee, labels and repositories in the item details. The UI can set the assignee, labels and repositories, change the title, the description and the status of open work, and add comments.
 
 ### Output
 

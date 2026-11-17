@@ -10,7 +10,7 @@ import json
 
 import typer
 
-from taskman.lifecycle import is_ready
+from taskman.lifecycle import inherited_repositories, is_ready
 from taskman.model.collection import in_manual_order
 from taskman.storage.store import Item, Store, key_order, open_store
 
@@ -20,7 +20,8 @@ def _load_graph(store: Store) -> dict[str, Item]:
     return {item.id: item for item in store.items() if not item.error}
 
 
-def _as_dict(item: Item) -> dict[str, str | bool | None | list[str]]:
+def _as_dict(item: Item, items: dict[str, Item]) -> dict:
+    """One item as a JSON row. ``items`` gives the ancestors whose repositories the item inherits."""
     return {
         "id": item.id,
         "type": item.type,
@@ -32,12 +33,14 @@ def _as_dict(item: Item) -> dict[str, str | bool | None | list[str]]:
         "depends_on": list(item.depends_on),
         "draft": item.draft,
         "parent_id": item.parent_id,
+        "repositories": list(item.metadata.get("repositories") or []),
+        "inherited_repositories": inherited_repositories(item, items),
     }
 
 
-def _emit(results: list[Item], as_json: bool) -> None:
+def _emit(results: list[Item], as_json: bool, items: dict[str, Item]) -> None:
     if as_json:
-        typer.echo(json.dumps([_as_dict(i) for i in results], indent=2))
+        typer.echo(json.dumps([_as_dict(i, items) for i in results], indent=2))
         return
     if not results:
         typer.echo("(none)")
@@ -97,7 +100,7 @@ def ready(
             out.append(item)
         elif item.status != "done":
             left_out.append(item)
-    _emit(in_manual_order(store, out), as_json)
+    _emit(in_manual_order(store, out), as_json, items)
     if left_out and not as_json:
         left_out.sort(key=lambda i: key_order(i.id))
         typer.echo(_not_ready_note(left_out, items), err=True)
@@ -120,7 +123,7 @@ def dependents(
         i for i in items.values()
         if i.status != "done" and item_id in i.depends_on
     ]
-    _emit(in_manual_order(store, out), as_json)
+    _emit(in_manual_order(store, out), as_json, items)
 
 
 def waiting_on(
@@ -145,4 +148,4 @@ def waiting_on(
     if missing:
         raise typer.BadParameter("missing dependencies: " + ", ".join(sorted(missing)))
     out = [items[dep] for dep in dependencies if items[dep].status != "done"]
-    _emit(in_manual_order(store, out), as_json)
+    _emit(in_manual_order(store, out), as_json, items)

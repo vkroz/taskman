@@ -86,8 +86,11 @@ Closed tasks are immutable. Further changes belong in a new task that references
 taskman ui
 taskman list --recursive --json
 taskman context TASK_ID
+taskman context TASK_ID --since CURSOR
 taskman validate
 ```
+
+`context` ends with a `cursor`. `context --since CURSOR` prints only the comments and field changes of the item after that cursor, and the next cursor. A description change shows as a note with the current revision of the item, without its text. When nothing is new, the output is one line. So an agent that refreshes during its work adds only the new content to its context.
 
 The UI refreshes as agents change tasks. `taskman validate` checks the dependency graph for unknown dependencies and cycles; acceptance testing is separate. Use `taskman help` for storage rules and `taskman COMMAND --help` for syntax.
 
@@ -114,9 +117,12 @@ Error messages never show a password or a connection URL.
 taskman assign TM-42 claude-code
 taskman unassign TM-42
 taskman label TM-42 --add backend --remove ui
+taskman repo TM-42 git@github.com:vkroz/taskman.git
 taskman list --assignee claude-code --label backend
 taskman activity TM-42
 ```
+
+`repo` names the repositories that the work of an item is about. Taskman stores each one as host and path, here `github.com/vkroz/taskman`, and refuses a local or relative path. Without arguments, `repo` shows the repositories of the item. `--clear` removes them. An item without own repositories inherits those of its nearest ancestor; `show`, `context` and `list --json` give them as `inherited_repositories`. A change of repositories makes the revision advance.
 
 `context` includes the activity of the item. A done item keeps its position among its siblings.
 
@@ -274,7 +280,7 @@ Python code is under `taskman/src/taskman/`; plugin sources are under `plugins/t
 
 Run `taskman ui` for the local workspace. The sidebar selects a view (Attention, Active, Ready, Blocked, Drafts, Backlog or Done) and a project. Search, facet filters and the epic scope apply at once and stay in the URL. Sort orders siblings; drag an open item to change its position within its parent and project. Select a row to open its details; Back or Esc closes them. [docs/ui-design.md](docs/ui-design.md) describes the page.
 
-Create work with **New**; a top-level item needs a project key. Details show the state, blockers, close readiness and one timeline of comments and changes. In open work, click the title, the description, the status, the assignee or the labels to change them. Each field saves when it loses focus; Esc cancels. A reason for a title or description change is optional; a given reason becomes a decision comment. The status offers only the moves that the lifecycle allows now, and Done needs all close checks. The menu offers **Add comment** with a kind (and a result for a verification) and **Delete draft** for draft leaves with no incoming dependencies. Finalized and completed work cannot be deleted. Completed work shows read-only fields. Agents finalize items through the CLI.
+Create work with **New**; a top-level item needs a project key. Details show the state, blockers, close readiness and one timeline of comments and changes. In open work, click the title, the description, the status, the assignee, the labels or the repositories to change them. Each field saves when it loses focus; Esc cancels. A reason for a title or description change is optional; a given reason becomes a decision comment. The status offers only the moves that the lifecycle allows now, and Done needs all close checks. The menu offers **Add comment** with a kind (and a result for a verification) and **Delete draft** for draft leaves with no incoming dependencies. Finalized and completed work cannot be deleted. Completed work shows read-only fields. Agents finalize items through the CLI.
 
 The same operations are available from the CLI:
 

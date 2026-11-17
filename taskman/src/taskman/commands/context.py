@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -81,6 +82,31 @@ def label(
     typer.echo(f"Labels of {item_id}: {', '.join(item.metadata['labels']) or 'none'}")
 
 
+def repo(
+    item_id: str = typer.Argument(...),
+    addresses: list[str] | None = typer.Argument(None, help="Remote addresses, for example github.com/OWNER/NAME."),
+    clear: bool = typer.Option(False, "--clear", help="Remove all repositories of the item."),
+) -> None:
+    """Show, replace or clear the repositories of an item. Without own repositories, an item inherits them."""
+    if addresses and clear:
+        raise typer.BadParameter("give addresses or --clear, not both")
+    store = open_store()
+    if addresses or clear:
+        with reported():
+            item = lifecycle.set_repositories(store, item_id, addresses or [])
+        typer.echo(f"Repositories of {item_id}: {', '.join(item.metadata.get('repositories') or []) or 'none'}")
+        return
+    items = {item.id: item for item in store.items()}
+    own = items[item_id].metadata.get("repositories") or []
+    inherited = lifecycle.inherited_repositories(items[item_id], items)
+    if own:
+        typer.echo(f"Repositories of {item_id}: {', '.join(own)}")
+    elif inherited:
+        typer.echo(f"Repositories of {item_id}, inherited from {inherited['from']}: {', '.join(inherited['addresses'])}")
+    else:
+        typer.echo(f"Repositories of {item_id}: none")
+
+
 def activity(
     item_id: str = typer.Argument(...),
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON."),
@@ -121,9 +147,51 @@ def discard(item_id: str = typer.Argument(...)) -> None:
     typer.echo(f"Discarded: {item_id}")
 
 
-def context(item_id: str = typer.Argument(...)) -> None:
-    """Emit task, ancestors, descendants, dependencies and the item's activity as JSON for a fresh agent."""
+# Only the form that Taskman prints: no leading zeros, nothing after the second number.
+_CURSOR = re.compile(r"^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\Z")
+
+
+def _cursor(item, activity: list) -> str:
+    """The read position: the number of comments and of field changes. Both only grow."""
+    return f"{len(item.metadata.get('journal') or [])}.{len(activity)}"
+
+
+def _news(store, item_id: str, since: str) -> dict:
+    """The comments and field changes of an item after ``since``, and the new cursor."""
+    match = _CURSOR.match(since)
+    item = store.get(item_id)
+    activity = store.activity(item_id)
+    comments = item.metadata.get("journal") or []
+    if not match or int(match[1]) > len(comments) or int(match[2]) > len(activity):
+        raise typer.BadParameter(f"unknown cursor {since!r}; run `taskman context {item_id}` for a new one")
+    revision = item.metadata.get("revision", 0)
+    changes = []
+    for entry in activity[int(match[2]):]:
+        if entry["field"] == "description":
+            # The text can be long: an agent reads the item again when it needs it.
+            entry = {"field": "description", "author": entry["author"], "at": entry["at"],
+                     "note": f"changed; the current revision of the item is {revision}"}
+        changes.append(entry)
+    return {"id": item_id, "cursor": _cursor(item, activity), "revision": revision, "status": item.status,
+            "draft": item.draft, "comments": comments[int(match[1]):], "changes": changes}
+
+
+def context(
+    item_id: str = typer.Argument(...),
+    since: str | None = typer.Option(
+        None, "--since", help="Only the comments and changes after this cursor. Each output gives the next cursor."
+    ),
+) -> None:
+    """Emit task, ancestors, descendants, dependencies and the item's activity as JSON for a fresh agent.
+
+    The output gives a cursor. With --since CURSOR, the output holds only the item's comments and field changes after that cursor, and a description change shows as a note without its text. When nothing is new, the output is one line.
+    """
     store = open_store()
+    if since is not None:
+        news = _news(store, item_id, since)
+        quiet = not news["comments"] and not news["changes"]
+        typer.echo(json.dumps(news, indent=None if quiet else 2, default=str))
+        return
     items = {item.id: item for item in store.items()}
     if item_id not in items:
         raise typer.BadParameter(f"item not found: {item_id}")
@@ -138,7 +206,7 @@ def context(item_id: str = typer.Argument(...)) -> None:
             parent = items[parent].parent_id
 
     ancestors = [payload(items[parent]) for parent in ancestor_ids(items[item_id])]
-    item = payload(items[item_id])
+    item = payload(items[item_id]) | {"inherited_repositories": lifecycle.inherited_repositories(items[item_id], items)}
     descendants = [payload(other) for other in items.values() if item_id in ancestor_ids(other)]
     dependencies = []
     seen = set()
@@ -154,6 +222,7 @@ def context(item_id: str = typer.Argument(...)) -> None:
             pending.extend(value["frontmatter"].get("depends_on", []))
         else:
             dependencies.append({"id": dep, "missing": True})
+    activity = store.activity(item_id)
     result = {"item": item, "ancestors": ancestors, "descendants": descendants, "dependencies": dependencies,
-              "activity": store.activity(item_id)}
+              "activity": activity, "cursor": _cursor(items[item_id], activity)}
     typer.echo(json.dumps(result, indent=2, default=str))

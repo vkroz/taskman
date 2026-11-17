@@ -26,7 +26,7 @@ From top to bottom, the panel shows:
 
 1. The type, the key (a click copies it), Copy link, previous and next, and close.
 2. The project and the ancestors as links.
-3. The title, the state, the status, the owner, the labels, and the creation and update times. In open work, the title, the status, the owner and the labels are fields that you edit in place.
+3. The title, the state, the status, the owner, the labels, the repositories, and the creation and update times. In open work, the title, the status, the owner, the labels and the repositories are fields that you edit in place.
 4. A menu with Add comment, Show only its sub-items, and Delete draft. Delete draft shows only for a draft that can be discarded. Otherwise the menu gives the reason, for example "has 1 child". A done item shows "Closed with evidence" and no actions.
 5. Close readiness for open items: finalized ("Not finalized (draft)" for a draft), dependencies, sub-items, summary and verification for the current revision. The verdict is "Ready to close" with the `taskman close` command, or "Not closable" with the number of open checks.
 6. The description as Markdown. The page builds every node with DOM text, so item text never becomes markup. A first heading equal to the title is not repeated. In open work, a click or Enter on the description changes it to a text field.
@@ -36,12 +36,13 @@ From top to bottom, the panel shows:
 
 ## Edit in place
 
-Open work has no Edit button. A click on a field starts the edit, and the field saves when focus leaves it. Esc restores the saved value. Enter saves the title, the owner and the labels; Ctrl+Enter or Cmd+Enter saves the description.
+Open work has no Edit button. A click on a field starts the edit, and the field saves when focus leaves it. Esc restores the saved value. Enter saves the title, the owner, the labels and the repositories; Ctrl+Enter or Cmd+Enter saves the description.
 
 - **Title and description**: while you edit one of them, an optional "Reason for the change" field shows below it. A reason becomes a decision comment by the store actor. Without a reason, the change has no comment; the timeline still shows the change. A draft can have an empty description. If someone changed the title or description after the page showed it, the field keeps the typed text and offers Reload theirs or Overwrite with mine.
 - **Status**: Backlog, Active or Done. A move that the lifecycle refuses now is disabled and gives the cause, for example "Active (finalize first)", "Active (finalize TM-4 first)" for a draft ancestor, "Active (blocked by TM-7)" or "Done (2 checks open)". Done closes the item.
 - **Assignee**: a text field that suggests known people and agents. An empty field removes the assignee.
 - **Labels**: Enter or a comma adds a label, and the remove button or Backspace removes one. The page lowercases labels and rejects labels that do not match `^[a-z0-9_-]{1,50}$`.
+- **Repositories**: git remote addresses, separated by spaces or commas. The server stores each one as host and path and refuses a local path. An empty field removes the own repositories. Then the placeholder shows the inherited repositories and the ancestor that names them.
 
 A failed save keeps the typed value in the field and shows the error below it. A poll does not render over a field that has an unsaved value. Opening another item while a field shows a failed save asks first: Discard and open, or Cancel. Esc during a running save keeps the value that is being saved. Completed work shows read-only fields.
 
@@ -86,5 +87,6 @@ Implementation uses a shared Python query service for CLI and UI. `taskman brows
 - `GET /api/show/KEY` adds ancestors, children, dependencies, dependents, the close gates and whether the item can be discarded, with the reason when it cannot. `taskman close` uses the same close gates. The response has an `etag`. `GET /api/show/KEY?etag=ETAG` with the current `etag` returns only `{etag, unchanged: true}`.
 - `POST /api/edit` with `base_title` and `base_body` returns 409 with the current text when another actor changed the title or description after the editor opened. Comments, assignee and label changes do not cause a conflict. Without `body`, `POST /api/edit` keeps the description. The `reason` is optional; a reason that is not empty becomes a decision comment.
 - `POST /api/fields` sets the assignee and the labels in one transaction.
+- `POST /api/repositories` replaces the repositories of an open item. `GET /api/show/KEY` gives `inherited_repositories`.
 - `POST /api/move` with `status` `backlog`, `active` or `done` moves the item, as `taskman move` does. A move to `done` closes the item through the close gates.
 - `POST /api/reorder` moves an item to a one-based `position` among its siblings, as `taskman reorder --position` does. The top-level items of each project have their own order.

@@ -84,7 +84,8 @@ LIFECYCLE
   browse    Query items by field and emit JSON that keeps the hierarchy.
   show      Print an item's fields and description.
   context   Read item, ancestors, descendants, dependencies and activity as
-            JSON.
+            JSON, with a cursor. `--since CURSOR` gives only the comments
+            and field changes after that cursor, and the next cursor.
   update    Replace an open item's description using --body-file.
   edit      Change an open item's title and description, with a reason.
   depend    Replace dependencies with repeated --on keys, or --clear.
@@ -96,6 +97,9 @@ LIFECYCLE
             comment. `record` is an alias.
   assign    Set the assignee of an open item; `unassign` removes it.
   label     Add or remove labels of an open item.
+  repo      Show, replace or clear the repositories of an item: git remote
+            addresses such as github.com/OWNER/NAME. Without own
+            repositories, an item inherits those of its nearest ancestor.
   activity  Show the field changes of an item.
   reorder   Move an open item to another position among its siblings.
   discard   Remove an unreferenced draft leaf.

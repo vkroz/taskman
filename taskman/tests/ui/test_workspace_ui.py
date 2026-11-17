@@ -777,6 +777,40 @@ def test_status_assignee_and_labels_save_in_place(rw, desktop):
     expect(desktop.locator("#preview .state")).to_contain_text("Active")
 
 
+def test_repositories_save_in_place_and_a_child_shows_the_inherited_ones(rw, desktop, tmp_path):
+    child = rw.api("/api/items", {"title": "Child of the billing epic", "type": "task", "parent": "RES-1"})["id"]
+    visit(desktop, rw, "/?item=RES-1")
+    expect(detail_key(desktop)).to_have_text("RES-1")
+    field = desktop.locator("#repositories-field")
+    field.fill("/Users/me/billing")
+    field.press("Enter")
+    expect(desktop.locator("#preview .field-error:not([hidden])")).to_contain_text("remote address")
+    field.fill("git@github.com:acme/billing.git, https://github.com/acme/usage")
+    field.press("Enter")
+    eventually(lambda: rw.api("/api/show/RES-1")["frontmatter"]["repositories"]
+               == ["github.com/acme/billing", "github.com/acme/usage"])
+    expect(field).to_have_value("github.com/acme/billing, github.com/acme/usage")
+    expect(desktop.locator("#preview .timeline")).to_contain_text("set the repositories to github.com/acme/billing")
+
+    visit(desktop, rw, f"/?item={child}")
+    expect(detail_key(desktop)).to_have_text(child)
+    expect(desktop.locator("#repositories-field")).to_have_value("")
+    expect(desktop.locator("#repositories-field")).to_have_attribute(
+        "placeholder", "github.com/acme/billing, github.com/acme/usage (from RES-1)")
+
+    # A closed child shows the repositories that it inherits, read-only.
+    agent = agent_store(tmp_path)
+    lifecycle.finalize(agent, child)
+    lifecycle.record(agent, child, "summary", "Codex", "Done.")
+    lifecycle.record(agent, child, "verification", "Codex", "Passed.", "pass")
+    lifecycle.close(agent, child)
+    agent.close()
+    visit(desktop, rw, f"/?item={child}")
+    expect(desktop.locator("#preview [data-repositories]")).to_have_text(
+        "Repositories: github.com/acme/billing, github.com/acme/usage (from RES-1)")
+    expect(desktop.locator("#repositories-field")).to_have_count(0)
+
+
 def test_text_typed_while_a_save_reloads_the_item_is_kept(rw, desktop):
     # TASKMAN-44: the reload after a save does not replace a field that the user started to type in.
     visit(desktop, rw, "/?item=RES-5")

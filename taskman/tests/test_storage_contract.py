@@ -460,6 +460,64 @@ def test_assignee_and_labels(store):
         lifecycle.label(store, item, ["a_b"], [])
 
 
+def test_repositories_are_stored_as_remote_addresses(store):
+    parent = _new(store, "Parent", "feat")
+    item = _new(store, "Item", parent=parent)
+    revision, parent_revision = (store.get(key).metadata["revision"] for key in (item, parent))
+    forms = ["git@github.com:vkroz/taskman.git", "https://github.com/vkroz/taskman", "github.com/vkroz/taskman",
+             "ssh://git@GitHub.com:22/vkroz/taskman/", "https://user@github.com/vkroz/taskman.git"]
+    for form in forms:
+        assert lifecycle.repository_address(form) == "github.com/vkroz/taskman"
+    saved = lifecycle.set_repositories(store, item, [*forms, "gitlab.com/group/sub/app"])
+    assert saved.metadata["repositories"] == ["github.com/vkroz/taskman", "gitlab.com/group/sub/app"]
+    assert store.get(item).metadata["repositories"] == ["github.com/vkroz/taskman", "gitlab.com/group/sub/app"]
+    # A change of scope: the revision of the item and of its ancestors advances.
+    assert store.get(item).metadata["revision"] == revision + 1
+    assert store.get(parent).metadata["revision"] == parent_revision + 1
+    entry = [e for e in store.activity(item) if e["field"] == "repositories"]
+    assert [(e["old"], e["new"]) for e in entry] == [("", "github.com/vkroz/taskman, gitlab.com/group/sub/app")]
+    with pytest.raises(NoChange):
+        lifecycle.set_repositories(store, item, ["gitlab.com/group/sub/app.git", "github.com/vkroz/taskman"])
+    assert lifecycle.set_repositories(store, item, []).metadata["repositories"] == []
+    assert store.get(item).metadata["revision"] == revision + 2
+
+
+@pytest.mark.parametrize("text", ["/Users/me/repo", "~/repo", "file:///Users/me/repo", "C:\\repo", "github.com",
+                                  "repo", "", "github.com/" + "x" * 200, "./taskman", "../x", "../../src/app",
+                                  "github.com/o/../r", "github.com/./r", "localhost/srv/repo",
+                                  "file://localhost/srv/repo", "-x.com/o/r", "github..com/o/r"])
+def test_a_local_path_or_a_partial_address_is_not_a_repository(store, text):
+    item = _new(store, "Item")
+    with pytest.raises(LifecycleError, match="remote address"):
+        lifecycle.set_repositories(store, item, [text])
+    assert store.get(item).metadata["repositories"] == []
+
+
+def test_an_item_inherits_the_repositories_of_its_nearest_ancestor(store):
+    epic = _new(store, "Epic", "epic")
+    feat = _new(store, "Feat", "feat", parent=epic)
+    task = _new(store, "Task", parent=feat)
+    lifecycle.set_repositories(store, epic, ["github.com/o/a"])
+    items = {item.id: item for item in store.items()}
+    assert lifecycle.inherited_repositories(items[task], items) == {"from": epic, "addresses": ["github.com/o/a"]}
+    assert lifecycle.inherited_repositories(items[epic], items) is None
+    lifecycle.set_repositories(store, feat, ["github.com/o/b"])
+    items = {item.id: item for item in store.items()}
+    assert lifecycle.inherited_repositories(items[task], items) == {"from": feat, "addresses": ["github.com/o/b"]}
+    lifecycle.set_repositories(store, task, ["github.com/o/c"])
+    items = {item.id: item for item in store.items()}
+    assert lifecycle.inherited_repositories(items[task], items) is None
+
+
+def test_closed_items_keep_their_repositories(store):
+    item = _new(store, "Item")
+    lifecycle.set_repositories(store, item, ["github.com/o/a"])
+    _closed(store, item)
+    with pytest.raises(LifecycleError, match="immutable"):
+        lifecycle.set_repositories(store, item, ["github.com/o/b"])
+    assert store.get(item).metadata["repositories"] == ["github.com/o/a"]
+
+
 def test_dependency_order_is_not_a_dependency_change(store):
     item, first, second = (_new(store, title) for title in ("Item", "First", "Second"))
     assert lifecycle.set_dependencies(store, item, [second, first]).depends_on == (first, second)

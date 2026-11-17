@@ -307,6 +307,14 @@ class SqlStore:
                 self._activity(row_id, "labels", old["labels"], labels, now)
                 changed = True
 
+            repositories = sorted(set(new["repositories"] or []))
+            if repositories != old["repositories"]:
+                self._q("DELETE FROM repositories WHERE item_id = ?", (row_id,))
+                for address in repositories:
+                    self._q("INSERT INTO repositories (item_id, address) VALUES (?, ?)", (row_id, address))
+                self._activity(row_id, "repositories", old["repositories"], repositories, now)
+                changed = True
+
             deps = sorted(set(new["depends_on"] or []), key=self._key_order)
             if deps != old["depends_on"]:
                 targets = [self._require(dep) for dep in deps]
@@ -435,6 +443,11 @@ class SqlStore:
         # Sort here: the database collation (en_US on Postgres) orders "-" and "_" differently.
         for names in labels.values():
             names.sort()
+        repositories: dict[int, list[str]] = {}
+        for item, address in self._q(f"SELECT c.item_id, c.address FROM repositories c {child_filter}", params):
+            repositories.setdefault(item, []).append(address)
+        for addresses in repositories.values():
+            addresses.sort()
         journal: dict[int, list[dict[str, Any]]] = {}
         for item, kind, result, author, text, revision, at in self._q(
             f"SELECT c.item_id, c.kind, c.result, c.author, c.text, c.revision, c.created_at FROM comments c "
@@ -445,9 +458,9 @@ class SqlStore:
             if result is not None:
                 entry["result"] = result
             journal.setdefault(item, []).append(entry)
-        return [self._item(row, deps, labels, journal) for row in rows]
+        return [self._item(row, deps, labels, repositories, journal) for row in rows]
 
-    def _item(self, row: tuple, deps: dict, labels: dict, journal: dict) -> Item:
+    def _item(self, row: tuple, deps: dict, labels: dict, repositories: dict, journal: dict) -> Item:
         (row_id, project, number, item_type, title, description, status, draft, revision, assignee,
          created_at, created_by, changed_at, parent_project, parent_number) = row
         key = f"{project}-{number}"
@@ -462,6 +475,7 @@ class SqlStore:
             "depends_on": deps.get(row_id, []),
             "assignee": assignee,
             "labels": labels.get(row_id, []),
+            "repositories": repositories.get(row_id, []),
             "journal": journal.get(row_id, []),
             "created_at": created_at,
             "created_by": created_by,

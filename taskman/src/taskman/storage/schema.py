@@ -205,6 +205,19 @@ MIGRATIONS: tuple[Migration, ...] = (
         "index of login start times",
         ("CREATE INDEX logins_created_at ON logins (created_at)",),
     ),
+    Migration(
+        6,
+        "repositories of items",
+        (
+            """
+            CREATE TABLE repositories (
+                item_id {bigint} NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+                address TEXT NOT NULL CHECK (length(address) BETWEEN 1 AND 200),
+                PRIMARY KEY (item_id, address)
+            )
+            """,
+        ),
+    ),
 )
 
 CURRENT_VERSION = MIGRATIONS[-1].version

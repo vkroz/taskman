@@ -470,6 +470,64 @@ def assign(store: Store, item_id: str, assignee: str | None) -> Item:
     return store.save(item_id, metadata, item.body)
 
 
+_SCP_REMOTE = re.compile(r"^(?:[^@/:]+@)?([^/:]+):(?!//)(.+)$")
+_URL_REMOTE = re.compile(r"^[a-z][a-z0-9+.-]*://(?:[^@/]+@)?([^/:]+)(?::[0-9]*)?/(.+)$", re.IGNORECASE)
+# A host name with at least one dot, then one or more path segments.
+_HOST_LABEL = r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?"
+_REPOSITORY = re.compile(rf"^{_HOST_LABEL}(?:\.{_HOST_LABEL})+(/[A-Za-z0-9._~-]+)+$")
+
+
+def repository_address(text: str) -> str:
+    """The normal form of a git remote address: host and path, without scheme, user, port or ``.git``.
+
+    ``git@github.com:o/r.git``, ``https://github.com/o/r`` and ``github.com/o/r`` all give
+    ``github.com/o/r``. A local path is not an address: paths differ between machines.
+    """
+    raw = text.strip() if isinstance(text, str) else ""
+    match = _URL_REMOTE.match(raw) or (None if "://" in raw else _SCP_REMOTE.match(raw))
+    address = f"{match[1]}/{match[2]}" if match else raw
+    host, _, path = address.partition("/")
+    path = path.strip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    address = f"{host.lower()}/{path}"
+    # "." and ".." segments make a relative path; "localhost" names another machine for each agent.
+    segments = path.split("/")
+    if len(address) > 200 or not _REPOSITORY.match(address) or any(s in (".", "..") for s in segments):
+        raise LifecycleError(
+            "a repository is a remote address with a host name and a path, such as github.com/OWNER/NAME; "
+            f"local paths are refused: {raw!r}",
+            usage=True,
+        )
+    return address
+
+
+def inherited_repositories(item: Item, items: dict[str, Item]) -> dict[str, Any] | None:
+    """The repositories of the nearest ancestor that names them, when the item names none itself."""
+    if item.metadata.get("repositories"):
+        return None
+    for ancestor in ancestors(items, item):
+        if ancestor.metadata.get("repositories"):
+            return {"from": ancestor.id, "addresses": list(ancestor.metadata["repositories"])}
+    return None
+
+
+@served
+def set_repositories(store: Store, item_id: str, addresses: list[str]) -> Item:
+    """Replace the repositories of an open item. The scope changes, so the revision advances."""
+    item = _require(store, item_id, usage=True)
+    _open(item)
+    repositories = sorted({repository_address(address) for address in addresses})
+    if repositories == sorted(item.metadata.get("repositories") or []):
+        raise NoChange(f"No change: {item_id} repositories are unchanged.")
+    metadata = copy.deepcopy(item.metadata)
+    metadata["repositories"] = repositories
+    metadata["revision"] = _revision(item) + 1
+    item = store.save(item_id, metadata, item.body)
+    invalidate_ancestors(store, item_id)
+    return item
+
+
 @served
 def label(store: Store, item_id: str, add: list[str], remove: list[str]) -> Item:
     """Add and remove labels. The revision does not change."""
