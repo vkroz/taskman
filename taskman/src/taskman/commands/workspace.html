@@ -3249,7 +3249,8 @@
         const selected = selection && !selection.isCollapsed && preview.contains(selection.anchorNode);
         return selected || preview.contains(document.activeElement) || !!preview.querySelector("[data-unsaved]");
       };
-      /** Fetch the open item. Re-render only when it changed and the user is not reading or typing in it. */
+      /** Fetch the open item. Re-render only when it changed and the user is not reading or typing in it.
+       * force is true, or a function that decides after the fetch, when the user can have started to type. */
       async function loadDetail(id, { force = false, signal } = {}) {
         let result;
         // The etag of the rendered detail: the server answers "unchanged" until there is something new to show.
@@ -3277,6 +3278,7 @@
         S.missing = false;
         if (!changed) return;
         S.detail = result;
+        if (typeof force === "function") force = force();
         if (!force && panelBusy()) {
           refreshStatusChoices(result);
           return; // retried on the next poll
@@ -3464,10 +3466,12 @@
       /** After an in-place save: refresh the list, and render the open item again unless a field in it is in use. */
       async function afterFieldSave() {
         await refresh({ force: true });
-        const active = document.activeElement;
-        const editing = (preview.contains(active) && active.matches("input,textarea,select,[contenteditable=plaintext-only]"))
-          || !!preview.querySelector("[data-unsaved]");
-        if (S.item) await loadDetail(S.item, { force: !editing }).catch(() => {});
+        const editing = () => {
+          const active = document.activeElement;
+          return (preview.contains(active) && active.matches("input,textarea,select,[contenteditable=plaintext-only]"))
+            || !!preview.querySelector("[data-unsaved]");
+        };
+        if (S.item) await loadDetail(S.item, { force: () => !editing() }).catch(() => {});
       }
       /** The error of a field, plus the reason for a title or description change, shown while the field is in use. */
       function reasonRow(id) {

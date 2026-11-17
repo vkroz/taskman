@@ -777,6 +777,32 @@ def test_status_assignee_and_labels_save_in_place(rw, desktop):
     expect(desktop.locator("#preview .state")).to_contain_text("Active")
 
 
+def test_text_typed_while_a_save_reloads_the_item_is_kept(rw, desktop):
+    # TASKMAN-44: the reload after a save does not replace a field that the user started to type in.
+    visit(desktop, rw, "/?item=RES-5")
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    held, release = [], []
+    assignee = desktop.locator("#assignee-field")
+    assignee.fill("Codex")
+    # A forced reload asks without an etag; a poll asks with one and passes.
+    desktop.route("**/api/show/RES-5*", lambda route: route.continue_() if release or "etag=" in route.request.url
+                  else held.append(route))
+    assignee.press("Enter")
+    eventually(lambda: rw.api("/api/show/RES-5")["frontmatter"]["assignee"] == "Codex")
+    eventually(lambda: desktop.wait_for_timeout(50) or held)
+    entry = desktop.locator("#label-field")
+    entry.fill("Backend")
+    release.append(True)
+    with desktop.expect_response(lambda r: "/api/show/RES-5" in r.url and "etag=" not in r.url):
+        for route in held:
+            route.continue_()
+    desktop.wait_for_timeout(100)  # the page renders after the response arrives
+    desktop.unroute("**/api/show/RES-5*")
+    expect(entry).to_have_value("Backend")
+    entry.press("Enter")
+    expect(desktop.locator("#preview .tokens .chip")).to_have_text(["backend", "bug", "ui"])
+
+
 def test_esc_during_a_running_save_keeps_the_value_that_is_saved(rw, desktop):
     # TASKMAN-43: Esc while a save is running restores the value being saved and does not send a second save.
     visit(desktop, rw, "/?item=RES-5")
