@@ -16,6 +16,7 @@ from typer.testing import CliRunner
 from taskman.cli import app
 from taskman.commands.ui import _make_handler
 from taskman.storage.sql_store import open_sql_store
+from tests import sql_helpers
 
 
 def cli(*args, text=None, ok=True):
@@ -81,7 +82,7 @@ def test_ui_create_to_nested_plan_execution_and_fresh_agent_context(sqlite_env):
         second = new("Review", parent=story)
         cli("depend", second, "--on", first)
         for item in (epic, story, first, second):
-            cli("finalize", item)
+            sql_helpers.finalize(item)
         cli("move", second, "active", ok=False)
         cli("move", first, "active")
         record(first, "decision", "Reuse the existing public contract.")
@@ -92,7 +93,8 @@ def test_ui_create_to_nested_plan_execution_and_fresh_agent_context(sqlite_env):
                                 env={**os.environ, "TASKMAN_BACKEND": "sqlite", "TASKMAN_DATABASE_URL": f"sqlite://{sqlite_env.sqlite_path}"}, capture_output=True, text=True, check=True)
         context = json.loads(result.stdout)
         assert [a["id"] for a in context["ancestors"]] == [story, epic]
-        assert context["dependencies"][0]["frontmatter"]["journal"][0]["text"] == "Reuse the existing public contract."
+        decisions = [e for e in context["dependencies"][0]["frontmatter"]["journal"] if e["kind"] == "decision"]
+        assert decisions[0]["text"] == "Reuse the existing public contract."
         complete(second)
         complete(story)
         complete(epic)
@@ -112,7 +114,7 @@ def test_ui_create_to_nested_plan_execution_and_fresh_agent_context(sqlite_env):
 def test_close_requires_current_success_and_summary_and_cannot_be_bypassed(sqlite_env):
     item = new("Check me")
     cli("close", item, ok=False)
-    cli("finalize", item)
+    sql_helpers.finalize(item)
     record(item, "verification", result="pass")
     cli("close", item, ok=False)  # no summary
     record(item, "summary")
@@ -134,7 +136,7 @@ def test_parent_evidence_becomes_stale_after_child_changes(sqlite_env):
     parent = new("Parent", "epic")
     child = new("Child", parent=parent)
     for item in (parent, child):
-        cli("finalize", item)
+        sql_helpers.finalize(item)
     record(parent, "summary")
     record(parent, "verification", result="pass")
     complete(child)
@@ -162,7 +164,7 @@ def test_ready_respects_drafts_and_parent_dependencies(sqlite_env):
     child = new("Child", parent=parent)
     assert json.loads(cli("ready", "--json")) == []
     for item in (dep, parent, child):
-        cli("finalize", item)
+        sql_helpers.finalize(item)
     cli("depend", parent, "--on", dep)
     assert {i["id"] for i in json.loads(cli("ready", "--json"))} == {dep}
     cli("move", child, "active", ok=False)
@@ -175,7 +177,7 @@ def test_discard_only_unreferenced_draft_leaves(sqlite_env):
     cli("depend", b, "--on", a)
     cli("discard", a, ok=False)
     cli("discard", b)
-    cli("finalize", a)
+    sql_helpers.finalize(a)
     cli("discard", a, ok=False)
 
 
@@ -198,7 +200,7 @@ def test_type_conversion_invalidates_item_and_parent_evidence(sqlite_env):
     parent = new("Parent", "epic")
     item = new("Item", parent=parent)
     for value in (parent, item):
-        cli("finalize", value)
+        sql_helpers.finalize(value)
         record(value, "summary")
         record(value, "verification", result="pass")
     before = json.loads(cli("context", item))
@@ -214,7 +216,7 @@ def test_cannot_close_through_unfinished_parent_dependency(sqlite_env):
     parent = new("Parent", "epic")
     child = new("Child", parent=parent)
     for item in (dependency, parent, child):
-        cli("finalize", item)
+        sql_helpers.finalize(item)
     cli("depend", parent, "--on", dependency)
     assert [v["id"] for v in json.loads(cli("waiting-on", child, "--json"))] == [dependency]
     record(child, "summary")

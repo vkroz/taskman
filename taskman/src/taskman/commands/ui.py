@@ -205,10 +205,18 @@ def show(store: Store, item_id: str, etag: str | None = None) -> dict[str, Any] 
         "dependents": [brief(other.id) for other in sorted(items.values(), key=lambda o: key_order(o.id))
                        if item_id in other.depends_on],
         "close_gates": None if item.status == "done" else lifecycle.close_gates(item, items),
+        "ready_gates": lifecycle.ready_gates(item, items) if item.draft and item.status != "done" else None,
+        "link": item_link(store, item_id),
         "inherited_repositories": lifecycle.inherited_repositories(item, items),
         "can_discard": blocker is None,
         "discard_blocked_reason": blocker,
     }, etag)
+
+
+def item_link(store: Store, item_id: str) -> str:
+    """The link to paste into a coding session: the server address and the key, or the key alone without a server."""
+    server = getattr(store, "url", "")
+    return f"{server}/items/{item_id}" if server else item_id
 
 
 def edit_conflict(store: Store, data: dict) -> dict[str, Any] | None:
@@ -272,7 +280,7 @@ def _make_handler(store: Store):
                 return
             if self.path not in ('/api/items', '/api/query', '/api/edit', '/api/discard', '/api/reorder',
                                  '/api/comment', '/api/assign', '/api/label', '/api/fields', '/api/move',
-                                 '/api/repositories'):
+                                 '/api/repositories', '/api/finalize'):
                 self._json(404, {'error': 'Unknown endpoint'})
                 return
             try:
@@ -317,6 +325,8 @@ def _make_handler(store: Store):
                             if not all(isinstance(v, list) and all(isinstance(x, str) for x in v) for v in (add, remove)):
                                 raise ValueError('Labels must be lists of text')
                             result = _unchanged_ok(lambda: lifecycle.label(store, item_id, add, remove))
+                        elif self.path == '/api/finalize':
+                            result = _unchanged_ok(lambda: lifecycle.finalize(store, item_id))
                         elif self.path == '/api/repositories':
                             addresses = data.get('repositories')
                             if not isinstance(addresses, list) or not all(isinstance(x, str) for x in addresses):
@@ -351,7 +361,7 @@ def _make_handler(store: Store):
                             result = {'order': reorder_item(store, item_id, position)}
                         if status == 200 and self.path in ('/api/edit', '/api/comment', '/api/assign',
                                                            '/api/label', '/api/fields', '/api/move',
-                                                           '/api/repositories'):
+                                                           '/api/repositories', '/api/finalize'):
                             result['row'] = _row(*_snapshot(store), item_id)
                     self._json(status, result)
                     return

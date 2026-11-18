@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from taskman.cli import app
 from taskman.storage.sql_store import default_actor
+from tests import sql_helpers
 
 runner = CliRunner()
 
@@ -69,14 +70,14 @@ def test_each_command_uses_the_configured_database(tmp_path, monkeypatch):
 def test_a_write_does_not_wait_for_its_own_lock(cli):
     started = time.monotonic()
     cli("new", "--title", "Quick", "--project", "TM")
-    cli("finalize", "TM-1")
+    sql_helpers.finalize("TM-1")
     assert time.monotonic() - started < 5  # a second connection would wait 30 s for the write lock
 
 
 def test_edit_changes_only_the_title_without_a_body_file(cli):
     cli("new", "--title", "Item", "--project", "TM", "--body-file", "-", input="Item spec.\n")
     cli("new", "--title", "Draft", "--project", "TM", "--body-file", "-", input="Draft spec.\n")
-    cli("finalize", "TM-1")
+    sql_helpers.finalize("TM-1")
     for key, body in (("TM-1", "Item spec.\n"), ("TM-2", "Draft spec.\n")):
         assert cli("edit", key, "--title", "Renamed", "--reason", "Rename only") == f"Updated: {key}\n"
         assert (_json("show", key, "--json")["frontmatter"]["title"], _json("show", key, "--json")["body"]) == (
@@ -109,7 +110,7 @@ def test_listings_filter_by_project(cli):
     for project in ("TM", "OPS", "TM"):
         cli("new", "--title", f"{project} item", "--project", project)
     for key in ("TM-1", "OPS-1", "TM-2"):
-        cli("finalize", key)
+        sql_helpers.finalize(key)
     assert [row["id"] for row in _json("list", "--json", "--project", "OPS")] == ["OPS-1"]
     assert [row["id"] for row in _json("ready", "--json", "--project", "TM")] == ["TM-1", "TM-2"]
     assert [row["id"] for row in _json("search", "item", "--json", "--project", "OPS")] == ["OPS-1"]
@@ -252,8 +253,8 @@ def test_close_and_convert_name_children_by_key(cli):
     assert "has children: TM-2" in cli("convert", "TM-1", "task", code=1)
     output = cli("close", "TM-1", code=1)
     assert "  TM-2" in output and "sqlite:" not in output
-    cli("finalize", "TM-1")
-    cli("finalize", "TM-2")
+    sql_helpers.finalize("TM-1")
+    sql_helpers.finalize("TM-2")
     for key in ("TM-2", "TM-1"):
         _comment(key, "summary", "Done")
         _comment(key, "verification", "Checked", result="pass")

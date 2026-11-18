@@ -217,7 +217,7 @@ def test_hide_done_filter_composes_with_other_filters_and_context(store):
     epic = sql.new("Epic", "epic")
     open_id = sql.new("Needle open", parent=epic)
     done_id = sql.new("Needle done", parent=epic)
-    sql.run("finalize", epic)
+    sql.finalize(epic)
     sql.prepare(done_id)
     sql.run("close", done_id)
     rows = collection(store)

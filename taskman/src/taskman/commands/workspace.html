@@ -214,7 +214,8 @@
       .btn:hover {
         background: var(--surface-2);
       }
-      .btn:disabled {
+      .btn:disabled,
+      .btn[aria-disabled="true"] {
         cursor: not-allowed;
         opacity: 0.55;
       }
@@ -1132,6 +1133,12 @@
         align-items: flex-start;
         gap: var(--s2);
       }
+      /* A long repository address wraps instead of pushing the card past a narrow screen. */
+      .gate > span,
+      .readiness .hint {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
       .gate a {
         white-space: nowrap;
       }
@@ -1295,6 +1302,11 @@
         font-size: 12px;
         line-height: 16px;
         color: var(--text-2);
+      }
+      /* A change text with a long value, such as a repository address, wraps on a narrow screen. */
+      .entry-head > span {
+        min-width: 0;
+        overflow-wrap: anywhere;
       }
       .entry-head .actor {
         color: var(--text);
@@ -2090,7 +2102,10 @@
         handoff: ["Handoff", "Where the work stopped and what the next agent needs."],
         summary: ["Summary", "What the work delivered, for closure."],
         verification: ["Verification", "The checks that ran and their result."],
+        review: ["Review", "The readiness checklist and its result. A passing review lets a draft be finalized."],
       };
+      // The results that each kind with a result accepts.
+      const KIND_RESULTS = { verification: ["pass", "fail", "blocked"], review: ["pass", "fail"] };
       const TIMELINE_FILTERS = [["all", "All"], ["evidence", "Evidence"], ["decisions", "Decisions"],
         ["handoffs", "Handoffs"], ["changes", "Changes"]];
 
@@ -3313,7 +3328,7 @@
           Button("", { kind: "ghost d-back", size: "sm", icon: "back", title: "Back to list", onclick: closeItem }),
           type ? TypeIcon(type) : null,
           h("button", { class: "d-key", type: "button", title: "Copy key", onclick: () => copyText(id, id) }, id),
-          Button("", { kind: "ghost", size: "sm", icon: "link", title: "Copy link", onclick: () => copyText(`${location.origin}/${id}`, "link") }),
+          Button("", { kind: "ghost", size: "sm", icon: "link", title: "Copy link", onclick: () => copyText(d && d.link ? d.link : id, "link") }),
           h("span", { class: "spacer" }),
           Button("", { kind: "ghost", size: "sm", icon: "up", title: "Previous item (k)", onclick: () => step(-1, true) }),
           Button("", { kind: "ghost", size: "sm", icon: "down", title: "Next item (j)", onclick: () => step(1, true) }),
@@ -3353,6 +3368,7 @@
         out.push(meta);
         out.push(detailActions(d));
         if (S.missing) return out;
+        if (d.ready_gates) out.push(readyCard(d));
         if (d.close_gates) out.push(readinessCard(d));
         if (open) out.push(descriptionEditor(d, live));
         else {
@@ -3755,11 +3771,8 @@
         add("Repositories", repositories, repositoriesError);
         return grid;
       }
-      function readinessCard(d) {
-        const gates = d.close_gates;
-        const failing = gates.filter((g) => !g.ok).length;
-        const closable = failing === 0;
-        const verdict = closable ? "Ready to close" : `Not closable · ${plural(failing, "check")} open`;
+      /** The checks of a gate, with pass or fail; failing refs link to their items. */
+      function gateList(gates, d) {
         const list = h("ul", { class: "gates" });
         for (const gate of gates) {
           const item = h("li", { class: "gate", "data-ok": String(gate.ok), "data-check": gate.check }, icon(gate.ok ? "check" : "x"));
@@ -3769,7 +3782,7 @@
             text.append(gate.detail.slice(0, colon + 2),
               h("span", { class: "gate-status", "data-status": gate.status, text: cap(gate.detail.slice(colon + 2)) }));
           } else {
-            const refs = gate.refs.filter((ref) => ref !== d.frontmatter.id);
+            const refs = (gate.refs || []).filter((ref) => ref !== d.frontmatter.id);
             const base = refs.length ? gate.detail.replace(/:?\s*[A-Z][A-Z0-9]*-\d+(,\s*[A-Z][A-Z0-9]*-\d+)*$/, "") : gate.detail;
             text.append(base);
             if (refs.length) {
@@ -3784,6 +3797,52 @@
           item.append(text);
           list.append(item);
         }
+        return list;
+      }
+      /** Definition of ready of a draft, with Finalize. Finalize stays disabled while a check fails. */
+      function readyCard(d) {
+        const gates = d.ready_gates;
+        const failed = gates.filter((g) => !g.ok);
+        const ready = failed.length === 0;
+        const verdict = ready ? "Ready to finalize" : `Not ready · ${plural(failed.length, "check")} open`;
+        // aria-disabled, not disabled: the button stays in the Tab order, so keyboard and
+        // screen-reader users reach it and hear its cause.
+        const blocked = !ready || S.missing;
+        let running = false;
+        const finalize = Button(ready ? "Finalize" : `Finalize (${plural(failed.length, "check")} open)`, {
+          kind: "primary", size: "sm", attrs: { id: "finalize", "aria-disabled": blocked ? "true" : null,
+            "aria-describedby": ready ? null : "finalize-cause" },
+          onclick: async () => {
+            if (blocked || running) return;
+            running = true;
+            finalize.setAttribute("aria-disabled", "true");
+            const id = d.frontmatter.id;
+            try {
+              const result = await api("/api/finalize", { id });
+              toast(result.message || `${id} finalized`);
+            } catch (failure) {
+              // The first line names the refusal; the panel reloads with the failed checks.
+              toast(`Not finalized: ${String(failure.message).split("\n")[0]}`);
+            }
+            await afterChange();
+            leaveField();
+          } });
+        const cause = ready ? null : h("p", { class: "hint", id: "finalize-cause",
+          text: `Finalize needs every check: ${failed.map((g) => g.detail).join("; ")}.` });
+        const review = gates.find((g) => g.check === "review");
+        const how = review && !review.ok ? h("p", { class: "hint", text: "Review the draft against the checklist of taskman help, "
+          + "then add a comment of kind Review with the result." }) : null;
+        return h("section", { class: "card readiness", "data-card": "ready", "aria-label": "Definition of ready" },
+          h("div", { class: "section-title" }, "Definition of ready",
+            h("span", { class: "right verdict", "data-closable": String(ready), text: verdict })),
+          gateList(gates, d), cause, how, h("div", { class: "actions" }, finalize));
+      }
+      function readinessCard(d) {
+        const gates = d.close_gates;
+        const failing = gates.filter((g) => !g.ok).length;
+        const closable = failing === 0;
+        const verdict = closable ? "Ready to close" : `Not closable · ${plural(failing, "check")} open`;
+        const list = gateList(gates, d);
         return h("section", { class: "card readiness", "aria-label": "Close readiness" },
           h("div", { class: "section-title" }, "Close readiness",
             h("span", { class: "right verdict", "data-closable": String(closable), text: verdict })),
@@ -3886,7 +3945,7 @@
         const draw = () => {
           const filter = S.timeline;
           const keep = (e) => filter === "all" ? true : filter === "changes" ? e.type === "change"
-            : filter === "evidence" ? e.kind === "summary" || e.kind === "verification"
+            : filter === "evidence" ? e.kind === "summary" || e.kind === "verification" || e.kind === "review"
             : filter === "decisions" ? e.kind === "decision" : filter === "handoffs" ? e.kind === "handoff" : true;
           const entries = timelineEntries(d).filter((e) => (e.type === "divider" ? filter === "all" : keep(e)));
           list.replaceChildren(...entries.map((e) => timelineEntry(e, current)));
@@ -4060,14 +4119,20 @@
           Object.entries(KINDS).map(([key, [label]]) => h("option", { value: key, selected: key === "progress" }, label)));
         const kindHint = h("span", { class: "hint" });
         const results = h("fieldset", { class: "pills", hidden: true }, h("legend", { class: "field-label", text: "Result" }),
-          ["pass", "fail", "blocked"].map((r) => h("label", { class: "pill" }, h("input", { type: "radio", name: "result", value: r }), cap(r))));
+          ["pass", "fail", "blocked"].map((r) => h("label", { class: "pill", "data-result": r },
+            h("input", { type: "radio", name: "result", value: r }), cap(r))));
         const resultError = h("span", { class: "field-error", hidden: true });
         const resultField = h("div", { class: "field", hidden: true }, results, resultError);
         const text = h("textarea", { name: "text", rows: 6, "aria-label": "Comment text" });
         const textError = h("span", { class: "field-error", hidden: true });
         const sync = () => {
           kindHint.textContent = KINDS[kind.value][1];
-          results.hidden = resultField.hidden = kind.value !== "verification";
+          const allowed = KIND_RESULTS[kind.value] || [];
+          results.hidden = resultField.hidden = !allowed.length;
+          for (const pill of results.querySelectorAll(".pill")) {
+            pill.hidden = !allowed.includes(pill.dataset.result);
+            if (pill.hidden) pill.querySelector("input").checked = false;
+          }
         };
         const dlg = Dialog({
           title: `Comment on ${id}`,
@@ -4082,8 +4147,8 @@
           onSubmit: async () => {
             resultError.hidden = textError.hidden = true;
             const result = $("input[name=result]:checked", dlg.form);
-            if (kind.value === "verification" && !result) {
-              resultError.textContent = "Choose the verification result";
+            if (KIND_RESULTS[kind.value] && !result) {
+              resultError.textContent = `Choose the ${kind.value} result`;
               resultError.hidden = false;
               return;
             }
@@ -4094,7 +4159,7 @@
               return;
             }
             await api("/api/comment", { id, kind: kind.value, text: text.value,
-              result: kind.value === "verification" ? result.value : null });
+              result: KIND_RESULTS[kind.value] ? result.value : null });
             dlg.resetDirty();
             dlg.close();
             toast(`Comment added to ${id}`);

@@ -15,6 +15,7 @@ from taskman.storage.schema import upgrade
 from taskman.storage.settings import StorageSettings
 from taskman.storage.sql import connect
 from taskman.storage.sql_store import open_sql_store
+from tests import ready
 
 
 def _serve(store):
@@ -116,7 +117,7 @@ def test_done_items_cannot_be_reordered_or_changed(api, tmp_path):
     assert "capabilities" not in api("/api/query", {})
     store = open_sql_store(StorageSettings("sqlite", sqlite_path=tmp_path / "taskman.db"), actor="agent")
     try:
-        lifecycle.finalize(store, "TM-1")
+        ready.finalize(store, "TM-1")
         lifecycle.record(store, "TM-1", "summary", "agent", "Done")
         lifecycle.record(store, "TM-1", "verification", "agent", "Checked", "pass")
         lifecycle.close(store, "TM-1")

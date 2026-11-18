@@ -21,8 +21,10 @@ IMMUTABLE = "closed items are immutable; create a linked follow-up task"
 ITEM_TYPES = ("epic", "feat", "task", "bugfix")
 # Leaf types have no children.
 LEAF_TYPES = ("task", "bugfix")
-JOURNAL_KINDS = ("decision", "progress", "handoff", "summary", "verification")
+JOURNAL_KINDS = ("decision", "progress", "handoff", "summary", "verification", "review")
 RESULTS = ("pass", "fail", "blocked")
+# The results that each kind with a result accepts. A readiness review passes or fails.
+KIND_RESULTS = {"verification": RESULTS, "review": ("pass", "fail")}
 
 
 class LifecycleError(ValueError):
@@ -163,13 +165,60 @@ def create(
     return item
 
 
+def _has_description(item: Item) -> bool:
+    """True when the description holds more than a first heading that repeats the title, at any level."""
+    lines = item.body.strip().splitlines()
+    if lines and lines[0].lstrip().startswith("#") and lines[0].strip().lstrip("#").strip() == item.title.strip():
+        lines = lines[1:]
+    return any(line.strip() for line in lines)
+
+
+def ready_gates(item: Item, items: dict[str, Item]) -> list[dict[str, Any]]:
+    """The checks of the definition of ready that ``finalize`` applies, in display order. Changes nothing.
+
+    Each check has ``check``, ``ok`` and ``detail`` (display text). The reviewer checklist
+    itself is the text of the ``review`` comment; Taskman checks that a current one passed.
+    """
+    revision = _revision(item)
+    status, stale_at = _evidence(item.metadata.get("journal") or [], "review", revision)
+    if item.metadata.get("repositories"):
+        repositories = f"Repositories: {', '.join(item.metadata['repositories'])}"
+    else:
+        inherited = inherited_repositories(item, items)
+        repositories = (f"Repositories from {inherited['from']}: {', '.join(inherited['addresses'])}" if inherited
+                        else "No repository on the item or an ancestor")
+    detail = f"stale at rev {stale_at}" if status == "stale" else status
+    return [
+        {"check": "title", "ok": bool(item.title.strip()),
+         "detail": "Title present" if item.title.strip() else "Title is empty"},
+        {"check": "description", "ok": _has_description(item),
+         "detail": "Description present" if _has_description(item) else "Description is empty"},
+        {"check": "repositories", "ok": not repositories.startswith("No "), "detail": repositories},
+        {"check": "review", "ok": status == "pass", "detail": f"Readiness review for rev {revision}: {detail}",
+         "status": status, "revision": revision},
+    ]
+
+
 @served
 def finalize(store: Store, item_id: str) -> Item:
+    """Clear the draft marker when the item meets the definition of ready."""
     item = _readable(_require(store, item_id, usage=False), usage=False)
     if item.metadata.get("status") == "done":
         raise NoChange(f"No change: {item_id} is closed and immutable.")
     if not item.draft:
         raise NoChange(f"Item {item_id} is not a draft — nothing to do.")
+    failed = [gate for gate in ready_gates(item, {other.id: other for other in store.items()}) if not gate["ok"]]
+    if failed:
+        lines = [f"cannot finalize {item_id} — the definition of ready is not met:"]
+        lines += [f"  {gate['detail']}" for gate in failed]
+        review = next((gate for gate in failed if gate["check"] == "review"), None)
+        if review and review["status"] == "fail":
+            lines.append("  Fix the failed checks of the latest review, then review the item again:")
+        elif review:
+            lines.append("  Review the item against the checklist of `taskman help`, then record the result:")
+        if review:
+            lines.append(f"  taskman comment {item_id} --kind review --result pass|fail --body-file FILE")
+        raise LifecycleError("\n".join(lines), usage=True)
     metadata = copy.deepcopy(item.metadata)
     metadata["draft"] = False
     return store.save(item_id, metadata, item.body)
@@ -194,8 +243,12 @@ def check_entry(kind: str, actor: str, result: str | None) -> None:
         raise LifecycleError("unknown entry kind", usage=True)
     if not actor.strip():
         raise LifecycleError("actor must not be empty", usage=True)
-    if (kind == "verification" and result not in RESULTS) or (kind != "verification" and result is not None):
-        raise LifecycleError("verification requires --result pass|fail|blocked; other entries omit it", usage=True)
+    if (kind in KIND_RESULTS and result not in KIND_RESULTS[kind]) or (kind not in KIND_RESULTS and result is not None):
+        raise LifecycleError(
+            "verification requires --result pass|fail|blocked, review requires --result pass|fail; "
+            "other entries omit it",
+            usage=True,
+        )
 
 
 @served

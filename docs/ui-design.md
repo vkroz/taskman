@@ -1,6 +1,6 @@
 # Taskman workspace design
 
-The workspace is one HTML file with no build step and no external files. It works offline. It shows what Taskman derives, not raw fields: state, blockers, leaf progress, latest verification and close readiness. Agents finalize items through the CLI. People and agents move and close open items from the status field of the item panel, or through the CLI. The page shows whether an item can close and why not.
+The workspace is one HTML file with no build step and no external files. It works offline. It shows what Taskman derives, not raw fields: state, blockers, leaf progress, latest verification, readiness and close readiness. People finalize drafts from the item panel when the definition of ready is met. People and agents move and close open items from the status field of the item panel, or through the CLI. The page shows whether an item can close and why not.
 
 ## Layout
 
@@ -24,15 +24,16 @@ A facet opens a checklist of the values in the current view, with counts. A clic
 
 From top to bottom, the panel shows:
 
-1. The type, the key (a click copies it), Copy link, previous and next, and close.
+1. The type, the key (a click copies it), Copy link, previous and next, and close. Copy link copies the link for a coding session: the server address and the key (`https://taskman.example.com/items/TM-42`), or the key alone when the UI uses a local database.
 2. The project and the ancestors as links.
 3. The title, the state, the status, the owner, the labels, the repositories, and the creation and update times. In open work, the title, the status, the owner, the labels and the repositories are fields that you edit in place.
 4. A menu with Add comment, Show only its sub-items, and Delete draft. Delete draft shows only for a draft that can be discarded. Otherwise the menu gives the reason, for example "has 1 child". A done item shows "Closed with evidence" and no actions.
-5. Close readiness for open items: finalized ("Not finalized (draft)" for a draft), dependencies, sub-items, summary and verification for the current revision. The verdict is "Ready to close" with the `taskman close` command, or "Not closable" with the number of open checks.
-6. The description as Markdown. The page builds every node with DOM text, so item text never becomes markup. A first heading equal to the title is not repeated. In open work, a click or Enter on the description changes it to a text field.
-7. Sub-items with a segmented progress bar, blocked items first. **Add sub-item** shows on open epics and features.
-8. Depends on and Blocks.
-9. One timeline of comments and field changes, newest first. Filters are All, Evidence, Decisions, Handoffs and Changes. Each comment shows its kind, actor, revision and time. A verification shows its result. A divider marks the start of each revision.
+5. For a draft, the definition of ready: title, description, repositories and the readiness review for the current revision, each with pass or fail. The verdict is "Ready to finalize" or "Not ready" with the number of open checks. **Finalize** is disabled while a check fails, and a line below the checks names each cause. A failed or missing review adds how to record one.
+6. Close readiness for open items: finalized ("Not finalized (draft)" for a draft), dependencies, sub-items, summary and verification for the current revision. The verdict is "Ready to close" with the `taskman close` command, or "Not closable" with the number of open checks.
+7. The description as Markdown. The page builds every node with DOM text, so item text never becomes markup. A first heading equal to the title is not repeated. In open work, a click or Enter on the description changes it to a text field.
+8. Sub-items with a segmented progress bar, blocked items first. **Add sub-item** shows on open epics and features.
+9. Depends on and Blocks.
+10. One timeline of comments and field changes, newest first. Filters are All, Evidence, Decisions, Handoffs and Changes. Each comment shows its kind, actor, revision and time. A verification shows its result. A divider marks the start of each revision.
 
 ## Edit in place
 
@@ -87,6 +88,7 @@ Implementation uses a shared Python query service for CLI and UI. `taskman brows
 - `GET /api/show/KEY` adds ancestors, children, dependencies, dependents, the close gates and whether the item can be discarded, with the reason when it cannot. `taskman close` uses the same close gates. The response has an `etag`. `GET /api/show/KEY?etag=ETAG` with the current `etag` returns only `{etag, unchanged: true}`.
 - `POST /api/edit` with `base_title` and `base_body` returns 409 with the current text when another actor changed the title or description after the editor opened. Comments, assignee and label changes do not cause a conflict. Without `body`, `POST /api/edit` keeps the description. The `reason` is optional; a reason that is not empty becomes a decision comment.
 - `POST /api/fields` sets the assignee and the labels in one transaction.
+- `POST /api/finalize` finalizes a draft that meets the definition of ready; it answers 400 with the failed checks otherwise. `GET /api/show/KEY` gives `ready_gates` for a draft and `link` for every item.
 - `POST /api/repositories` replaces the repositories of an open item. `GET /api/show/KEY` gives `inherited_repositories`.
 - `POST /api/move` with `status` `backlog`, `active` or `done` moves the item, as `taskman move` does. A move to `done` closes the item through the close gates.
 - `POST /api/reorder` moves an item to a one-based `position` among its siblings, as `taskman reorder --position` does. The top-level items of each project have their own order.

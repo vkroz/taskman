@@ -21,12 +21,14 @@ taskman new --type epic --title "Outcome" --project PROJECT --body-file requirem
 taskman new --type feat --title "Story" --parent PARENT_KEY --body-file story.md --json
 taskman new --title "Work" --parent PARENT_KEY --body-file task.md --json
 taskman depend TASK_KEY --on DEPENDENCY_KEY
+taskman repo PARENT_KEY github.com/OWNER/NAME
+taskman comment TASK_KEY --kind review --result pass --body-file review.md
 taskman finalize TASK_KEY
 ```
 
 A top-level item needs `--project` with the project key (2-10 uppercase letters or digits); Taskman creates the project on first use. A child gets the project of its parent, and dependencies stay inside one project. Replace placeholders with returned keys. `depend` replaces the dependency list; repeat `--on` to retain multiple dependencies. `--clear` removes it. Use parent relationships for decomposition and dependencies for execution order. Independent tasks may run in parallel if the host supports it and shared files remain coordinated.
 
-Items begin as drafts. Finalize a draft only when the user agrees to its scope in this conversation. A request to work on "the first task" does not approve a draft. Leave unresolved drafts open; `discard` removes only an unreferenced draft leaf. Finalize ancestors before executing children.
+Items begin as drafts. Finalize a draft only when the user agrees to its scope in this conversation. `finalize` also needs a title, a description beyond the title heading, a repository on the item or an ancestor, and a latest `review` comment that passed at the current revision; [composition guidance](../rules/task-composition.md) gives the reviewer checklist. Name repositories on the top-level item, so that children inherit them. A request to work on "the first task" does not approve a draft. Leave unresolved drafts open; `discard` removes only an unreferenced draft leaf. Finalize ancestors before executing children.
 
 ## Execute and comment
 

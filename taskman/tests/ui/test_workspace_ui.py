@@ -28,6 +28,7 @@ from taskman.storage.settings import StorageSettings
 from taskman.storage.sql import connect
 from taskman.storage.sql_store import open_sql_store
 from tests.ui_seed import seed
+from tests import ready
 
 REQUIRE_BROWSER = os.environ.get("TASKMAN_TEST_REQUIRE_BROWSER", "").strip() == "1"
 
@@ -66,12 +67,13 @@ def _free_port() -> int:
 class Server:
     """``taskman ui`` on a SQLite database file, in its own process."""
 
-    def __init__(self, db: Path, home: Path) -> None:
+    def __init__(self, db: Path, home: Path, extra: dict[str, str] | None = None) -> None:
         self.port = _free_port()
         self.base = f"http://127.0.0.1:{self.port}"
         env = {k: v for k, v in os.environ.items() if not k.startswith("TASKMAN_")}
         # TMPDIR keeps the server's pid file away from a real `taskman ui`.
         env.update(HOME=str(home), TMPDIR=str(home), TASKMAN_BACKEND="sqlite", TASKMAN_DATABASE_URL=f"sqlite://{db}")
+        env.update(extra or {})
         command = [str(Path(sys.executable).with_name("taskman")), "ui", "--port", str(self.port), "--no-browser"]
         self.process = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         deadline = time.monotonic() + 20
@@ -800,7 +802,7 @@ def test_repositories_save_in_place_and_a_child_shows_the_inherited_ones(rw, des
 
     # A closed child shows the repositories that it inherits, read-only.
     agent = agent_store(tmp_path)
-    lifecycle.finalize(agent, child)
+    ready.finalize(agent, child)
     lifecycle.record(agent, child, "summary", "Codex", "Done.")
     lifecycle.record(agent, child, "verification", "Codex", "Passed.", "pass")
     lifecycle.close(agent, child)
@@ -809,6 +811,143 @@ def test_repositories_save_in_place_and_a_child_shows_the_inherited_ones(rw, des
     expect(desktop.locator("#preview [data-repositories]")).to_have_text(
         "Repositories: github.com/acme/billing, github.com/acme/usage (from RES-1)")
     expect(desktop.locator("#repositories-field")).to_have_count(0)
+
+
+def _copied(page) -> list[str]:
+    """Record what the page copies, without the system clipboard."""
+    page.evaluate("""() => { window.copied = [];
+      Object.defineProperty(navigator, 'clipboard', { configurable: true,
+        value: { writeText: async (text) => { window.copied.push(text); } } }); }""")
+    return page
+
+
+@pytest.mark.parametrize("viewport", ["desktop", "mobile"])
+def test_a_draft_shows_its_readiness_checks_and_finalizes_when_they_pass(chromium, rw, request, tmp_path, viewport):
+    page = request.getfixturevalue(viewport)
+    visit(page, rw, "/?view=drafts&item=TM-13")
+    expect(detail_key(page)).to_have_text("TM-13")
+    card = page.locator('#preview [data-card="ready"]')
+    expect(card.locator(".section-title")).to_contain_text("Definition of ready")
+    checks = card.locator(".gate")
+    expect(checks).to_have_count(4)
+    assert checks.evaluate_all("gs => gs.map(g => [g.dataset.check, g.dataset.ok])") == [
+        ["title", "true"], ["description", "false"], ["repositories", "false"], ["review", "false"]]
+    finalize = page.locator("#finalize")
+    expect(finalize).to_be_disabled()
+    expect(finalize).to_have_text("Finalize (3 checks open)")
+    # The button stays in the Tab order, so its cause reaches keyboard and screen-reader users.
+    finalize.focus()
+    expect(finalize).to_be_focused()
+    expect(finalize).to_have_accessible_description(re.compile("Description is empty"))
+    # A click on the blocked button sends nothing: waiting for the request times out.
+    with pytest.raises(Exception, match="Timeout"):
+        with page.expect_request(lambda r: r.url.endswith("/api/finalize"), timeout=500):
+            finalize.click(force=True)
+    expect(page.locator("#finalize-cause")).to_contain_text("Description is empty")
+    expect(page.locator("#finalize-cause")).to_contain_text("No repository on the item or an ancestor")
+
+    agent = agent_store(tmp_path)
+    lifecycle.update_body(agent, "TM-13", "# Rename the --kind option\n\nThe outcome.\n")
+    lifecycle.set_repositories(agent, "TM-13", ["github.com/vkroz/taskman"])
+    lifecycle.record(agent, "TM-13", "review", "Codex", "The checklist passes.", "pass")
+    agent.close()
+    visit(page, rw, "/?view=drafts&item=TM-13")
+    expect(page.locator('#preview [data-card="ready"] .verdict')).to_have_text("Ready to finalize")
+    expect(page.locator("#finalize")).to_be_enabled()
+    expect(row(page, "TM-13")).to_have_count(1)
+    expect(page.locator("#preview .props .chip-draft")).to_have_count(1)
+    drafts = page.locator('button[data-view="drafts"] .n-count')
+    before = int(drafts.inner_text())
+    page.locator("#finalize").click()
+    expect(page.locator("#toasts")).to_contain_text("TM-13 finalized")
+    eventually(lambda: rw.api("/api/show/TM-13")["frontmatter"]["draft"] is False)
+    expect(page.locator('#preview [data-card="ready"]')).to_have_count(0)
+    expect(page.locator("#preview .props .chip-draft")).to_have_count(0)
+    expect(row(page, "TM-13")).to_have_count(0)  # the Drafts view no longer holds it
+    expect(drafts).to_have_text(str(before - 1))
+    expect(page.locator("#detail-title")).to_be_focused()
+
+
+def test_a_refused_finalize_reloads_the_failed_checks(chromium, rw, desktop, tmp_path):
+    agent = agent_store(tmp_path)
+    lifecycle.update_body(agent, "TM-13", "# Rename the --kind option\n\nThe outcome.\n")
+    lifecycle.set_repositories(agent, "TM-13", ["github.com/vkroz/taskman"])
+    lifecycle.record(agent, "TM-13", "review", "Codex", "The checklist passes.", "pass")
+    visit(desktop, rw, "/?view=drafts&item=TM-13")
+    expect(desktop.locator("#finalize")).to_be_enabled()
+    # Another writer changes the description after the page showed it: the review is stale.
+    lifecycle.update_body(agent, "TM-13", "# Rename the --kind option\n\nThe outcome, changed.\n")
+    agent.close()
+    desktop.locator("#finalize").click()
+    expect(desktop.locator("#toasts")).to_contain_text("Not finalized: cannot finalize TM-13")
+    expect(desktop.locator('#preview [data-card="ready"] .verdict')).to_have_text("Not ready · 1 check open")
+    expect(desktop.locator("#finalize")).to_be_disabled()
+    expect(desktop.locator("#finalize-cause")).to_contain_text("stale at rev 2")
+    assert rw.api("/api/show/TM-13")["frontmatter"]["draft"] is True
+
+
+def test_a_long_repository_address_stays_inside_the_card_on_a_phone(chromium, rw, mobile, tmp_path):
+    agent = agent_store(tmp_path)
+    lifecycle.set_repositories(agent, "TM-13", ["github.com/" + "organization" * 6 + "/repository"])
+    agent.close()
+    visit(mobile, rw, "/?view=drafts&item=TM-13")
+    card = mobile.locator('#preview [data-card="ready"]')
+    expect(card).to_be_visible()
+    assert card.evaluate("c => c.scrollWidth <= c.clientWidth && c.getBoundingClientRect().right <= innerWidth")
+
+
+@pytest.fixture
+def remote_ui(seed_db, tmp_path):
+    """`taskman ui` that reaches a local `taskman serve` on a copy of the seed, as with a shared server."""
+    db = _copy(seed_db, tmp_path)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("TASKMAN_")}
+    env.update(HOME=str(tmp_path), TMPDIR=str(tmp_path), TASKMAN_BACKEND="sqlite", TASKMAN_DATABASE_URL=f"sqlite://{db}")
+    taskman = str(Path(sys.executable).with_name("taskman"))
+    token = subprocess.run([taskman, "token", "create", "--person", "Vlad"], env=env, capture_output=True,
+                           text=True, check=True).stdout.strip().splitlines()[-1]
+    port = _free_port()
+    serve = subprocess.Popen([taskman, "serve", "--port", str(port)], env=env,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    url = f"http://127.0.0.1:{port}"
+    try:
+        eventually(lambda: _answers(url + "/readyz"), timeout=20)
+        ui = Server(tmp_path / "unused.db", tmp_path, {"TASKMAN_SERVER_URL": url, "TASKMAN_TOKEN": token})
+        ui.server_url = url
+        yield ui
+        ui.stop()
+    finally:
+        serve.terminate()
+        serve.wait(timeout=5)
+
+
+def _answers(url: str) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+@pytest.mark.parametrize("viewport", ["desktop", "mobile"])
+def test_copy_link_with_a_server_copies_the_server_address_and_the_key(chromium, remote_ui, request, viewport):
+    page = request.getfixturevalue(viewport)
+    visit(page, remote_ui, "/?item=RES-5")
+    expect(detail_key(page)).to_have_text("RES-5")
+    _copied(page)
+    page.get_by_role("button", name="Copy link").click()
+    expect(page.locator("#toasts")).to_contain_text("Copied link")
+    assert page.evaluate("window.copied") == [f"{remote_ui.server_url}/items/RES-5"]
+
+
+@pytest.mark.parametrize("viewport", ["desktop", "mobile"])
+def test_copy_link_without_a_server_copies_the_key(chromium, rw, request, viewport):
+    page = request.getfixturevalue(viewport)
+    visit(page, rw, "/?item=RES-5")
+    expect(detail_key(page)).to_have_text("RES-5")
+    _copied(page)
+    page.get_by_role("button", name="Copy link").click()
+    expect(page.locator("#toasts")).to_contain_text("Copied link")
+    assert page.evaluate("window.copied") == ["RES-5"]
 
 
 def test_text_typed_while_a_save_reloads_the_item_is_kept(rw, desktop):
@@ -901,8 +1040,8 @@ def test_status_field_names_the_ancestor_that_refuses_the_move(rw, desktop, tmp_
     agent = agent_store(tmp_path)
     try:
         with agent.lock():
-            lifecycle.finalize(agent, under_draft)
-            lifecycle.finalize(agent, under_blocked)
+            ready.finalize(agent, under_draft)
+            ready.finalize(agent, under_blocked)
     finally:
         agent.close()
     active = "#status-field option[value=active]"
@@ -968,7 +1107,7 @@ def test_status_choices_follow_a_title_save_while_the_status_field_has_focus(rw,
     agent = agent_store(tmp_path)
     try:
         with agent.lock():
-            lifecycle.finalize(agent, key)
+            ready.finalize(agent, key)
     finally:
         agent.close()
     rw.api("/api/comment", {"id": key, "kind": "summary", "text": "Done."})
@@ -1051,7 +1190,7 @@ def test_closing_from_the_status_field_makes_the_item_read_only(rw, desktop, tmp
     agent = agent_store(tmp_path)
     try:
         with agent.lock():
-            lifecycle.finalize(agent, key)
+            ready.finalize(agent, key)
     finally:
         agent.close()
     rw.api("/api/comment", {"id": key, "kind": "summary", "text": "Done."})
@@ -1109,7 +1248,7 @@ def test_sort_by_type_follows_the_type_order_in_a_flat_view(rw, desktop, tmp_pat
     try:
         with agent.lock():
             for key in keys.values():
-                lifecycle.finalize(agent, key)
+                ready.finalize(agent, key)
     finally:
         agent.close()
     visit(desktop, rw, "/?view=ready&project=SORT&sort=type")
@@ -1205,6 +1344,25 @@ def test_create_and_comment(rw, desktop):
     desktop.keyboard.press("Control+Enter")
     expect(desktop.locator("dialog[open] .field-error:visible")).to_have_text("Choose the verification result")
     assert not [url for url in seen if url.endswith("/api/comment")]
+
+
+def test_a_review_comment_takes_pass_or_fail(rw, desktop):
+    visit(desktop, rw, "/?item=TM-13")
+    open_menu_item(desktop, "Add comment")
+    desktop.select_option("dialog[open] select[name=kind]", "review")
+    pills = desktop.locator("dialog[open] fieldset.pills .pill:visible")
+    expect(pills).to_have_text(["Pass", "Fail"])
+    desktop.fill("dialog[open] textarea[name=text]", "Outcome, scope and criteria are clear.")
+    desktop.keyboard.press("Control+Enter")
+    expect(desktop.locator("dialog[open] .field-error:visible")).to_have_text("Choose the review result")
+    desktop.click("dialog[open] .pill:has-text('Pass')")
+    desktop.keyboard.press("Control+Enter")
+    expect(desktop.locator("dialog[open]")).to_have_count(0)
+    journal = rw.api("/api/show/TM-13")["frontmatter"]["journal"]
+    assert (journal[-1]["kind"], journal[-1]["result"]) == ("review", "pass")
+    entry = desktop.locator('#preview .entry[data-kind="review"]')
+    expect(entry.locator(".kind")).to_have_text("Review")
+    expect(entry.locator(".result")).to_have_text("Pass")
 
 
 # ---- 12. errors and connection (P0-13) ----

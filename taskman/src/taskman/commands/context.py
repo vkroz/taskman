@@ -33,10 +33,10 @@ def update(
 
 def comment(
     item_id: str = typer.Argument(...),
-    kind: str = typer.Option(..., "--kind", help="decision, progress, handoff, summary, or verification."),
+    kind: str = typer.Option(..., "--kind", help="decision, progress, handoff, summary, verification, or review."),
     body: str | None = typer.Option(None, "--body", help="The comment text. Give this or --body-file."),
     body_file: str | None = typer.Option(None, "--body-file", help="Evidence or context; - reads stdin."),
-    result: str | None = typer.Option(None, "--result", help="Verification only: pass, fail, or blocked."),
+    result: str | None = typer.Option(None, "--result", help="Verification: pass, fail, or blocked. Review: pass or fail."),
     actor: str | None = typer.Option(None, "--actor", help="Author of the comment. Default: the person of the token on a server, the git user.name with a local database."),
 ) -> None:
     """Add an attributed comment without replacing another agent's context. `record` is an alias."""
