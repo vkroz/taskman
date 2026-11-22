@@ -85,6 +85,8 @@ LIFECYCLE
   search    Find items by key, slug, title or description text.
   browse    Query items by field and emit JSON that keeps the hierarchy.
   show      Print an item's fields and description.
+  locate    Find the item of a key or a copied link, and check that this
+            directory is a checkout of one of its repositories.
   context   Read item, ancestors, descendants, dependencies and activity as
             JSON, with a cursor. `--since CURSOR` gives only the comments
             and field changes after that cursor, and the next cursor.

@@ -96,7 +96,7 @@ taskman validate
 
 The UI refreshes as agents change tasks. `taskman validate` checks the dependency graph for unknown dependencies and cycles; acceptance testing is separate. Use `taskman help` for storage rules and `taskman COMMAND --help` for syntax.
 
-The plugin supplies define, design, plan, implement and validate skills, plus optional review, commenting, commit and documentation skills. Skills use the same task records on either platform.
+The plugin supplies define, design, review, plan, implement and validate skills, plus optional code review, commenting, commit and documentation skills. Skills use the same task records on either platform.
 
 ### Push new comments into a Claude Code session
 
