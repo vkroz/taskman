@@ -5,6 +5,7 @@ import json
 
 import typer
 
+from taskman import lifecycle
 from taskman.storage.store import open_store
 
 
@@ -22,13 +23,20 @@ def show(
         typer.echo(f"Error: {item.error}", err=True)
         raise typer.Exit(1)
 
+    inherited = None
+    if not item.metadata.get("repositories") and item.parent_id:
+        inherited = lifecycle.inherited_repositories(item, {other.id: other for other in store.items()})
+
     if as_json:
         payload = {
             "frontmatter": item.metadata,
             "body": item.body,
             "path": item.location,
+            "inherited_repositories": inherited,
         }
         typer.echo(json.dumps(payload, indent=2, default=str))
         return
 
     typer.echo(store.document(item_id))
+    if inherited:
+        typer.echo(f"Repositories inherited from {inherited['from']}: {', '.join(inherited['addresses'])}")

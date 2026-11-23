@@ -22,7 +22,7 @@ def _item(title: str) -> str:
 def _item_under(title: str, parent: str) -> str:
     """Create a finalized child item; return its key."""
     key = sql.new(title, parent=parent)
-    sql.run("finalize", key)
+    sql.finalize(key)
     return key
 
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from taskman import lifecycle as L
 from taskman.storage.store import Store
+from tests import ready
 
 
 def seed(store: Store) -> None:
@@ -17,7 +18,7 @@ def seed(store: Store) -> None:
         with store.lock():
             item = L.create(store, title, typ, parent, body, project=project)
             if final:
-                L.finalize(store, item.id)
+                ready.finalize(store, item.id)
         return item.id
 
     def done(key, actor="Claude Code"):

@@ -47,7 +47,7 @@ ITEMS AND KEYS
   type       epic | feat | task | bugfix. A bugfix is a task that fixes a
              bug. Change the type with `convert`.
   status     backlog | active | done.
-  draft      A new item is a draft until `finalize`.
+  draft      A new item is a draft until `finalize`. See DEFINITION OF READY.
 
   A new top-level item needs --project KEY; Taskman creates the project on
   first use. A child gets the project of its parent. Dependencies stay inside
@@ -55,9 +55,10 @@ ITEMS AND KEYS
   an unknown key, every command prints `Error: item not found: KEY` and
   exits with code 1.
 
-  A comment has a kind: decision, progress, handoff, summary or
-  verification. A verification comment has a result: pass, fail or blocked.
-  Nobody can change or delete a comment.
+  A comment has a kind: decision, progress, handoff, summary, verification
+  or review. A verification comment has a result: pass, fail or blocked. A
+  review comment has a result: pass or fail. Nobody can change or delete a
+  comment.
 
   Each change to a field writes an activity entry with its author and time.
   The author is the --actor value. Without it, the author is the person of
@@ -70,7 +71,8 @@ LIFECYCLE
 
   new       Create a draft work item (top-level with --project, or nested
             with --parent). Give the title as TITLE or with --title.
-  finalize  Clear the draft marker after the user reviews.
+  finalize  Clear the draft marker when the item meets the definition of
+            ready. Otherwise name each check that fails.
   move      Change status. Children keep their own status.
   convert   Change an item's type. An item with children cannot become a task.
   close     Mark a completed item done. Requires all descendants and
@@ -83,8 +85,11 @@ LIFECYCLE
   search    Find items by key, slug, title or description text.
   browse    Query items by field and emit JSON that keeps the hierarchy.
   show      Print an item's fields and description.
+  locate    Find the item of a key or a copied link, and check that this
+            directory is a checkout of one of its repositories.
   context   Read item, ancestors, descendants, dependencies and activity as
-            JSON.
+            JSON, with a cursor. `--since CURSOR` gives only the comments
+            and field changes after that cursor, and the next cursor.
   update    Replace an open item's description using --body-file.
   edit      Change an open item's title and description, with a reason.
   depend    Replace dependencies with repeated --on keys, or --clear.
@@ -92,15 +97,50 @@ LIFECYCLE
             List the unfinished dependencies of an item and its ancestors.
   dependents
             List the open items that depend on an item.
-  comment   Add a decision, progress, handoff, summary or verification
-            comment. `record` is an alias.
+  comment   Add a decision, progress, handoff, summary, verification or
+            review comment. `record` is an alias.
   assign    Set the assignee of an open item; `unassign` removes it.
   label     Add or remove labels of an open item.
+  repo      Show, replace or clear the repositories of an item: git remote
+            addresses such as github.com/OWNER/NAME. Without own
+            repositories, an item inherits those of its nearest ancestor.
   activity  Show the field changes of an item.
   reorder   Move an open item to another position among its siblings.
   discard   Remove an unreferenced draft leaf.
   install   Install the shared plugin using repeated --platform targets.
+  channel   Run a Claude Code channel (MCP server on stdin and stdout) that
+            pushes new comments of the watched item into the session.
   validate  Check the dependency graph: unknown dependencies and cycles.
+
+================================================================================
+DEFINITION OF READY
+================================================================================
+
+  `finalize` succeeds only when all of these are true:
+
+  - The description holds more than a first heading that repeats the title.
+  - The item or an ancestor names at least one repository (`repo`).
+  - The title is not empty.
+  - The latest `review` comment has result `pass` and was recorded at the
+    current revision. A change that makes the revision advance makes the
+    review stale.
+
+  The reviewer, an agent or a person, records the review with
+  `taskman comment KEY --kind review --result pass|fail`. Its text gives the
+  result of each check of the reviewer checklist:
+
+  - Outcome: what is true when the item is done.
+  - Scope: what is in and what is out.
+  - Acceptance criteria: each one is observable.
+  - Verification: the exact local check for each criterion.
+  - Bugfix: steps to reproduce, expected behavior and actual behavior.
+  - Dependencies: each one is named, with its order.
+  - Size: a task or bugfix fits one change; a larger item needs children.
+  - Code context: the reviewer read the affected code, and the item names
+    the affected area.
+  - Clarity: no open question and no undefined term.
+
+  Taskman checks that a current review passed; it does not judge the text.
 
 ================================================================================
 INVARIANTS

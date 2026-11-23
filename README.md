@@ -48,9 +48,11 @@ taskman new --type feat --title "Persist conversations" --parent EPIC_ID --body-
 taskman new --title "Save messages" --parent STORY_ID --body-file task.md --json
 ```
 
-Replace the uppercase placeholders with the keys returned by `new`. `new` also takes the title as an argument, for example `taskman new "Save messages" --parent STORY_ID`. New items are drafts. Finalize items once their scope is agreed; finalize their ancestors too before execution.
+Replace the uppercase placeholders with the keys returned by `new`. `new` also takes the title as an argument, for example `taskman new "Save messages" --parent STORY_ID`. New items are drafts. Finalize items once their scope is agreed; finalize their ancestors too before execution. `finalize` applies the definition of ready: a title, a description beyond the title heading, a repository on the item or an ancestor, and a latest readiness review that passed at the current revision. `taskman help` gives the reviewer checklist.
 
 ```sh
+taskman repo TASK_ID github.com/OWNER/NAME
+taskman comment TASK_ID --kind review --result pass --body-file review.md
 taskman finalize TASK_ID
 taskman depend REVIEW_ID --on TASK_ID
 taskman ready --json
@@ -86,12 +88,35 @@ Closed tasks are immutable. Further changes belong in a new task that references
 taskman ui
 taskman list --recursive --json
 taskman context TASK_ID
+taskman context TASK_ID --since CURSOR
 taskman validate
 ```
 
+`context` ends with a `cursor`. `context --since CURSOR` prints only the comments and field changes of the item after that cursor, and the next cursor. A description change shows as a note with the current revision of the item, without its text. When nothing is new, the output is one line. So an agent that refreshes during its work adds only the new content to its context.
+
 The UI refreshes as agents change tasks. `taskman validate` checks the dependency graph for unknown dependencies and cycles; acceptance testing is separate. Use `taskman help` for storage rules and `taskman COMMAND --help` for syntax.
 
-The plugin supplies define, design, plan, implement and validate skills, plus optional review, commenting, commit and documentation skills. Skills use the same task records on either platform.
+The plugin supplies define, design, review, plan, implement and validate skills, plus optional code review, commenting, commit and documentation skills. Skills use the same task records on either platform.
+
+### Push new comments into a Claude Code session
+
+`taskman channel` is a Claude Code channel: a local MCP (Model Context Protocol) server that pushes the new comments of one item into a running Claude Code session. The agent does not poll and does not restart. Channels are a research preview of Claude Code: the flags and the protocol can change.
+
+1. Name the server in the `.mcp.json` file of the project:
+
+   ```json
+   {"mcpServers": {"taskman": {"command": "taskman", "args": ["channel"]}}}
+   ```
+
+2. Start Claude Code in an interactive terminal with the channel enabled. Claude Code ignores the flag with `-p`. Choose "I am using this for local development" in the dialog that follows.
+
+   ```bash
+   claude --dangerously-load-development-channels server:taskman
+   ```
+
+3. Give the agent an item. The agent calls the `watch` tool of the channel with the key and its own author name.
+
+Every 10 seconds (`--interval`), the channel reads the item with `context --since` and pushes the read when it holds new comments or field changes by others. Comments on other items and the agent's own comments and changes do not arrive. Claude Code holds an event that arrives during a turn and delivers it on the next turn. Events arrive only while the session is open. On claude.ai Team and Enterprise plans, an Owner must turn on channels (`channelsEnabled`) first. Without the flag, Claude Code runs the server as a plain MCP server, and the agent refreshes with `context --since` at each step.
 
 ## Storage settings
 
@@ -114,9 +139,12 @@ Error messages never show a password or a connection URL.
 taskman assign TM-42 claude-code
 taskman unassign TM-42
 taskman label TM-42 --add backend --remove ui
+taskman repo TM-42 git@github.com:vkroz/taskman.git
 taskman list --assignee claude-code --label backend
 taskman activity TM-42
 ```
+
+`repo` names the repositories that the work of an item is about. Taskman stores each one as host and path, here `github.com/vkroz/taskman`, and refuses a local or relative path. Without arguments, `repo` shows the repositories of the item. `--clear` removes them. An item without own repositories inherits those of its nearest ancestor; `show`, `context` and `list --json` give them as `inherited_repositories`. A change of repositories makes the revision advance.
 
 `context` includes the activity of the item. A done item keeps its position among its siblings.
 
@@ -274,7 +302,7 @@ Python code is under `taskman/src/taskman/`; plugin sources are under `plugins/t
 
 Run `taskman ui` for the local workspace. The sidebar selects a view (Attention, Active, Ready, Blocked, Drafts, Backlog or Done) and a project. Search, facet filters and the epic scope apply at once and stay in the URL. Sort orders siblings; drag an open item to change its position within its parent and project. Select a row to open its details; Back or Esc closes them. [docs/ui-design.md](docs/ui-design.md) describes the page.
 
-Create work with **New**; a top-level item needs a project key. Details show the state, blockers, close readiness and one timeline of comments and changes. In open work, click the title, the description, the status, the assignee or the labels to change them. Each field saves when it loses focus; Esc cancels. A reason for a title or description change is optional; a given reason becomes a decision comment. The status offers only the moves that the lifecycle allows now, and Done needs all close checks. The menu offers **Add comment** with a kind (and a result for a verification) and **Delete draft** for draft leaves with no incoming dependencies. Finalized and completed work cannot be deleted. Completed work shows read-only fields. Agents finalize items through the CLI.
+Create work with **New**; a top-level item needs a project key. Details show the state, blockers, close readiness and one timeline of comments and changes. In open work, click the title, the description, the status, the assignee, the labels or the repositories to change them. Each field saves when it loses focus; Esc cancels. A reason for a title or description change is optional; a given reason becomes a decision comment. The status offers only the moves that the lifecycle allows now, and Done needs all close checks. The menu offers **Add comment** with a kind (and a result for a verification or a review) and **Delete draft** for draft leaves with no incoming dependencies. Finalized and completed work cannot be deleted. Completed work shows read-only fields. A draft shows its definition of ready: each check with pass or fail, and **Finalize**, which stays disabled while a check fails and names the cause. **Copy link** in the item header copies the server address and the key, for example `https://taskman.example.com/items/TM-42`, to paste into a coding session; without a server it copies the key.
 
 The same operations are available from the CLI:
 

@@ -22,6 +22,7 @@ from taskman.storage.sql_store import SqlStore, open_sql_store
 from taskman.storage.store import StorageConfigError, StorageError
 from taskman.storage.remote import RemoteStore
 from tests.conftest import RunningServer, postgres_test_settings, reset_postgres
+from tests import ready
 
 
 def _empty_postgres(tmp_path) -> StorageSettings:
@@ -93,7 +94,7 @@ def _ready_to_close(store, item_id) -> None:
 
 
 def _closed(store, item_id) -> None:
-    lifecycle.finalize(store, item_id)
+    ready.finalize(store, item_id)
     _ready_to_close(store, item_id)
     lifecycle.close(store, item_id)
 
@@ -247,7 +248,7 @@ def test_activation_requires_finalized_items_and_done_dependencies(store):
     lifecycle.set_dependencies(store, work, [dep])
     with pytest.raises(LifecycleError, match="finalize"):
         lifecycle.move(store, work, "active")
-    lifecycle.finalize(store, work)
+    ready.finalize(store, work)
     with pytest.raises(LifecycleError, match="dependency is not done"):
         lifecycle.move(store, work, "active")
     _closed(store, dep)
@@ -265,11 +266,11 @@ def test_ready_needs_finalized_unblocked_ancestors(store):
     child = _new(store, "Child", "task", feat)
     dep = _new(store, "Dep")
     lifecycle.set_dependencies(store, feat, [dep])
-    lifecycle.finalize(store, child)
+    ready.finalize(store, child)
     assert child not in ready_ids()  # parent is still a draft
-    lifecycle.finalize(store, feat)
+    ready.finalize(store, feat)
     assert child not in ready_ids()  # parent waits on dep
-    lifecycle.finalize(store, dep)
+    ready.finalize(store, dep)
     assert ready_ids() == {dep}
     _ready_to_close(store, dep)
     lifecycle.close(store, dep)
@@ -290,7 +291,7 @@ def test_verification_comments_require_a_result(store):
 
 def test_close_requires_summary_and_passing_verification(store):
     item = _new(store, "Item")
-    lifecycle.finalize(store, item)
+    ready.finalize(store, item)
     with pytest.raises(LifecycleError, match="passing verification"):
         lifecycle.close(store, item)
     lifecycle.record(store, item, "verification", "pytest", "failed", "fail")
@@ -308,7 +309,7 @@ def test_close_requires_summary_and_passing_verification(store):
 def test_close_requires_finished_descendants(store):
     feat = _new(store, "Feature", "feat")
     _new(store, "Child", "task", feat)
-    lifecycle.finalize(store, feat)
+    ready.finalize(store, feat)
     _ready_to_close(store, feat)
     with pytest.raises(LifecycleError, match="descendants not in done"):
         lifecycle.close(store, feat)
@@ -316,7 +317,7 @@ def test_close_requires_finished_descendants(store):
 
 def test_body_change_invalidates_earlier_evidence(store):
     item = _new(store, "Item")
-    lifecycle.finalize(store, item)
+    ready.finalize(store, item)
     _ready_to_close(store, item)
     lifecycle.update_body(store, item, "Changed requirements.\n")
     with pytest.raises(LifecycleError, match="current revision"):
@@ -326,7 +327,7 @@ def test_body_change_invalidates_earlier_evidence(store):
 def test_child_change_invalidates_parent_evidence(store):
     feat = _new(store, "Feature", "feat")
     child = _new(store, "Child", "task", feat)
-    lifecycle.finalize(store, feat)
+    ready.finalize(store, feat)
     _closed(store, child)
     _ready_to_close(store, feat)
     before = store.get(feat).metadata["revision"]
@@ -347,11 +348,14 @@ def test_revision_counts_requirement_changes_only(store):
         lambda: lifecycle.update_body(store, item, "New body"),
         lambda: lifecycle.set_dependencies(store, item, [dep]),
         lambda: lifecycle.convert(store, item, "feat"),
+        lambda: lifecycle.set_repositories(store, item, ["github.com/o/r"]),
     ):
         before = revision()
         change()
         assert revision() == before + 1
     lifecycle.create(store, "Sibling", "task", None, project="TM")
+    # The rest of the definition of ready, so that finalize below succeeds.
+    lifecycle.record(store, item, "review", "pytest", "checklist passes", "pass")
     before = revision()
     for change in (
         lambda: lifecycle.record(store, item, "handoff", "pytest", "next"),
@@ -365,6 +369,82 @@ def test_revision_counts_requirement_changes_only(store):
         change()
         assert revision() == before
     assert "rank" in _fields(store, item)
+
+
+# ---- definition of ready ----------------------------------------------------
+
+
+def test_a_review_passes_or_fails(store):
+    item = _new(store, "Item")
+    for result in (None, "blocked"):
+        with pytest.raises(LifecycleError, match="review requires --result pass|fail"):
+            lifecycle.record(store, item, "review", "pytest", "checked", result)
+    lifecycle.record(store, item, "review", "pytest", "outcome unclear", "fail")
+    lifecycle.record(store, item, "review", "pytest", "checklist passes", "pass")
+    assert [(e["kind"], e["result"]) for e in store.get(item).metadata["journal"]] == [("review", "fail"), ("review", "pass")]
+    # A review does not change the revision: it judges the current one.
+    assert store.get(item).metadata["revision"] == 0
+
+
+def test_finalize_names_each_check_that_fails(store):
+    item = _new(store, "Item")
+    with pytest.raises(LifecycleError) as refused:
+        lifecycle.finalize(store, item)
+    message = str(refused.value)
+    assert message.startswith(f"cannot finalize {item}")
+    for text in ("Description is empty", "No repository on the item or an ancestor",
+                 "Readiness review for rev 0: missing", "Review the item against the checklist",
+                 f"taskman comment {item} --kind review --result pass|fail"):
+        assert text in message
+    assert store.get(item).draft
+
+
+def test_finalize_needs_a_passing_review_for_the_current_revision(store):
+    parent = _new(store, "Parent", "feat")
+    item = lifecycle.create(store, "Item", "task", parent, "# Item\n\nThe outcome.\n").id
+    lifecycle.set_repositories(store, parent, ["github.com/o/r"])
+    lifecycle.record(store, item, "review", "pytest", "checklist passes", "pass")
+    lifecycle.record(store, item, "review", "pytest", "scope unclear", "fail")
+    # The latest review counts: a fail after a pass at the same revision refuses.
+    with pytest.raises(LifecycleError, match="Readiness review for rev 0: fail") as refused:
+        lifecycle.finalize(store, item)
+    assert "Fix the failed checks of the latest review" in str(refused.value)
+    lifecycle.record(store, item, "review", "pytest", "checklist passes", "pass")
+    lifecycle.update_body(store, item, "# Item\n\nThe outcome, refined.\n")
+    with pytest.raises(LifecycleError, match="Readiness review for rev 1: stale at rev 0"):
+        lifecycle.finalize(store, item)
+    lifecycle.record(store, item, "review", "pytest", "checklist passes", "pass")
+    # The repository comes from the parent.
+    assert lifecycle.finalize(store, item).draft is False
+    with pytest.raises(NoChange, match="not a draft"):
+        lifecycle.finalize(store, item)
+
+
+def test_ready_gates_report_each_check(store):
+    item = lifecycle.create(store, "Item", "task", None, "Requirements.\n", project="TM").id
+    lifecycle.set_repositories(store, item, ["github.com/o/r"])
+    items = {other.id: other for other in store.items()}
+    gates = {gate["check"]: gate for gate in lifecycle.ready_gates(items[item], items)}
+    assert [(g["check"], g["ok"]) for g in gates.values()] == [("title", True), ("description", True),
+                                                               ("repositories", True), ("review", False)]
+    assert gates["repositories"]["detail"] == "Repositories: github.com/o/r"
+    assert gates["review"]["detail"] == "Readiness review for rev 1: missing"
+
+
+@pytest.mark.parametrize("body", ["", "  \n", "# Item\n", "## Item\n\n", "#  Item  \n", "### Item"])
+def test_a_title_heading_alone_is_no_description(store, body):
+    item = lifecycle.create(store, "Item", "task", None, body or " ", project="TM").id
+    items = {other.id: other for other in store.items()}
+    assert lifecycle.ready_gates(items[item], items)[1] == {"check": "description", "ok": False,
+                                                            "detail": "Description is empty"}
+
+
+def test_a_blank_title_fails_the_gate(store):
+    item = lifecycle.create(store, "   ", "task", None, "The outcome.\n", project="TM").id
+    lifecycle.set_repositories(store, item, ["github.com/o/r"])
+    lifecycle.record(store, item, "review", "pytest", "checklist passes", "pass")
+    with pytest.raises(LifecycleError, match="Title is empty"):
+        lifecycle.finalize(store, item)
 
 
 def test_closed_items_are_immutable(store):
@@ -413,7 +493,7 @@ def test_edit_without_a_reason_adds_no_comment(store):
 def test_edit_without_a_description_keeps_it(store):
     draft = lifecycle.create(store, "Draft", "task", None, "Draft spec.\n", project="TM").id
     finalized = lifecycle.create(store, "Item", "task", None, "Item spec.\n", project="TM").id
-    lifecycle.finalize(store, finalized)
+    ready.finalize(store, finalized)
     for key, body in ((draft, "Draft spec.\n"), (finalized, "Item spec.\n")):
         edited = lifecycle.edit(store, key, "Renamed", None, "Rename only")
         assert (edited.title, edited.body) == ("Renamed", body)
@@ -460,6 +540,64 @@ def test_assignee_and_labels(store):
         lifecycle.label(store, item, ["a_b"], [])
 
 
+def test_repositories_are_stored_as_remote_addresses(store):
+    parent = _new(store, "Parent", "feat")
+    item = _new(store, "Item", parent=parent)
+    revision, parent_revision = (store.get(key).metadata["revision"] for key in (item, parent))
+    forms = ["git@github.com:vkroz/taskman.git", "https://github.com/vkroz/taskman", "github.com/vkroz/taskman",
+             "ssh://git@GitHub.com:22/vkroz/taskman/", "https://user@github.com/vkroz/taskman.git"]
+    for form in forms:
+        assert lifecycle.repository_address(form) == "github.com/vkroz/taskman"
+    saved = lifecycle.set_repositories(store, item, [*forms, "gitlab.com/group/sub/app"])
+    assert saved.metadata["repositories"] == ["github.com/vkroz/taskman", "gitlab.com/group/sub/app"]
+    assert store.get(item).metadata["repositories"] == ["github.com/vkroz/taskman", "gitlab.com/group/sub/app"]
+    # A change of scope: the revision of the item and of its ancestors advances.
+    assert store.get(item).metadata["revision"] == revision + 1
+    assert store.get(parent).metadata["revision"] == parent_revision + 1
+    entry = [e for e in store.activity(item) if e["field"] == "repositories"]
+    assert [(e["old"], e["new"]) for e in entry] == [("", "github.com/vkroz/taskman, gitlab.com/group/sub/app")]
+    with pytest.raises(NoChange):
+        lifecycle.set_repositories(store, item, ["gitlab.com/group/sub/app.git", "github.com/vkroz/taskman"])
+    assert lifecycle.set_repositories(store, item, []).metadata["repositories"] == []
+    assert store.get(item).metadata["revision"] == revision + 2
+
+
+@pytest.mark.parametrize("text", ["/Users/me/repo", "~/repo", "file:///Users/me/repo", "C:\\repo", "github.com",
+                                  "repo", "", "github.com/" + "x" * 200, "./taskman", "../x", "../../src/app",
+                                  "github.com/o/../r", "github.com/./r", "localhost/srv/repo",
+                                  "file://localhost/srv/repo", "-x.com/o/r", "github..com/o/r"])
+def test_a_local_path_or_a_partial_address_is_not_a_repository(store, text):
+    item = _new(store, "Item")
+    with pytest.raises(LifecycleError, match="remote address"):
+        lifecycle.set_repositories(store, item, [text])
+    assert store.get(item).metadata["repositories"] == []
+
+
+def test_an_item_inherits_the_repositories_of_its_nearest_ancestor(store):
+    epic = _new(store, "Epic", "epic")
+    feat = _new(store, "Feat", "feat", parent=epic)
+    task = _new(store, "Task", parent=feat)
+    lifecycle.set_repositories(store, epic, ["github.com/o/a"])
+    items = {item.id: item for item in store.items()}
+    assert lifecycle.inherited_repositories(items[task], items) == {"from": epic, "addresses": ["github.com/o/a"]}
+    assert lifecycle.inherited_repositories(items[epic], items) is None
+    lifecycle.set_repositories(store, feat, ["github.com/o/b"])
+    items = {item.id: item for item in store.items()}
+    assert lifecycle.inherited_repositories(items[task], items) == {"from": feat, "addresses": ["github.com/o/b"]}
+    lifecycle.set_repositories(store, task, ["github.com/o/c"])
+    items = {item.id: item for item in store.items()}
+    assert lifecycle.inherited_repositories(items[task], items) is None
+
+
+def test_closed_items_keep_their_repositories(store):
+    item = _new(store, "Item")
+    lifecycle.set_repositories(store, item, ["github.com/o/a"])
+    _closed(store, item)
+    with pytest.raises(LifecycleError, match="immutable"):
+        lifecycle.set_repositories(store, item, ["github.com/o/b"])
+    assert store.get(item).metadata["repositories"] == ["github.com/o/a"]
+
+
 def test_dependency_order_is_not_a_dependency_change(store):
     item, first, second = (_new(store, title) for title in ("Item", "First", "Second"))
     assert lifecycle.set_dependencies(store, item, [second, first]).depends_on == (first, second)
@@ -472,7 +610,8 @@ def test_each_field_change_writes_activity_and_comments_do_not(store):
     item = _new(store, "Item")
     _new(store, "Sibling")
     lifecycle.edit(store, item, "Renamed", "New body", "why")
-    lifecycle.finalize(store, item)
+    lifecycle.set_repositories(store, item, ["github.com/o/r"])
+    ready.finalize(store, item)
     lifecycle.set_dependencies(store, item, [dep])
     lifecycle.convert(store, item, "feat")
     lifecycle.assign(store, item, "codex")
@@ -483,7 +622,8 @@ def test_each_field_change_writes_activity_and_comments_do_not(store):
     _closed(store, dep)
     lifecycle.move(store, item, "active")
     assert _fields(store, item) == [
-        "created", "title", "description", "draft", "dependencies", "type", "assignee", "labels", "rank", "status",
+        "created", "title", "description", "repositories", "draft", "dependencies", "type", "assignee", "labels", "rank",
+        "status",
     ]
     entries = {entry["field"]: entry for entry in store.activity(item)}
     assert all(entry["author"] == "pytest" for entry in entries.values())
@@ -496,10 +636,12 @@ def test_each_field_change_writes_activity_and_comments_do_not(store):
 def test_last_change_time_follows_every_change(store):
     item = _new(store, "Item")
     dep = _new(store, "Dep")
+    ready.make_ready(store, item)
     for change in (
         lambda: lifecycle.record(store, item, "handoff", "pytest", "next"),
         lambda: lifecycle.set_dependencies(store, item, [dep]),
         lambda: lifecycle.label(store, item, ["db"], []),
+        lambda: lifecycle.record(store, item, "review", "pytest", "checklist passes", "pass"),
         lambda: lifecycle.finalize(store, item),
     ):
         before = store.get(item).modified

@@ -107,7 +107,7 @@ def test_new_allocates_sequential_keys(sqlite_env) -> None:
 def test_finalize_clears_draft(sqlite_env) -> None:
     key = sql.new("X")
     assert sql.show(key)["frontmatter"]["draft"] is True
-    sql.run("finalize", key)
+    sql.finalize(key)
     assert sql.show(key)["frontmatter"]["draft"] is False
 
 
@@ -118,7 +118,7 @@ def test_finalize_missing_id(sqlite_env) -> None:
 def test_finalize_parent_item(sqlite_env) -> None:
     parent = sql.new("Parent", "epic")
     sql.new("Child", parent=parent)
-    sql.run("finalize", parent)
+    sql.finalize(parent)
     assert sql.show(parent)["frontmatter"]["draft"] is False
 
 

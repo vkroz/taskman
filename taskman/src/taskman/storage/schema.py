@@ -35,38 +35,69 @@ _OLD_TYPE_CHECK = "CHECK (type IN ('epic', 'feat', 'task'))"
 _NEW_TYPE_CHECK = "CHECK (type IN ('epic', 'feat', 'task', 'bugfix'))"
 
 
-def _allow_bugfix_type(conn: Any, dialect: Dialect) -> None:
-    """Let ``items.type`` hold ``bugfix``. Rows, ids, keys and indexes stay as they are.
+def _widen_checks(conn: Any, dialect: Dialect, table: str, checks: dict[str, tuple[str, str]], purpose: str) -> None:
+    """Replace CHECK constraints of ``table`` with wider ones. Rows, ids, keys and indexes stay as they are.
 
-    Postgres replaces the named constraint. SQLite cannot alter a CHECK and its
+    ``checks`` maps each Postgres constraint name to its old and new CHECK text.
+    Postgres replaces the named constraints. SQLite cannot alter a CHECK and its
     usual table rebuild is unsafe here: with foreign keys on, which cannot change
     inside a transaction, ``DROP TABLE items`` deletes the comments, labels and
     activity of every item. So SQLite edits the stored table definition, the
     procedure that https://sqlite.org/lang_altertable.html gives to change CHECK
-    constraints. All existing rows satisfy the wider constraint.
+    constraints. All existing rows satisfy the wider constraints.
     """
     if dialect.name == "postgres":
-        conn.execute(
-            f"ALTER TABLE items DROP CONSTRAINT items_type_check, ADD CONSTRAINT items_type_check {_NEW_TYPE_CHECK}"
-        )
+        changes = ", ".join(f"DROP CONSTRAINT {name}, ADD CONSTRAINT {name} {new}" for name, (_, new) in checks.items())
+        conn.execute(f"ALTER TABLE {table} {changes}")
         return
     version = conn.execute("PRAGMA schema_version").fetchone()[0]
     conn.execute("PRAGMA writable_schema = ON")
     try:
-        conn.execute(
-            "UPDATE sqlite_master SET sql = replace(sql, ?, ?) WHERE type = 'table' AND name = 'items'",
-            (_OLD_TYPE_CHECK, _NEW_TYPE_CHECK),
-        )
+        for old, new in checks.values():
+            conn.execute(
+                "UPDATE sqlite_master SET sql = replace(sql, ?, ?) WHERE type = 'table' AND name = ?",
+                (old, new, table),
+            )
         # A new schema version makes every connection read the new definition.
         conn.execute(f"PRAGMA schema_version = {int(version) + 1}")
     finally:
         conn.execute("PRAGMA writable_schema = OFF")
-    sql = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'items'").fetchone()[0]
-    if _NEW_TYPE_CHECK not in sql:
-        raise StorageConfigError("The items table has an unexpected definition; cannot add the bugfix type.")
+    sql = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)).fetchone()[0]
+    if any(new not in sql for _, new in checks.values()):
+        raise StorageConfigError(f"The {table} table has an unexpected definition; cannot {purpose}.")
     problems = [row[0] for row in conn.execute("PRAGMA integrity_check").fetchall()]
     if problems != ["ok"]:
         raise StorageConfigError(f"The database failed its integrity check: {'; '.join(problems)}")
+
+
+def _allow_bugfix_type(conn: Any, dialect: Dialect) -> None:
+    """Let ``items.type`` hold ``bugfix``."""
+    _widen_checks(conn, dialect, "items", {"items_type_check": (_OLD_TYPE_CHECK, _NEW_TYPE_CHECK)},
+                  "add the bugfix type")
+
+
+_OLD_KIND_CHECK = "CHECK (kind IN ('decision', 'progress', 'handoff', 'summary', 'verification'))"
+_NEW_KIND_CHECK = "CHECK (kind IN ('decision', 'progress', 'handoff', 'summary', 'verification', 'review'))"
+_OLD_RESULT_CHECK = """CHECK (
+                    -- IS NOT NULL is required: a CHECK that evaluates to NULL passes.
+                    (kind = 'verification' AND result IS NOT NULL AND result IN ('pass', 'fail', 'blocked'))
+                    OR (kind <> 'verification' AND result IS NULL)
+                )"""
+_NEW_RESULT_CHECK = """CHECK (
+                    -- IS NOT NULL is required: a CHECK that evaluates to NULL passes.
+                    (kind = 'verification' AND result IS NOT NULL AND result IN ('pass', 'fail', 'blocked'))
+                    OR (kind = 'review' AND result IS NOT NULL AND result IN ('pass', 'fail'))
+                    OR (kind NOT IN ('verification', 'review') AND result IS NULL)
+                )"""
+
+
+def _allow_review_comments(conn: Any, dialect: Dialect) -> None:
+    """Let a comment have the kind ``review`` with the result ``pass`` or ``fail``."""
+    _widen_checks(conn, dialect, "comments", {
+        "comments_kind_check": (_OLD_KIND_CHECK, _NEW_KIND_CHECK),
+        # Postgres names a CHECK on two columns after the table only.
+        "comments_check": (_OLD_RESULT_CHECK, _NEW_RESULT_CHECK),
+    }, "add the review comment kind")
 
 
 MIGRATIONS: tuple[Migration, ...] = (
@@ -205,6 +236,20 @@ MIGRATIONS: tuple[Migration, ...] = (
         "index of login start times",
         ("CREATE INDEX logins_created_at ON logins (created_at)",),
     ),
+    Migration(
+        6,
+        "repositories of items",
+        (
+            """
+            CREATE TABLE repositories (
+                item_id {bigint} NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+                address TEXT NOT NULL CHECK (length(address) BETWEEN 1 AND 200),
+                PRIMARY KEY (item_id, address)
+            )
+            """,
+        ),
+    ),
+    Migration(7, "review comments", (), run=_allow_review_comments),
 )
 
 CURRENT_VERSION = MIGRATIONS[-1].version

@@ -28,12 +28,14 @@ from taskman.commands.auth import auth_app
 from taskman.commands.show import show as _show
 from taskman.commands.ui import ui as _ui
 from taskman.commands.validate import validate as _validate
-from taskman.commands.context import activity, assign, comment, context, update, depend, discard, label, unassign
+from taskman.commands.context import activity, assign, comment, context, update, depend, discard, label, repo, unassign
 from taskman.model.locking import mutating
 from taskman.storage.settings import load_env_file
 from taskman.storage.remote import remote_settings, server_url
 from taskman.storage.settings import storage_settings
 from taskman.storage.store import StorageConfigError, StorageError, begin_command, open_store
+from taskman.commands.channel import channel as _channel
+from taskman.commands.locate import locate as _locate
 from taskman.commands.install import install
 from taskman.commands.db import db_app
 from taskman.commands.collection import browse, edit, reorder
@@ -111,6 +113,7 @@ app.command("record", help="Alias of `comment`.")(_storage_errors(mutating(comme
 app.command("assign")(_storage_errors(mutating(assign)))
 app.command("unassign")(_storage_errors(mutating(unassign)))
 app.command("label")(_storage_errors(mutating(label)))
+app.command("repo")(_storage_errors(mutating(repo)))
 app.command("activity")(_storage_errors(activity))
 app.command("depend")(_storage_errors(mutating(depend)))
 app.command("discard")(_storage_errors(mutating(discard)))
@@ -124,6 +127,8 @@ app.command("waiting-on")(_storage_errors(_waiting_on))
 app.command("search")(_storage_errors(_search))
 app.command("ui")(_storage_errors(_ui))
 app.command("help")(_help)
+app.command("channel")(_channel)
+app.command("locate")(_storage_errors(_locate))
 # --- auxiliary or temporary commands ---
 app.command("convert")(_storage_errors(mutating(_convert)))
 app.add_typer(db_app, name="db")

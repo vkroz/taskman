@@ -29,6 +29,7 @@ def list_items(
     store = open_store()
     items = store.items()
     parents = {item.id: item.parent_id for item in items}
+    by_id = {item.id: item for item in items}
     if parent and parent not in parents:
         raise typer.BadParameter(f"parent not found: {parent}")
 
@@ -56,7 +57,7 @@ def list_items(
             continue
         if label is not None and label not in (item.metadata.get("labels") or []):
             continue
-        rows.append(_as_dict(item))
+        rows.append(_as_dict(item, by_id))
 
     if as_json:
         typer.echo(json.dumps(rows, indent=2))

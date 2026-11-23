@@ -19,6 +19,7 @@ from taskman.storage.remote import RemoteStore, remote_settings
 from taskman.storage.settings import load_env_file
 from taskman.storage.store import StorageConfigError, StorageError, item_data, item_from_data
 from tests.sql_helpers import comment, new, prepare, run, show
+from tests import sql_helpers
 
 SRC = str(Path(__file__).resolve().parents[1] / "src")
 
@@ -81,7 +82,7 @@ def test_list_and_ready_follow_the_order_set_with_reorder_through_the_server(rem
     feat = new("Feature", "feat")
     first, second = new("First", parent=feat), new("Second", parent=feat)
     for key in (feat, first, second):
-        run("finalize", key)
+        sql_helpers.finalize(key)
     run("reorder", second, "--position", "1")
 
     def keys(*args):
@@ -121,7 +122,7 @@ def test_a_newer_server_that_adds_item_fields_does_not_break_the_cli(remote_env,
     public = server._public
     monkeypatch.setattr(server, "_public", lambda item: public(item) | {"estimate": 3})
     key = new("Task", body="Spec.\n")
-    run("finalize", key)
+    sql_helpers.finalize(key)
     assert key in run("list") and key in run("ready")
     assert show(key)["body"] == "Spec.\n"
     assert json.loads(run("context", key))["item"]["id"] == key

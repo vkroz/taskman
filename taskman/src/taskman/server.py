@@ -35,7 +35,7 @@ OPERATIONS: dict[str, Callable] = {
     for operation in (
         lifecycle.create, lifecycle.finalize, lifecycle.update_body, lifecycle.record,
         lifecycle.set_dependencies, lifecycle.discard, lifecycle.move, lifecycle.convert,
-        lifecycle.close, lifecycle.edit, lifecycle.assign, lifecycle.label, reorder_item,
+        lifecycle.close, lifecycle.edit, lifecycle.assign, lifecycle.label, lifecycle.set_repositories, reorder_item,
     )
 }
 

@@ -13,7 +13,7 @@ from taskman.storage.sql import connect, transaction
 from taskman.storage.store import StorageConfigError
 
 runner = CliRunner()
-TABLES = {"projects", "items", "labels", "dependencies", "comments", "activity", "persons", "tokens", "logins",
+TABLES = {"projects", "items", "labels", "repositories", "dependencies", "comments", "activity", "persons", "tokens", "logins",
           "schema_versions"}
 
 
@@ -344,3 +344,57 @@ def test_a_failed_bugfix_migration_leaves_version_3(db, monkeypatch):
     assert _schema_snapshot(conn, dialect) == before
     with transaction(conn, dialect):
         assert database_version(conn, dialect) == 3
+
+
+_COMMENT = ("INSERT INTO comments (item_id, kind, result, author, text, revision, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)")
+
+
+def test_upgrade_from_version_6_allows_review_comments_and_keeps_every_row(db):
+    conn, dialect = db
+    q = dialect.sql
+    now = "2026-11-17T00:00:00+00:00"
+    _version_3_database_with_items(conn, dialect)
+    assert upgrade(conn, dialect, MIGRATIONS[:6]) == [4, 5, 6]
+    with transaction(conn, dialect):
+        conn.execute(q(_COMMENT), (2, "verification", "pass", "pytest", "checked", 1, now))
+    rows, indexes = _rows(conn), _indexes(conn, dialect)
+    with pytest.raises(Exception):
+        with transaction(conn, dialect):
+            conn.execute(q(_COMMENT), (2, "review", "pass", "pytest", "too early", 1, now))
+
+    assert upgrade(conn, dialect) == [7]
+
+    assert _rows(conn) == rows
+    assert indexes <= _indexes(conn, dialect)
+    with transaction(conn, dialect):
+        for result in ("pass", "fail"):
+            conn.execute(q(_COMMENT), (2, "review", result, "pytest", f"review {result}", 1, now))
+    rejected = [
+        ("review", "blocked"), ("review", None), ("verification", None), ("decision", "pass"), ("note", None),
+    ]
+    for kind, result in rejected:
+        with pytest.raises(Exception):
+            with transaction(conn, dialect):
+                conn.execute(q(_COMMENT), (2, kind, result, "pytest", "rejected", 1, now))
+    if dialect.name == "sqlite":
+        assert conn.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_a_failed_review_migration_leaves_version_6(db, monkeypatch):
+    conn, dialect = db
+    _version_3_database_with_items(conn, dialect)
+    upgrade(conn, dialect, MIGRATIONS[:6])
+    if dialect.name == "sqlite":
+        # A comments table whose definition Taskman did not write.
+        monkeypatch.setattr("taskman.storage.schema._OLD_RESULT_CHECK", "CHECK (result IN ('other'))")
+    else:
+        conn.execute("ALTER TABLE comments RENAME CONSTRAINT comments_check TO custom_result_check")
+    rows, before = _rows(conn), _schema_snapshot(conn, dialect)
+    with pytest.raises(Exception, match="unexpected definition" if dialect.name == "sqlite" else "comments_check"):
+        upgrade(conn, dialect)
+    assert _rows(conn) == rows
+    assert _schema_snapshot(conn, dialect) == before
+    with transaction(conn, dialect):
+        assert database_version(conn, dialect) == 6

@@ -16,6 +16,7 @@ from taskman.storage.schema import upgrade
 from taskman.storage.sql import connect
 from taskman.storage.sql_store import open_sql_store
 from tests.ui_seed import seed
+from tests import ready
 
 HEADERS = {"Content-Type": "application/json", "X-Taskman": "1"}
 
@@ -207,7 +208,7 @@ def test_query_rejects_unknown_view_sort_and_filters(seeded):
 def test_attention_includes_handoffs_and_items_ready_to_close(api, store):
     for title in ("Handoff", "Closable", "Plain"):
         _create(api, title, project="TM")
-    lifecycle.finalize(store, "TM-2")
+    ready.finalize(store, "TM-2")
     lifecycle.record(store, "TM-1", "handoff", "Codex", "Next agent: continue.")
     lifecycle.record(store, "TM-2", "summary", "Codex", "Done.")
     lifecycle.record(store, "TM-2", "verification", "Codex", "Passed.", "pass")
@@ -232,10 +233,13 @@ def test_show_adds_relations_close_gates_and_discard_state(seeded):
     assert tm11["children"] == [{"id": "TM-12", "type": "task", "title": "Write the deploy document",
                                  "state": "draft", "assignee": None}]
     assert [d["id"] for d in tm11["depends_on"]] == ["TM-6"]
-    gates = {gate["check"]: gate for gate in seeded("/api/show/RES-4")["close_gates"]}
+    res4 = seeded("/api/show/RES-4")
+    gates = {gate["check"]: gate for gate in res4["close_gates"]}
     assert [g["ok"] for g in gates.values()] == [True, True, True, False, False]
     assert (gates["verification"]["status"], gates["summary"]["status"]) == ("fail", "missing")
-    assert gates["verification"]["detail"] == "Verification for rev 0: fail"
+    # The seed gives RES-4 a description before its review (its repository comes from RES-1): revision 1.
+    assert res4["frontmatter"]["revision"] == 1
+    assert gates["verification"]["detail"] == "Verification for rev 1: fail"
     tm1 = {gate["check"]: gate for gate in seeded("/api/show/TM-1")["close_gates"]}
     assert (tm1["children"]["ok"], tm1["children"]["detail"]) == (False, "Sub-items done (4/11)")
     assert seeded("/api/show/TM-2")["close_gates"] is None
@@ -311,18 +315,19 @@ def test_edit_journals_the_store_actor_and_allows_title_only_drafts(api, store):
     api("/api/edit", {"id": key, "title": "Draft", "body": "", "reason": "Title only"})
     item = store.get(key)
     assert (item.body, item.metadata["journal"][-1]["actor"]) == ("", "Vlad")
-    lifecycle.finalize(store, key)
+    ready.finalize(store, key)
     error = api("/api/edit", {"id": key, "title": "Draft", "body": " ", "reason": "Empty"}, status=400)["error"]
     assert "must not be empty" in error
     assert api("/api/edit", {"id": key, "title": "Draft", "body": "B", "reason": ""})["ok"]
-    assert (store.get(key).body, store.get(key).metadata["journal"][-1]["text"]) == ("B", "Title only")
+    decisions = [e for e in store.get(key).metadata["journal"] if e["kind"] == "decision"]
+    assert (store.get(key).body, decisions[-1]["text"]) == ("B", "Title only")
     assert "not found" in api("/api/edit", {"id": "TM-99", "title": "T", "body": "B", "reason": "R",
                                             "base_title": "T"}, status=400)["error"]
 
 
 def test_edit_without_a_body_keeps_the_description(api, store):
     key = _create(api, "Item", project="TM")
-    lifecycle.finalize(store, key)
+    ready.finalize(store, key)
     saved = api("/api/edit", {"id": key, "title": "Renamed", "reason": "Rename only"})
     assert (saved["ok"], saved["row"]["title"], store.get(key).body) == (True, "Renamed", "Body")
     error = api("/api/edit", {"id": key, "title": "Renamed", "body": "", "reason": "Clear"}, status=400)["error"]
@@ -341,7 +346,7 @@ def test_lifecycle_edit_records_the_store_actor(store):
 
 def test_move_changes_the_status_and_returns_the_row(api, store):
     key = _create(api, "Item", project="TM")
-    lifecycle.finalize(store, key)
+    ready.finalize(store, key)
     result = api("/api/move", {"id": key, "status": "active"})
     assert (result["ok"], result["row"]["status"], result["row"]["state"]) == (True, "active", "active")
     assert api("/api/move", {"id": key, "status": "active"})["message"] == f"No change: {key} already in active."
@@ -384,11 +389,68 @@ def test_fields_are_atomic_and_validated(api, store):
     assert "list" in api("/api/fields", {"id": key, "assignee": "bob", "labels": "db"}, status=400)["error"]
     assert "not found" in api("/api/fields", {"id": "TM-9", "assignee": "bob", "labels": []}, status=400)["error"]
     assert store.get(key) == before
-    lifecycle.finalize(store, key)
+    ready.finalize(store, key)
     lifecycle.record(store, key, "summary", "Codex", "Done.")
     lifecycle.record(store, key, "verification", "Codex", "Passed.", "pass")
     lifecycle.close(store, key)
     assert "immutable" in api("/api/fields", {"id": key, "assignee": "bob", "labels": []}, status=400)["error"]
+
+
+# ---- /api/finalize and the item link ---------------------------------------------
+
+
+def test_finalize_applies_the_definition_of_ready(api, store):
+    key = _create(api, "Item", project="TM")
+    gates = api(f"/api/show/{key}")["ready_gates"]
+    assert [(g["check"], g["ok"]) for g in gates] == [("title", True), ("description", True), ("repositories", False),
+                                                      ("review", False)]
+    assert "cannot finalize" in api("/api/finalize", {"id": key}, status=400)["error"]
+    lifecycle.set_repositories(store, key, ["github.com/o/r"])
+    lifecycle.record(store, key, "review", "Codex", "The checklist passes.", "pass")
+    result = api("/api/finalize", {"id": key})
+    assert result["ok"] and result["row"]["draft"] is False
+    shown = api(f"/api/show/{key}")
+    assert shown["ready_gates"] is None and shown["frontmatter"]["draft"] is False
+    assert api("/api/finalize", {"id": key})["message"].endswith("nothing to do.")
+    assert "not found" in api("/api/finalize", {"id": "TM-99"}, status=400)["error"]
+
+
+def test_the_link_holds_the_server_address_and_the_key():
+    class Remote:
+        url = "https://taskman.example.com"
+
+    assert ui.item_link(Remote(), "TM-4") == "https://taskman.example.com/items/TM-4"
+    assert ui.item_link(object(), "TM-4") == "TM-4"
+
+
+def test_show_gives_the_link(api):
+    key = _create(api, "Item", project="TM")
+    assert api(f"/api/show/{key}")["link"] == key
+
+
+# ---- /api/repositories -------------------------------------------------------
+
+
+def test_repositories_save_normalized_and_show_what_a_child_inherits(api, store):
+    parent = _create(api, "Parent", project="TM")
+    lifecycle.convert(store, parent, "feat")
+    child = _create(api, "Child", parent=parent)
+    result = api("/api/repositories", {"id": parent, "repositories": ["git@github.com:o/r.git", "github.com/o/s"]})
+    assert result["ok"] and result["row"]["id"] == parent
+    assert api(f"/api/show/{parent}")["frontmatter"]["repositories"] == ["github.com/o/r", "github.com/o/s"]
+    assert api(f"/api/show/{parent}")["inherited_repositories"] is None
+    assert api(f"/api/show/{child}")["inherited_repositories"] == {"from": parent,
+                                                                   "addresses": ["github.com/o/r", "github.com/o/s"]}
+    assert api("/api/repositories", {"id": parent, "repositories": ["github.com/o/s", "github.com/o/r"]})["ok"]
+    assert [a["field"] for a in store.activity(parent)].count("repositories") == 1
+
+
+def test_repositories_are_validated(api, store):
+    key = _create(api, "Item", project="TM")
+    assert "remote address" in api("/api/repositories", {"id": key, "repositories": ["/tmp/repo"]}, status=400)["error"]
+    assert "list" in api("/api/repositories", {"id": key, "repositories": "github.com/o/r"}, status=400)["error"]
+    assert "not found" in api("/api/repositories", {"id": "TM-9", "repositories": []}, status=400)["error"]
+    assert store.get(key).metadata["repositories"] == []
 
 
 # ---- per-project order ------------------------------------------------------------
@@ -417,7 +479,7 @@ def _gate_fixtures(store):
         key = lifecycle.create(store, title, "task" if parent else "feat", parent, "Body",
                                project=None if parent else "TM").id
         if final:
-            lifecycle.finalize(store, key)
+            ready.finalize(store, key)
         return key
 
     def evidence(key, *kinds, result="pass"):
@@ -487,7 +549,8 @@ def test_close_gate_details_name_the_failing_items(store):
     assert gates("Child of draft")["finalized"]["detail"] == f"Draft ancestor: {by_title['Draft parent'].id}"
     assert gates("Draft")["finalized"]["detail"] == "Not finalized (draft)"
     stale = gates("Stale")["verification"]
-    assert (stale["status"], stale["detail"]) == ("stale", "Verification for rev 1: stale at rev 0")
+    revision = by_title["Stale"].metadata["revision"]
+    assert (stale["status"], stale["detail"]) == ("stale", f"Verification for rev {revision}: stale at rev {revision - 1}")
     assert gates("Open child")["children"]["refs"] == [by_title["Child of open"].id]
     assert gates("Complete")["dependencies"]["detail"] == "No dependencies"
 
@@ -499,7 +562,7 @@ def test_discard_blocker_agrees_with_discard(store):
         other = lifecycle.create(store, "Other", "task", None, project="TM").id
         final = lifecycle.create(store, "Final", "task", None, project="TM").id
     lifecycle.set_dependencies(store, other, [child])
-    lifecycle.finalize(store, final)
+    ready.finalize(store, final)
     for key in (feat, child, final, other):
         items = {item.id: item for item in store.items()}
         reason = lifecycle.discard_blocker(items[key], items)

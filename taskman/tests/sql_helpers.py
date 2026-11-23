@@ -32,9 +32,21 @@ def comment(key: str, kind: str, text: str = "Checked.", result: str | None = No
     run(*args, *(["--result", result] if result else []), input=text)
 
 
+def finalize(key: str, code: int | None = 0) -> str:
+    """Give the item what the definition of ready needs, through the CLI, then run `finalize`."""
+    shown = show(key)
+    if shown["body"].strip() in ("", f"# {shown['frontmatter']['title']}"):
+        run("update", key, "--body-file", "-", input=f"# {shown['frontmatter']['title']}\n\nFixture requirements.\n")
+    if not shown["frontmatter"].get("repositories") and not shown.get("inherited_repositories"):
+        run("repo", key, "github.com/test/fixture")
+    comment(key, "review", "Fixture review: the checklist passes.", result="pass")
+    return run("finalize", key, code=code)
+
+
 def prepare(key: str) -> None:
     """Finalize the item and add a current summary and passing verification, so it can close."""
-    run("finalize", key, code=None)
+    if show(key)["frontmatter"]["draft"]:
+        finalize(key)
     comment(key, "summary", "Fixture summary.")
     comment(key, "verification", "Fixture verification.", result="pass")
 
