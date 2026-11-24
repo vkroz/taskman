@@ -1,0 +1,77 @@
+# Local Taskman stack: Postgres, a one-time schema upgrade, and the server.
+# The taskman containers reach Postgres only through its unix socket, which a
+# named volume shares at /cloudsql/local. Cloud Run uses /cloudsql/<connection name>.
+#
+# Run from this directory:
+#   mkdir -p .secrets && python3 -c "import secrets; print(secrets.token_urlsafe(24))" > .secrets/db_password
+#   docker compose up -d --build
+#   docker compose run --rm server token create --person "you@example.com"
+
+x-taskman: &taskman
+  build: .
+  image: taskman:local
+  environment:
+    TASKMAN_BACKEND: postgres
+    TASKMAN_DB_SOCKET: /cloudsql/local
+    TASKMAN_DB_NAME: taskman
+    TASKMAN_DB_USER: taskman
+    TASKMAN_DB_PASSWORD_FILE: /run/secrets/db_password
+  secrets:
+    - db_password
+  volumes:
+    - db-socket:/cloudsql/local
+
+services:
+  db:
+    image: postgres:16
+    # No network: the socket is the only way in.
+    network_mode: none
+    environment:
+      POSTGRES_DB: taskman
+      POSTGRES_USER: taskman
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      # Socket connections need the password, as on Cloud SQL.
+      POSTGRES_INITDB_ARGS: --auth-local=scram-sha-256
+    secrets:
+      - db_password
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - db-socket:/var/run/postgresql
+    healthcheck:
+      # Loopback, not the socket: the temporary server of the first start
+      # listens only on the socket, so this passes only for the final server.
+      test: ["CMD", "pg_isready", "--host=127.0.0.1", "--username=taskman", "--dbname=taskman"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  upgrade:
+    <<: *taskman
+    command: ["db", "upgrade"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  server:
+    <<: *taskman
+    depends_on:
+      upgrade:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+secrets:
+  db_password:
+    file: .secrets/db_password
+
+volumes:
+  db-data:
+  db-socket:

@@ -7,147 +7,137 @@ work-item frontmatter. They share a single tree-walk + graph-build pass
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from pathlib import Path
 
 import typer
 
-from taskman.commands.new import get_tasks_dir
-from taskman.model.layout import iter_work_items, parent_item_path
-from taskman.model.names import NameParseError, parse_name, special_file_name
-from taskman.model.yaml_io import FrontmatterError, read_file
+from taskman.lifecycle import inherited_repositories, is_ready
+from taskman.model.collection import in_manual_order
+from taskman.storage.store import Item, Store, key_order, open_store
 
 
-@dataclass(frozen=True, slots=True)
-class _Item:
-    """Materialized work-item record used by query commands."""
-
-    item_id: str
-    item_type: str
-    status: str
-    priority: str
-    slug: str
-    title: str
-    path: str
-    depends_on: tuple[str, ...]
-    draft: bool = False
-    parent_id: str | None = None
+def _load_graph(store: Store) -> dict[str, Item]:
+    """Read every item once; return key → Item."""
+    return {item.id: item for item in store.items() if not item.error}
 
 
-def _load_graph(tasks_dir: Path) -> dict[str, _Item]:
-    """Walk the tree once; return id → _Item mapping."""
-    items: dict[str, _Item] = {}
-    for path in iter_work_items(tasks_dir):
-        try:
-            wi = parse_name(path.name)
-        except NameParseError:
-            continue
-        body_file = (
-            path / special_file_name(wi.item_id) if path.is_dir() else path
-        )
-        if not body_file.exists():
-            continue
-        try:
-            data, _ = read_file(body_file)
-        except FrontmatterError:
-            continue
-        deps_raw = data.get("depends_on") or []
-        deps = tuple(str(d) for d in deps_raw) if isinstance(deps_raw, list) else ()
-        items[wi.item_id] = _Item(
-            item_id=wi.item_id,
-            item_type=wi.item_type,
-            status=wi.status,
-            priority=wi.priority,
-            slug=wi.slug,
-            title=str(data.get("title", "")),
-            path=str(path),
-            depends_on=deps,
-            draft=bool(data.get("draft")),
-            parent_id=parse_name(parent_item_path(path, tasks_dir).name).item_id if parent_item_path(path, tasks_dir) else None,
-        )
-    return items
-
-
-def _as_dict(item: _Item) -> dict[str, str | bool | None | list[str]]:
+def _as_dict(item: Item, items: dict[str, Item]) -> dict:
+    """One item as a JSON row. ``items`` gives the ancestors whose repositories the item inherits."""
     return {
-        "id": item.item_id,
-        "type": item.item_type,
+        "id": item.id,
+        "type": item.type,
         "status": item.status,
         "priority": item.priority,
         "slug": item.slug,
         "title": item.title,
-        "path": item.path,
+        "path": item.location,
         "depends_on": list(item.depends_on),
         "draft": item.draft,
         "parent_id": item.parent_id,
+        "repositories": list(item.metadata.get("repositories") or []),
+        "inherited_repositories": inherited_repositories(item, items),
     }
 
 
-def _emit(results: list[_Item], as_json: bool) -> None:
+def _emit(results: list[Item], as_json: bool, items: dict[str, Item]) -> None:
     if as_json:
-        typer.echo(json.dumps([_as_dict(i) for i in results], indent=2))
+        typer.echo(json.dumps([_as_dict(i, items) for i in results], indent=2))
         return
     if not results:
         typer.echo("(none)")
         return
     for i in results:
         typer.echo(
-            f"  {i.priority} {i.item_type:5} {i.item_id} {i.status:7} "
+            f"  {i.priority} {i.type:6} {i.id} {i.status:7} "
             f"{i.slug:30} {i.title}"
         )
 
 
-def is_ready(item: _Item, items: dict[str, _Item]) -> bool:
-    if item.status == "done":
-        return False
-    current = item
-    while current:
-        if current.draft or current.status == "done":
-            return False
-        if any(d not in items or items[d].status != "done" for d in current.depends_on):
-            return False
-        current = items.get(current.parent_id)
-    return True
+_NOTE_LIMIT = 10
+
+
+def _not_ready_reason(item: Item, items: dict[str, Item]) -> str:
+    """Why an open item is not ready: a draft, under a draft, or waiting on dependencies."""
+    if item.draft:
+        return "draft"
+    parent = items.get(item.parent_id)
+    while parent:
+        if parent.draft:
+            return "under a draft"
+        parent = items.get(parent.parent_id)
+    return "waiting on dependencies"
+
+
+def _not_ready_note(left_out: list[Item], items: dict[str, Item]) -> str:
+    """One line that names the open items that ``ready`` leaves out, and why."""
+    groups: dict[str, list[str]] = {"draft": [], "under a draft": [], "waiting on dependencies": []}
+    for item in left_out[:_NOTE_LIMIT]:
+        groups[_not_ready_reason(item, items)].append(item.id)
+    named = "; ".join(f"{', '.join(keys)} ({reason})" for reason, keys in groups.items() if keys)
+    more = f"; and {len(left_out) - _NOTE_LIMIT} more" if len(left_out) > _NOTE_LIMIT else ""
+    return f"Not ready: {named}{more}. To see them, run: taskman list"
 
 
 def ready(
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON."),
+    project: str | None = typer.Option(None, "--project", help="Only items of this project key."),
 ) -> None:
-    """List items whose every dependency is in done (or who have no deps)."""
-    items = _load_graph(get_tasks_dir())
-    out: list[_Item] = []
+    """List open items that are ready to start.
+
+    An item is ready when it is not done, and the item and all its ancestors are
+    finalized, not done, and have no unfinished dependency. When open items are
+    not ready, text output ends with one line on stderr that names them and gives
+    the reason. Items show in the order that you set in the UI or with
+    `taskman reorder`.
+    """
+    store = open_store()
+    items = _load_graph(store)
+    out: list[Item] = []
+    left_out: list[Item] = []
     for item in items.values():
+        if project is not None and item.metadata.get("project") != project:
+            continue
         if is_ready(item, items):
             out.append(item)
-    out.sort(key=lambda i: (i.priority, i.item_id))
-    _emit(out, as_json)
+        elif item.status != "done":
+            left_out.append(item)
+    _emit(in_manual_order(store, out), as_json, items)
+    if left_out and not as_json:
+        left_out.sort(key=lambda i: key_order(i.id))
+        typer.echo(_not_ready_note(left_out, items), err=True)
 
 
 def dependents(
     item_id: str = typer.Argument(..., help="Item ID to find dependents of."),
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON."),
 ) -> None:
-    """List non-done items that list ``<id>`` in their depends_on."""
-    items = _load_graph(get_tasks_dir())
+    """List non-done items that list ``<id>`` in their depends_on.
+
+    Items show in the order that you set in the UI or with `taskman reorder`.
+    """
+    store = open_store()
+    items = _load_graph(store)
     if item_id not in items:
-        typer.echo(f"Warning: item not found: {item_id}", err=True)
+        typer.echo(f"Error: item not found: {item_id}", err=True)
         raise typer.Exit(1)
     out = [
         i for i in items.values()
         if i.status != "done" and item_id in i.depends_on
     ]
-    out.sort(key=lambda i: (i.priority, i.item_id))
-    _emit(out, as_json)
+    _emit(in_manual_order(store, out), as_json, items)
 
 
 def waiting_on(
     item_id: str = typer.Argument(..., help="Item ID whose deps to inspect."),
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON."),
 ) -> None:
-    """List unfinished dependencies of this item and its ancestors."""
-    items = _load_graph(get_tasks_dir())
+    """List unfinished dependencies of this item and its ancestors.
+
+    Items show in the order that you set in the UI or with `taskman reorder`.
+    """
+    store = open_store()
+    items = _load_graph(store)
     if item_id not in items:
-        typer.echo(f"Warning: item not found: {item_id}", err=True)
+        typer.echo(f"Error: item not found: {item_id}", err=True)
         raise typer.Exit(1)
     target = items[item_id]
     dependencies = set()
@@ -158,5 +148,4 @@ def waiting_on(
     if missing:
         raise typer.BadParameter("missing dependencies: " + ", ".join(sorted(missing)))
     out = [items[dep] for dep in dependencies if items[dep].status != "done"]
-    out.sort(key=lambda i: (i.priority, i.item_id))
-    _emit(out, as_json)
+    _emit(in_manual_order(store, out), as_json, items)

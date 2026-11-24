@@ -1,6 +1,6 @@
 # Taskman
 
-Taskman keeps requirements, plans, dependencies, decisions and verification in a shared task tree. Codex and Claude Code use the same CLI and records, so one agent can implement a task and another can review it without a conversation handoff.
+Taskman keeps requirements, plans, dependencies, decisions and verification as shared work items in a SQL database. Codex and Claude Code use the same CLI and records, so one agent can implement a task and another can review it without a conversation handoff.
 
 The browser UI creates tasks and displays their hierarchy, status and evidence. Agents plan and execute through the CLI. Completion means the agreed acceptance criteria work locally; deployment is outside this workflow.
 
@@ -15,6 +15,14 @@ taskman install --platform codex --platform claude-code
 
 Choose either platform or repeat `--platform` for both. `taskman` and `tm` are equivalent commands. Start a fresh coding session after installing the plugin.
 
+A Taskman server deploys from the `staging` branch. People and agents who use a server install the CLI from `staging`, so that the CLI matches the server:
+
+```sh
+uv tool install --force 'git+https://github.com/vkroz/taskman.git@staging#subdirectory=taskman'
+```
+
+`taskman install` installs the plugin of the default branch.
+
 For a local checkout under development:
 
 ```sh
@@ -26,17 +34,25 @@ The CLI installs one shared plugin through host adapters. `taskman install --lis
 
 ## Work on a project
 
-Run Taskman inside the project. It finds the nearest ancestor `tasks/` directory, stopping at the repository root. Set `TASKMAN_TASKS_DIR` explicitly when multiple agents must share a particular tree across working directories.
+Taskman stores work items in SQLite by default, in one file for all repositories: `~/.local/share/taskman/taskman.db`. Create the database once:
 
 ```sh
-taskman new --type epic --title "Add conversation history" --body-file requirements.md --json
+taskman db upgrade
+```
+
+Items belong to projects and have keys such as `TM-42`. A new top-level item names its project with `--project`; Taskman creates the project on first use. A child uses the project of its parent.
+
+```sh
+taskman new --type epic --title "Add conversation history" --project TM --body-file requirements.md --json
 taskman new --type feat --title "Persist conversations" --parent EPIC_ID --body-file story.md --json
 taskman new --title "Save messages" --parent STORY_ID --body-file task.md --json
 ```
 
-Replace the uppercase placeholders with the IDs returned by `new`. New items are drafts. Finalize items once their scope is agreed; finalize their ancestors too before execution.
+Replace the uppercase placeholders with the keys returned by `new`. `new` also takes the title as an argument, for example `taskman new "Save messages" --parent STORY_ID`. New items are drafts. Finalize items once their scope is agreed; finalize their ancestors too before execution. `finalize` applies the definition of ready: a title, a description beyond the title heading, a repository on the item or an ancestor, and a latest readiness review that passed at the current revision. `taskman help` gives the reviewer checklist.
 
 ```sh
+taskman repo TASK_ID github.com/OWNER/NAME
+taskman comment TASK_ID --kind review --result pass --body-file review.md
 taskman finalize TASK_ID
 taskman depend REVIEW_ID --on TASK_ID
 taskman ready --json
@@ -44,23 +60,27 @@ taskman context TASK_ID
 taskman move TASK_ID active
 ```
 
-A story uses type `feat`. Taskman permits other nesting shapes; `task` is always a leaf. Independent tasks can run in parallel. Each agent reads `context` and records its contribution through the CLI. Taskman does not launch coding agents itself.
+`ready` lists the open items that can start: the item and all its ancestors are finalized, and their dependencies are done. Without `--json`, `ready` also names on stderr the open items that are not ready, and why.
+
+`list` and `ready` show items in the order that you set in the UI or with `taskman reorder`. Items of one project stay together. Each parent comes before its children. Siblings follow their position. The text output of `list` groups the items by status and keeps this order in each group.
+
+A story uses type `feat`. Taskman permits other nesting shapes; `task` and `bugfix` are always leaves. Independent tasks can run in parallel. Each agent reads `context` and records its contribution through the CLI. Taskman does not launch coding agents itself.
 
 ## Record work and verify
 
 ```sh
-taskman record TASK_ID --kind decision --actor Codex --body-file decision.md
+taskman comment TASK_ID --kind decision --actor Codex --body-file decision.md
 taskman update TASK_ID --body-file refined-requirements.md
-taskman record TASK_ID --kind summary --actor Codex --body-file summary.md
-taskman record TASK_ID --kind verification --result pass --actor "Claude Code" --body-file verification.md
+taskman comment TASK_ID --kind summary --actor Codex --body-file summary.md
+taskman comment TASK_ID --kind verification --result pass --actor "Claude Code" --body-file verification.md
 taskman close TASK_ID
 ```
 
-Use `--body-file -` to read stdin. Journal significant choices, their reasons and changes to scope. The completion summary should explain what changed, why, and any limits. Verification records should name the checks, commands, results and source revision or relevant working-tree changes. Distinguish executed tests from source inspection and another agent's report.
+`record` is an alias of `comment`. Every command that changes an item accepts `--actor NAME`; without it, the author is the person of the token on a server, or your git `user.name` with a local database. `comment` takes its text from `--body TEXT` or from `--body-file FILE`; `--body-file -` reads stdin. Comment on significant choices, their reasons and changes to scope. The completion summary should explain what changed, why, and any limits. Verification comments should name the checks, commands, results and source revision or relevant working-tree changes. Distinguish executed tests from source inspection and another agent's report.
 
-Open requirements may be refined to achieve the agreed outcome. Changes to the body, dependencies, type, implementation journal or children invalidate earlier completion evidence. Close requires a current summary, a current passing verification, and completed dependencies and descendants. A recorded pass is the agent's assertion: Taskman does not run tests or prove that assertion.
+Open requirements may be refined to achieve the agreed outcome. Changes to the description, dependencies, type or children, and new decision or progress comments, invalidate earlier completion evidence. Close requires a current summary, a current passing verification, and completed dependencies and descendants. A recorded pass is the agent's assertion: Taskman does not run tests or prove that assertion.
 
-Closed tasks are immutable. Further changes belong in a new task that references the original ID. Summaries supplement the journal; original entries remain available. `discard` removes only an unreferenced draft leaf.
+Closed tasks are immutable. Further changes belong in a new task that references the original key. Comments cannot change or be deleted; summaries supplement them. `discard` removes only an unreferenced draft leaf.
 
 ## View and check
 
@@ -68,12 +88,190 @@ Closed tasks are immutable. Further changes belong in a new task that references
 taskman ui
 taskman list --recursive --json
 taskman context TASK_ID
+taskman context TASK_ID --since CURSOR
 taskman validate
 ```
 
-The UI refreshes as agents change tasks. `taskman validate` checks task-data integrity; acceptance testing is separate. Use `taskman help` for storage rules and `taskman COMMAND --help` for syntax.
+`context` ends with a `cursor`. `context --since CURSOR` prints only the comments and field changes of the item after that cursor, and the next cursor. A description change shows as a note with the current revision of the item, without its text. When nothing is new, the output is one line. So an agent that refreshes during its work adds only the new content to its context.
 
-The plugin supplies define, design, plan, implement and validate skills, plus optional review, commenting, commit and documentation skills. Skills use the same task records on either platform.
+The UI refreshes as agents change tasks. `taskman validate` checks the dependency graph for unknown dependencies and cycles; acceptance testing is separate. Use `taskman help` for storage rules and `taskman COMMAND --help` for syntax.
+
+The plugin supplies define, design, review, plan, implement and validate skills, plus optional code review, commenting, commit and documentation skills. Skills use the same task records on either platform.
+
+### Push new comments into a Claude Code session
+
+`taskman channel` is a Claude Code channel: a local MCP (Model Context Protocol) server that pushes the new comments of one item into a running Claude Code session. The agent does not poll and does not restart. Channels are a research preview of Claude Code: the flags and the protocol can change.
+
+1. Name the server in the `.mcp.json` file of the project:
+
+   ```json
+   {"mcpServers": {"taskman": {"command": "taskman", "args": ["channel"]}}}
+   ```
+
+2. Start Claude Code in an interactive terminal with the channel enabled. Claude Code ignores the flag with `-p`. Choose "I am using this for local development" in the dialog that follows.
+
+   ```bash
+   claude --dangerously-load-development-channels server:taskman
+   ```
+
+3. Give the agent an item. The agent calls the `watch` tool of the channel with the key and its own author name.
+
+Every 10 seconds (`--interval`), the channel reads the item with `context --since` and pushes the read when it holds new comments or field changes by others. Comments on other items and the agent's own comments and changes do not arrive. Claude Code holds an event that arrives during a turn and delivers it on the next turn. Events arrive only while the session is open. On claude.ai Team and Enterprise plans, an Owner must turn on channels (`channelsEnabled`) first. Without the flag, Claude Code runs the server as a plain MCP server, and the agent refreshes with `context --since` at each step.
+
+## Storage settings
+
+Taskman reads its storage settings from environment variables and from a `.env` file at the repository root. A variable already set in the environment wins over `.env`. Docker Compose and Cloud Run set the same variables. Docker Compose reads the password from a mounted secret file; Cloud Run sets it as an environment variable from Secret Manager. Taskman ignores a `.env` file that git tracks, because a committed file could send your database password to another host. Keep `.env` out of git.
+
+| Variable | Backend | Meaning |
+| --- | --- | --- |
+| `TASKMAN_BACKEND` | all | `sqlite` (default) or `postgres`. |
+| `TASKMAN_DATABASE_URL` | sqlite | `sqlite:///absolute/path.db` or `sqlite://~/path.db`. Default: `~/.local/share/taskman/taskman.db`, one file for all repositories. |
+| `TASKMAN_DATABASE_URL` | postgres | `postgresql://user@host:port/dbname`. |
+| `TASKMAN_DB_SOCKET`, `TASKMAN_DB_NAME`, `TASKMAN_DB_USER` | postgres | Use these instead of a URL to connect through a unix socket, for example Cloud SQL. All three are required. |
+| `TASKMAN_DB_PASSWORD` | postgres | The database password. Optional. |
+| `TASKMAN_DB_PASSWORD_FILE` | postgres | A file that holds the password, for example a mounted secret. Surrounding whitespace is removed. Set this or `TASKMAN_DB_PASSWORD`, not both. |
+
+Error messages never show a password or a connection URL.
+
+`list`, `ready`, `search` and `browse` show all projects; `--project KEY` limits them to one. Items have assignees, labels and an activity history of every field change:
+
+```sh
+taskman assign TM-42 claude-code
+taskman unassign TM-42
+taskman label TM-42 --add backend --remove ui
+taskman repo TM-42 git@github.com:vkroz/taskman.git
+taskman list --assignee claude-code --label backend
+taskman activity TM-42
+```
+
+`repo` names the repositories that the work of an item is about. Taskman stores each one as host and path, here `github.com/vkroz/taskman`, and refuses a local or relative path. Without arguments, `repo` shows the repositories of the item. `--clear` removes them. An item without own repositories inherits those of its nearest ancestor; `show`, `context` and `list --json` give them as `inherited_repositories`. A change of repositories makes the revision advance.
+
+`context` includes the activity of the item. A done item keeps its position among its siblings.
+
+`taskman db upgrade` creates the schema in a new database and upgrades an older one. It does nothing when the schema is current. The postgres backend needs the `postgres` extra: `uv tool install 'taskman[postgres] @ git+https://github.com/vkroz/taskman.git#subdirectory=taskman'`.
+
+SQLite:
+
+```sh
+TASKMAN_BACKEND=sqlite
+```
+
+Local Postgres:
+
+```sh
+TASKMAN_BACKEND=postgres
+TASKMAN_DATABASE_URL=postgresql://taskman@localhost:5432/taskman
+TASKMAN_DB_PASSWORD=change-me
+```
+
+Cloud SQL through its unix socket, for example on Cloud Run. Cloud Run sets `TASKMAN_DB_PASSWORD` from a Secret Manager secret:
+
+```sh
+TASKMAN_BACKEND=postgres
+TASKMAN_DB_SOCKET=/cloudsql/project:region:instance
+TASKMAN_DB_NAME=taskman
+TASKMAN_DB_USER=taskman
+TASKMAN_DB_PASSWORD=<the value of the secret>
+```
+
+## Use a Taskman server
+
+A Taskman server lets agents and people on different computers share the same work items. The server alone opens the database. The CLI on each computer calls the server and does not know which database it uses.
+
+On a machine that reaches the database, with the storage settings above:
+
+```bash
+taskman db upgrade                          # create or upgrade the schema
+taskman token create --person "Ada"         # prints a token one time; it expires after 90 days
+taskman serve                               # listens on 127.0.0.1 and the port in PORT, or 8080
+```
+
+`taskman serve --host 0.0.0.0` accepts calls from other machines. `taskman token list --database` shows the tokens of every person without their secrets, and `taskman token revoke ID --database` stops one. With no server set, `--database` is not needed.
+
+### Run the server in a container
+
+`taskman/` holds a `Dockerfile` and a Docker Compose file. The Compose stack runs Postgres 16, the schema upgrade and the server. The server connects to Postgres through a unix socket, as on Cloud Run. On a computer with Docker, for example a MacBook:
+
+```sh
+cd taskman
+mkdir -p .secrets && python3 -c "import secrets; print(secrets.token_urlsafe(24))" > .secrets/db_password
+docker compose up -d --build
+docker compose run --rm server token create --person "you@example.com"
+export TASKMAN_SERVER_URL=http://127.0.0.1:8080 TASKMAN_TOKEN=<printed token>
+```
+
+Replace `<printed token>` with the token that `token create` printed. Git ignores `taskman/.secrets/`. The server accepts calls only from this computer, on `127.0.0.1:8080`. After you get a new version, run `docker compose up -d --build` again: the stack upgrades the schema before the server starts. `docker compose down` stops the stack and keeps the data.
+
+On Linux with umask 077, the container user cannot read the password file: run `chmod 644 .secrets/db_password`. The server does not connect again after Postgres restarts: run `docker compose restart server`. To change the password, change it in Postgres or delete all local data with `docker compose down -v`: Postgres reads the file only when it creates its data volume.
+
+To run the same image on Google Cloud Run with Cloud SQL, follow [docs/deploy-gcp.md](docs/deploy-gcp.md). `deploy/gcp/` holds the configuration file of each environment and the scripts that set up a project and deploy to it. The deploy workflow in `.github/workflows/` deploys each push to the `staging` branch.
+
+### Log in
+
+Install the CLI from `staging`, as [Install](#install) shows. The CLI on `main` has no `auth` command.
+
+On a computer with a browser:
+
+```bash
+taskman auth login --server https://taskman.example.com
+```
+
+The command opens a browser. You sign in with your Google account, and the CLI saves its own token for this computer. Every later command works through the server. `taskman auth status` shows the server and your email address. Without a server, it shows the local database that Taskman uses. `taskman auth logout` revokes the token and removes it.
+
+On a machine without a browser, for example a cloud virtual machine:
+
+1. On any computer, open `https://taskman.example.com/auth/token` and sign in. The page shows a personal access token one time.
+2. On the machine, run `taskman auth login --server https://taskman.example.com --with-token` and paste the token.
+
+An agent cloud environment sets `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` instead, as [Connect an agent cloud environment](#connect-an-agent-cloud-environment) shows. `TASKMAN_TOKEN` wins over a saved login.
+
+The person of the token is the author of each change. With `--actor claude`, the author is `claude for ada@example.com`. Taskman reads `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` from the environment only, never from a `.env` file. The address must start with `https://`, unless the server runs on the same computer. The CLI keeps its login in `~/.config/taskman/credentials.json`, which only you can read. A token expires after 90 days.
+
+### Manage your tokens
+
+Each login, each `/auth/token` page and each token of an operator is a separate token. To see your tokens and to stop one that you no longer use, or that someone else may have:
+
+```bash
+taskman token list          # ID, label, created, expires, last used, revoked
+taskman token revoke 7      # the next request with token 7 is refused
+```
+
+The `/auth/token` page shows the same list after you sign in, with a Revoke button for each token. The buttons work for 10 minutes after the sign-in. You see and revoke only your own tokens. No command or page shows the value of a token again. When you revoke the token that this computer uses, the next command fails with "refused the token": log in again.
+
+### Connect an agent cloud environment
+
+A cloud agent session starts without the CLI, the server address and a token. Set these items one time in the settings of the cloud environment, never in the repository:
+
+1. Network access: allow the exact host of the server, for example `taskman.example.com`. Do not allow a wildcard such as `*.run.app`, because it opens every service in that domain. Allow all HTTP methods: the CLI sends each change as a POST request.
+2. Setup step: install the CLI from the branch that the server deploys from. Use the `staging` command in [Install](#install).
+3. `TASKMAN_SERVER_URL`: set the server address as a plain variable, for example `https://taskman.example.com`. The address is not a secret.
+4. Token: on your computer, open `https://taskman.example.com/auth/token` and sign in. The page shows a token one time. Give it to the environment in one of two ways:
+   - The platform proxy adds the token to each request: save the token as a network secret for the host. For a Claude Code network secret, use the header `Authorization` and the prefix `Bearer`. Then set the plain variable `TASKMAN_TOKEN=proxy-injected`. The proxy replaces this placeholder.
+   - The platform has no such proxy: save the token in the secret store of the platform as `TASKMAN_TOKEN`.
+5. Check: in a new session, run `taskman auth status`. It must print `Logged in to https://taskman.example.com as <person>`. Any other output means that a setting is missing or wrong.
+
+Never paste a token into a conversation with an agent.
+
+A token belongs to one Taskman person. When all sessions of an environment share one token, all of them write as that person. Use `--actor` to name the agent, for example `--actor "Claude Code"`. The author is then `Claude Code for <person>`.
+
+The lines below give the mechanism of each platform on Nov 15, 2026. They are not yet verified end to end. The team verifies them during acceptance testing.
+
+- Claude Code on the web: set "Limited" network access and add the host to the allowed domains. Add a setup script. Set the variables `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN=proxy-injected`. Add a network secret for the host.
+- OpenAI Codex cloud: turn on agent internet access to the host for all HTTP methods. Add an install script. Set the variable `TASKMAN_SERVER_URL`. Add a network secret `TASKMAN_TOKEN` for the host. The agent sees only a placeholder.
+- GitHub Copilot cloud agent: add the host to the Copilot internet access allowlist of the repository. Save `TASKMAN_TOKEN` and `TASKMAN_SERVER_URL` as secrets under "Secrets and variables" > "Agents". The default cloud sandbox gets no variables, so the address is a secret here. On the Actions runtime, install the CLI in `.github/workflows/copilot-setup-steps.yml`. This one repository file holds no address and no token. The agent can read the token.
+- Grok: no hosted agent environment found as of Nov 15, 2026.
+
+### Turn on browser login
+
+Browser login needs a Google OAuth (Open Authorization) client of type "Web application". Create it on the Clients page of Google Auth Platform in the Google Cloud console, as [Google sign-in client and secret](docs/deploy-gcp.md#google-sign-in-client-and-secret) shows. Add `<public address>/auth/callback` as an authorized redirect URI (Uniform Resource Identifier). Then start the server with:
+
+| Variable | Value |
+| --- | --- |
+| `TASKMAN_GOOGLE_CLIENT_ID` | The client ID. Browser login is off without it. |
+| `TASKMAN_GOOGLE_CLIENT_SECRET` or `TASKMAN_GOOGLE_CLIENT_SECRET_FILE` | The client secret, or a file that holds it. |
+| `TASKMAN_PUBLIC_URL` | The address that people open, for example `https://taskman.example.com`. |
+| `TASKMAN_ALLOWED_EMAILS` | Comma-separated email addresses that may sign in. |
+| `TASKMAN_ALLOWED_DOMAINS` | Comma-separated Google Workspace domains. Every member of these organizations may sign in. Google must report the account as managed by the organization; an address in the domain alone is not enough. Set this, `TASKMAN_ALLOWED_EMAILS`, or both. |
 
 ## Develop Taskman
 
@@ -83,27 +281,38 @@ uv sync --extra dev
 uv run pytest
 ```
 
-Python code is under `taskman/src/taskman/`; plugin sources are under `plugins/tm/`. Add a platform adapter to the installer to support another coding tool without changing task storage. The shell script under `plugins/tm/scripts/` is retained for legacy data; current workflows use the Python CLI.
+Without a test database, the Postgres tests are reported as skipped. To run them, start Postgres 16 and point `TASKMAN_TEST_DATABASE_URL` at a database whose name ends in `_test`. The tests delete and recreate its `public` schema. Use a glibc image such as `postgres:16`: Alpine images sort text by bytes and hide collation errors.
 
-### Workspace UI and history
+```sh
+docker run -d --name taskman-pg-test -e POSTGRES_USER=taskman -e POSTGRES_PASSWORD=taskman -e POSTGRES_DB=taskman_test -p 127.0.0.1:54329:5432 postgres:16
+uv sync --extra dev --extra postgres
+TASKMAN_TEST_DATABASE_URL=postgresql://taskman:taskman@127.0.0.1:54329/taskman_test uv run pytest
+```
 
-Run `taskman ui` for the local workspace. The left navigation selects current, backlog, done or consolidated history. Search combines with epic scope and metadata filters; matching descendants retain labeled parent context. Sort orders siblings. Expand or collapse branches, and select a title to open details; Close returns the space to the list.
+The browser tests of the workspace page need the `ui` extra, which installs Playwright 1.63.0. They also need its Chromium build (`uv run playwright install chromium`). Without Playwright or Chromium, pytest reports them as skipped. With `TASKMAN_TEST_REQUIRE_BROWSER=1`, as in CI, pytest reports an error and the run fails. Without Playwright, pytest stops before it runs a test. `uv run pytest -m ui` runs only the workspace page tests.
 
-Create work with **New task**. Open task details offer title/description editing with a recorded reason. **Delete draft** is limited to draft leaves with no incoming dependencies; finalized and completed work cannot be deleted through this command.
+```sh
+uv sync --extra dev --extra postgres --extra ui
+uv run pytest -m ui
+```
 
-Select completed rows and choose **Consolidate completed work** to create a Markdown documentation summary. Selecting a parent includes its descendants. Originals remain immutable and retrievable in Consolidated history, while individual rows leave ordinary lists. The summary contains bounded excerpts and links to full requirements and evidence.
+Python code is under `taskman/src/taskman/`; plugin sources are under `plugins/tm/`. Add a platform adapter to the installer to support another coding tool without changing task storage.
+
+### Workspace UI
+
+Run `taskman ui` for the local workspace. The sidebar selects a view (Attention, Active, Ready, Blocked, Drafts, Backlog or Done) and a project. Search, facet filters and the epic scope apply at once and stay in the URL. Sort orders siblings; drag an open item to change its position within its parent and project. Select a row to open its details; Back or Esc closes them. [docs/ui-design.md](docs/ui-design.md) describes the page.
+
+Create work with **New**; a top-level item needs a project key. Details show the state, blockers, close readiness and one timeline of comments and changes. In open work, click the title, the description, the status, the assignee, the labels or the repositories to change them. Each field saves when it loses focus; Esc cancels. A reason for a title or description change is optional; a given reason becomes a decision comment. The status offers only the moves that the lifecycle allows now, and Done needs all close checks. The menu offers **Add comment** with a kind (and a result for a verification or a review) and **Delete draft** for draft leaves with no incoming dependencies. Finalized and completed work cannot be deleted. Completed work shows read-only fields. A draft shows its definition of ready: each check with pass or fail, and **Finalize**, which stays disabled while a check fails and names the cause. **Copy link** in the item header copies the server address and the key, for example `https://taskman.example.com/items/TM-42`, to paste into a coding session; without a server it copies the key.
 
 The same operations are available from the CLI:
 
 ```sh
 taskman browse --where status=active,backlog --sort title
-taskman browse --where status=done --epic EPIC_ID --keyword migration
+taskman browse --where status=done --epic EPIC_KEY --keyword migration
 taskman browse --contains journal=verification --exists depends_on
-taskman edit TASK_ID --title "Updated title" --body-file requirements.md --reason "Clarify table coverage"
-taskman discard DRAFT_ID
-taskman consolidate DONE_ID --title "Delivered database changes"
-taskman history
-taskman browse --include-archived
+taskman edit TASK_KEY --title "Updated title" --body-file requirements.md --reason "Clarify table coverage"
+taskman reorder TASK_KEY --position 1
+taskman discard DRAFT_KEY
 ```
 
-`browse` emits hierarchy-preserving JSON; contextual ancestors have `context: true` and do not match the query themselves. Use `show` or `context` with any retained ID for complete history. See [workspace design](docs/ui-design.md) for filtering and retention semantics.
+Without `--body-file`, `edit` changes only the title and keeps the description. On the command line, `edit` needs a reason. `browse` emits hierarchy-preserving JSON; contextual ancestors have `context: true` and do not match the query themselves. Use `show` or `context` with a key for the complete record. See [workspace design](docs/ui-design.md) for filtering semantics. In JSON, comments are in `frontmatter.journal`.

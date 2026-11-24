@@ -1,0 +1,600 @@
+"""Lifecycle rules for work items, independent of the storage backend.
+
+Every mutation checks its rules here, then asks the store to persist the
+result. Errors carry the user-facing message; ``usage`` marks errors that
+come from the caller's arguments (the CLI reports those with exit code 2).
+"""
+from __future__ import annotations
+
+import copy
+import re
+from datetime import datetime, timezone
+from typing import Any
+
+from taskman.model.graph import find_cycles, unknown_references
+from taskman.storage.store import Item, Store, key_order, served
+
+_PROJECT_KEY = re.compile(r"^[A-Z][A-Z0-9]{1,9}$")
+_LABEL = re.compile(r"^[a-z0-9_-]{1,50}$")
+
+IMMUTABLE = "closed items are immutable; create a linked follow-up task"
+ITEM_TYPES = ("epic", "feat", "task", "bugfix")
+# Leaf types have no children.
+LEAF_TYPES = ("task", "bugfix")
+JOURNAL_KINDS = ("decision", "progress", "handoff", "summary", "verification", "review")
+RESULTS = ("pass", "fail", "blocked")
+# The results that each kind with a result accepts. A readiness review passes or fails.
+KIND_RESULTS = {"verification": RESULTS, "review": ("pass", "fail")}
+
+
+class LifecycleError(ValueError):
+    """A rule rejected the change."""
+
+    def __init__(self, message: str, *, usage: bool = False) -> None:
+        super().__init__(message)
+        self.message = message
+        self.usage = usage
+
+
+class NoChange(Exception):
+    """The item already has the requested state."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _revision(item: Item) -> int:
+    return int(item.metadata.get("revision", 0))
+
+
+def _known_type(item_type: str) -> None:
+    if item_type not in ITEM_TYPES:
+        raise LifecycleError(f"the type must be one of {', '.join(ITEM_TYPES)}, got: {item_type!r}", usage=True)
+
+
+def _require(store: Store, item_id: str, *, usage: bool) -> Item:
+    item = store.get(item_id)
+    if item is None:
+        raise LifecycleError(f"item not found: {item_id}", usage=usage)
+    return item
+
+
+def _readable(item: Item, *, usage: bool) -> Item:
+    if item.error:
+        raise LifecycleError(item.error, usage=usage)
+    return item
+
+
+def _open(item: Item) -> None:
+    if item.metadata.get("status") == "done":
+        raise LifecycleError(IMMUTABLE, usage=True)
+
+
+def ancestors(items: dict[str, Item], item: Item) -> list[Item]:
+    chain = []
+    parent = item.parent_id
+    while parent in items:
+        chain.append(items[parent])
+        parent = items[parent].parent_id
+    return chain
+
+
+def _descendants(items: dict[str, Item], item_id: str) -> list[Item]:
+    """Descendants in the store's item order."""
+    children: dict[str, list[str]] = {}
+    for other in items.values():
+        if other.parent_id:
+            children.setdefault(other.parent_id, []).append(other.id)
+    found: set[str] = set()
+    pending = list(children.get(item_id, []))
+    while pending:
+        child = pending.pop()
+        found.add(child)
+        pending.extend(children.get(child, []))
+    return [other for other in items.values() if other.id in found]
+
+
+def is_ready(item: Item, items: dict[str, Item]) -> bool:
+    """True when the item and every ancestor are finalized, open, and unblocked."""
+    if item.status == "done":
+        return False
+    current = item
+    while current:
+        if current.draft or current.status == "done":
+            return False
+        if any(d not in items or items[d].status != "done" for d in current.depends_on):
+            return False
+        current = items.get(current.parent_id)
+    return True
+
+
+def invalidate_ancestors(store: Store, item_id: str) -> None:
+    """Bump each ancestor's revision: its acceptance evidence no longer covers its children."""
+    parent_id = store.get(item_id).parent_id
+    while parent_id:
+        ancestor = store.get(parent_id)
+        metadata = copy.deepcopy(ancestor.metadata)
+        metadata["revision"] = _revision(ancestor) + 1
+        store.save(ancestor.id, metadata, ancestor.body)
+        parent_id = ancestor.parent_id
+
+
+@served
+def create(
+    store: Store,
+    title: str,
+    item_type: str,
+    parent_id: str | None,
+    body: str | None = None,
+    project: str | None = None,
+) -> Item:
+    """Create a backlog draft. A child belongs to its parent's project."""
+    _known_type(item_type)
+    if project is not None and not _PROJECT_KEY.match(project):
+        raise LifecycleError(
+            "a project key has 2-10 uppercase letters and digits and starts with a letter", usage=True
+        )
+    if parent_id is not None:
+        parent = store.get(parent_id)
+        if parent is None:
+            raise LifecycleError(f"parent not found: {parent_id}")
+        if project is not None and parent.metadata.get("project") not in (None, project):
+            raise LifecycleError("a child belongs to the project of its parent", usage=True)
+        if parent.status == "done":
+            raise LifecycleError("closed parents are immutable; create a follow-up task")
+        if parent.type in LEAF_TYPES:
+            raise LifecycleError(
+                f"cannot add child to a {parent.type} ({parent_id}): {parent.type} = leaf invariant. "
+                f"Convert the parent first with: taskman convert {parent_id} feat"
+            )
+    item = store.create(
+        item_type=item_type,
+        title=title,
+        body=f"# {title}\n" if body is None else body,
+        parent_id=parent_id,
+        status="backlog",
+        draft=True,
+        project=project,
+    )
+    invalidate_ancestors(store, item.id)
+    return item
+
+
+def _has_description(item: Item) -> bool:
+    """True when the description holds more than a first heading that repeats the title, at any level."""
+    lines = item.body.strip().splitlines()
+    if lines and lines[0].lstrip().startswith("#") and lines[0].strip().lstrip("#").strip() == item.title.strip():
+        lines = lines[1:]
+    return any(line.strip() for line in lines)
+
+
+def ready_gates(item: Item, items: dict[str, Item]) -> list[dict[str, Any]]:
+    """The checks of the definition of ready that ``finalize`` applies, in display order. Changes nothing.
+
+    Each check has ``check``, ``ok`` and ``detail`` (display text). The reviewer checklist
+    itself is the text of the ``review`` comment; Taskman checks that a current one passed.
+    """
+    revision = _revision(item)
+    status, stale_at = _evidence(item.metadata.get("journal") or [], "review", revision)
+    if item.metadata.get("repositories"):
+        repositories = f"Repositories: {', '.join(item.metadata['repositories'])}"
+    else:
+        inherited = inherited_repositories(item, items)
+        repositories = (f"Repositories from {inherited['from']}: {', '.join(inherited['addresses'])}" if inherited
+                        else "No repository on the item or an ancestor")
+    detail = f"stale at rev {stale_at}" if status == "stale" else status
+    return [
+        {"check": "title", "ok": bool(item.title.strip()),
+         "detail": "Title present" if item.title.strip() else "Title is empty"},
+        {"check": "description", "ok": _has_description(item),
+         "detail": "Description present" if _has_description(item) else "Description is empty"},
+        {"check": "repositories", "ok": not repositories.startswith("No "), "detail": repositories},
+        {"check": "review", "ok": status == "pass", "detail": f"Readiness review for rev {revision}: {detail}",
+         "status": status, "revision": revision},
+    ]
+
+
+@served
+def finalize(store: Store, item_id: str) -> Item:
+    """Clear the draft marker when the item meets the definition of ready."""
+    item = _readable(_require(store, item_id, usage=False), usage=False)
+    if item.metadata.get("status") == "done":
+        raise NoChange(f"No change: {item_id} is closed and immutable.")
+    if not item.draft:
+        raise NoChange(f"Item {item_id} is not a draft — nothing to do.")
+    failed = [gate for gate in ready_gates(item, {other.id: other for other in store.items()}) if not gate["ok"]]
+    if failed:
+        lines = [f"cannot finalize {item_id} — the definition of ready is not met:"]
+        lines += [f"  {gate['detail']}" for gate in failed]
+        review = next((gate for gate in failed if gate["check"] == "review"), None)
+        if review and review["status"] == "fail":
+            lines.append("  Fix the failed checks of the latest review, then review the item again:")
+        elif review:
+            lines.append("  Review the item against the checklist of `taskman help`, then record the result:")
+        if review:
+            lines.append(f"  taskman comment {item_id} --kind review --result pass|fail --body-file FILE")
+        raise LifecycleError("\n".join(lines), usage=True)
+    metadata = copy.deepcopy(item.metadata)
+    metadata["draft"] = False
+    return store.save(item_id, metadata, item.body)
+
+
+@served
+def update_body(store: Store, item_id: str, body: str) -> Item:
+    item = _require(store, item_id, usage=True)
+    _open(item)
+    if not body.strip():
+        raise LifecycleError("body must not be empty", usage=True)
+    metadata = copy.deepcopy(item.metadata)
+    metadata["revision"] = _revision(item) + 1
+    item = store.save(item_id, metadata, body)
+    invalidate_ancestors(store, item_id)
+    return item
+
+
+def check_entry(kind: str, actor: str, result: str | None) -> None:
+    """Validate journal entry arguments before any item is read."""
+    if kind not in JOURNAL_KINDS:
+        raise LifecycleError("unknown entry kind", usage=True)
+    if not actor.strip():
+        raise LifecycleError("actor must not be empty", usage=True)
+    if (kind in KIND_RESULTS and result not in KIND_RESULTS[kind]) or (kind not in KIND_RESULTS and result is not None):
+        raise LifecycleError(
+            "verification requires --result pass|fail|blocked, review requires --result pass|fail; "
+            "other entries omit it",
+            usage=True,
+        )
+
+
+@served
+def record(store: Store, item_id: str, kind: str, actor: str, text: str, result: str | None = None) -> Item:
+    check_entry(kind, actor, result)
+    item = _require(store, item_id, usage=True)
+    _open(item)
+    if not text.strip():
+        raise LifecycleError("entry must not be empty", usage=True)
+    metadata = copy.deepcopy(item.metadata)
+    revises = kind in {"progress", "decision"}
+    if revises:
+        metadata["revision"] = _revision(item) + 1
+    entry: dict[str, Any] = {
+        "kind": kind,
+        "actor": actor,
+        "at": _now(),
+        "text": text.strip(),
+        "revision": int(metadata.get("revision", 0)),
+    }
+    if result:
+        entry["result"] = result
+    metadata.setdefault("journal", []).append(entry)
+    item = store.save(item_id, metadata, item.body)
+    if revises:
+        invalidate_ancestors(store, item_id)
+    return item
+
+
+@served
+def set_dependencies(store: Store, item_id: str, depends_on: list[str]) -> Item:
+    item = _require(store, item_id, usage=True)
+    _open(item)
+    deps = list(dict.fromkeys(depends_on))
+    items = {other.id: other for other in store.items()}
+    # A parent completes only after its children. Include those edges when
+    # checking cycles, so a child cannot depend on its own parent.
+    children: dict[str, list[str]] = {}
+    for other in items.values():
+        if other.parent_id:
+            children.setdefault(other.parent_id, []).append(other.id)
+    graph = {other_id: list(other.depends_on) + children.get(other_id, []) for other_id, other in items.items()}
+    graph[item_id] = deps + children.get(item_id, [])
+    if unknown_references(graph):
+        raise LifecycleError("dependency ID not found", usage=True)
+    if any(items[dep].metadata.get("project") != item.metadata.get("project") for dep in deps):
+        raise LifecycleError("dependencies stay inside one project", usage=True)
+    if find_cycles(graph):
+        raise LifecycleError("dependencies would create a cycle (including parent completion)", usage=True)
+    metadata = copy.deepcopy(item.metadata)
+    metadata["depends_on"] = deps
+    metadata["revision"] = _revision(item) + 1
+    item = store.save(item_id, metadata, item.body)
+    invalidate_ancestors(store, item_id)
+    return item
+
+
+def discard_blocker(item: Item, items: dict[str, Item]) -> str | None:
+    """Why ``discard`` would refuse the item, or ``None`` when it can be discarded. Changes nothing."""
+    if item.status == "done":
+        return "closed"
+    if not item.draft:
+        return "not a draft"
+    children = sum(other.parent_id == item.id for other in items.values())
+    if children:
+        return f"has {children} {'child' if children == 1 else 'children'}"
+    dependents = sorted((other.id for other in items.values() if item.id in other.depends_on), key=key_order)
+    if dependents:
+        return f"{', '.join(dependents)} {'depends' if len(dependents) == 1 else 'depend'} on it"
+    return None
+
+
+@served
+def discard(store: Store, item_id: str) -> None:
+    items = {item.id: item for item in store.items()}
+    if item_id not in items:
+        raise LifecycleError(f"item not found: {item_id}", usage=True)
+    item = items[item_id]
+    has_children = any(other.parent_id == item_id for other in items.values())
+    if item.metadata.get("status") == "done" or not item.draft or has_children:
+        raise LifecycleError("only draft leaves can be discarded; handle children first", usage=True)
+    if any(item_id in other.depends_on for other in items.values()):
+        raise LifecycleError("another item depends on this draft", usage=True)
+    invalidate_ancestors(store, item_id)
+    store.delete(item_id)
+
+
+@served
+def move(store: Store, item_id: str, target_status: str) -> Item:
+    item = _require(store, item_id, usage=False)
+    if target_status == "done":
+        return close(store, item_id)
+    if item.status == "done":
+        raise LifecycleError(IMMUTABLE, usage=True)
+    if item.status == target_status:
+        raise NoChange(f"No change: {item_id} already in {target_status}.")
+    items = {other.id: other for other in store.items()}
+    if any(ancestor.status == "done" for ancestor in ancestors(items, item)):
+        raise LifecycleError("closed ancestors are immutable; create a follow-up task", usage=True)
+    if target_status == "active":
+        for current in [item, *ancestors(items, item)]:
+            if current.draft:
+                raise LifecycleError("finalize the item and its ancestors before starting work", usage=True)
+            for dep in current.depends_on:
+                other = _require(store, dep, usage=True)
+                if other.metadata.get("status") != "done":
+                    raise LifecycleError(f"dependency is not done: {dep}", usage=True)
+    moved = store.set_status(item_id, target_status)
+    invalidate_ancestors(store, item_id)
+    return moved
+
+
+@served
+def convert(store: Store, item_id: str, target_type: str) -> Item:
+    _known_type(target_type)
+    item = _require(store, item_id, usage=False)
+    if item.status == "done":
+        raise LifecycleError(IMMUTABLE, usage=True)
+    if item.type == target_type:
+        raise NoChange(f"No change: {item_id} already typed {target_type}.")
+    if target_type in LEAF_TYPES:
+        children = [other for other in store.items() if other.parent_id == item_id]
+        if children:
+            names = ", ".join(sorted(child.id for child in children))
+            raise LifecycleError(f"cannot convert {item_id} to {target_type} — has children: {names}")
+    store.set_type(item_id, target_type)
+    item = store.get(item_id)
+    metadata = copy.deepcopy(item.metadata)
+    metadata["revision"] = _revision(item) + 1
+    item = store.save(item_id, metadata, item.body)
+    invalidate_ancestors(store, item_id)
+    return item
+
+
+def blockers(item: Item, items: dict[str, Item]) -> list[str]:
+    """Unfinished dependencies of the item and its ancestors, item first."""
+    chain = [item, *ancestors(items, item)]
+    deps = dict.fromkeys(dep for current in chain for dep in current.depends_on)
+    return [dep for dep in deps if dep not in items or items[dep].status != "done"]
+
+
+def _evidence(entries: list[dict], kind: str, revision: int) -> tuple[str, int | None]:
+    """The state of the latest summary or verification: its status and, when stale, its revision."""
+    found = [e for e in entries if e.get("kind") == kind]
+    if not found:
+        return "missing", None
+    if kind == "summary":
+        if any(e.get("revision") == revision for e in found):
+            return "present", None
+        return "stale", found[-1].get("revision")
+    if found[-1].get("revision") != revision:
+        return "stale", found[-1].get("revision")
+    return str(found[-1].get("result")), None
+
+
+def close_gates(item: Item, items: dict[str, Item]) -> list[dict[str, Any]]:
+    """The checks that ``close`` applies, in display order. Reads only ``items``; changes nothing.
+
+    Each check has ``check``, ``ok``, ``detail`` (display text) and ``refs`` (keys
+    that fail the check). Summary and verification also have ``status`` and ``revision``.
+    """
+    chain = [item, *ancestors(items, item)]
+    drafts = [current.id for current in chain if current.draft]
+    closed = [ancestor.id for ancestor in chain[1:] if ancestor.status == "done"]
+    deps = list(dict.fromkeys(dep for current in chain for dep in current.depends_on))
+    waiting = blockers(item, items)
+    descendants = _descendants(items, item.id)
+    unfinished = [other.id for other in descendants if other.status != "done"]
+    revision = _revision(item)
+    entries = item.metadata.get("journal") or []
+
+    if not drafts:
+        finalized = "Finalized"
+    elif item.draft:
+        finalized = "Not finalized (draft)"
+    else:
+        finalized = f"Draft ancestor: {', '.join(drafts)}"
+    if closed:
+        dependencies = f"Closed ancestor: {', '.join(closed)}"
+    elif waiting:
+        dependencies = f"Waiting on {', '.join(waiting)}"
+    else:
+        dependencies = f"Dependencies done ({len(deps)}/{len(deps)})" if deps else "No dependencies"
+    done_count = len(descendants) - len(unfinished)
+    children = f"Sub-items done ({done_count}/{len(descendants)})" if descendants else "No sub-items"
+    gates: list[dict[str, Any]] = [
+        {"check": "finalized", "ok": not drafts, "detail": finalized, "refs": drafts},
+        {"check": "dependencies", "ok": not waiting and not closed, "detail": dependencies,
+         "refs": waiting + closed},
+        {"check": "children", "ok": not unfinished, "detail": children, "refs": unfinished},
+    ]
+    for kind, label, passing in (("summary", "Summary", "present"), ("verification", "Verification", "pass")):
+        status, stale_at = _evidence(entries, kind, revision)
+        detail = f"stale at rev {stale_at}" if status == "stale" else status
+        gates.append({"check": kind, "ok": status == passing, "detail": f"{label} for rev {revision}: {detail}",
+                      "refs": [], "status": status, "revision": revision})
+    return gates
+
+
+@served
+def close(store: Store, item_id: str) -> Item:
+    item = _require(store, item_id, usage=False)
+    if item.status == "done":
+        raise NoChange(f"No change: {item_id} already done.")
+    items = {other.id: other for other in store.items()}
+    gates = {gate["check"]: gate for gate in close_gates(item, items)}
+    if not gates["children"]["ok"]:
+        lines = [f"cannot close {item_id} — descendants not in done:"]
+        lines += [f"  {ref}" for ref in gates["children"]["refs"]]
+        raise LifecycleError("\n".join(lines))
+    _readable(item, usage=False)
+    if item.draft:
+        raise LifecycleError("finalize the draft before closing it", usage=True)
+    if not (gates["finalized"]["ok"] and gates["dependencies"]["ok"]):
+        raise LifecycleError("item or ancestor has an unfinished dependency or is a draft", usage=True)
+    if not gates["verification"]["ok"]:
+        raise LifecycleError("record a passing verification for the current revision before closing", usage=True)
+    if not gates["summary"]["ok"]:
+        raise LifecycleError("record a summary for the current revision before closing", usage=True)
+    closed = store.set_status(item_id, "done")
+    invalidate_ancestors(store, item_id)
+    return closed
+
+
+@served
+def edit(store: Store, item_id: str, title: Any, body: Any, reason: Any) -> Item:
+    item = _require(store, item_id, usage=True)
+    if item.metadata.get("status") == "done":
+        raise LifecycleError("Completed work is immutable; create a follow-up task", usage=True)
+    if not isinstance(title, str) or not title.strip() or len(title) > 200:
+        raise LifecycleError("Enter a title of 1–200 characters", usage=True)
+    # Without a description, the current one stays.
+    if body is None:
+        body = item.body
+    # A draft may stay title-only (decision D2); finalized work keeps a description.
+    elif not isinstance(body, str) or (not body.strip() and not item.draft):
+        raise LifecycleError("Description must not be empty", usage=True)
+    # A person in the UI may leave the reason empty; the CLI still asks for one.
+    if reason is not None and not isinstance(reason, str):
+        raise LifecycleError("A reason for the change is text", usage=True)
+    metadata = copy.deepcopy(item.metadata)
+    metadata["title"] = title.strip()
+    metadata["revision"] = _revision(item) + 1
+    if reason and reason.strip():
+        metadata.setdefault("journal", []).append(
+            {
+                "kind": "decision",
+                "actor": store.actor,
+                "at": _now(),
+                "text": reason.strip(),
+                "revision": metadata["revision"],
+            }
+        )
+    item = store.save(item_id, metadata, body)
+    invalidate_ancestors(store, item_id)
+    return item
+
+
+@served
+def assign(store: Store, item_id: str, assignee: str | None) -> Item:
+    """Set or clear the assignee. The revision does not change."""
+    item = _require(store, item_id, usage=True)
+    _open(item)
+    if assignee is not None:
+        assignee = assignee.strip()
+        if not 1 <= len(assignee) <= 100:
+            raise LifecycleError("an assignee has 1-100 characters", usage=True)
+    if item.metadata.get("assignee") == assignee:
+        raise NoChange(f"No change: {item_id} already has this assignee.")
+    metadata = copy.deepcopy(item.metadata)
+    metadata["assignee"] = assignee
+    return store.save(item_id, metadata, item.body)
+
+
+_SCP_REMOTE = re.compile(r"^(?:[^@/:]+@)?([^/:]+):(?!//)(.+)$")
+_URL_REMOTE = re.compile(r"^[a-z][a-z0-9+.-]*://(?:[^@/]+@)?([^/:]+)(?::[0-9]*)?/(.+)$", re.IGNORECASE)
+# A host name with at least one dot, then one or more path segments.
+_HOST_LABEL = r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?"
+_REPOSITORY = re.compile(rf"^{_HOST_LABEL}(?:\.{_HOST_LABEL})+(/[A-Za-z0-9._~-]+)+$")
+
+
+def repository_address(text: str) -> str:
+    """The normal form of a git remote address: host and path, without scheme, user, port or ``.git``.
+
+    ``git@github.com:o/r.git``, ``https://github.com/o/r`` and ``github.com/o/r`` all give
+    ``github.com/o/r``. A local path is not an address: paths differ between machines.
+    """
+    raw = text.strip() if isinstance(text, str) else ""
+    match = _URL_REMOTE.match(raw) or (None if "://" in raw else _SCP_REMOTE.match(raw))
+    address = f"{match[1]}/{match[2]}" if match else raw
+    host, _, path = address.partition("/")
+    path = path.strip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    address = f"{host.lower()}/{path}"
+    # "." and ".." segments make a relative path; "localhost" names another machine for each agent.
+    segments = path.split("/")
+    if len(address) > 200 or not _REPOSITORY.match(address) or any(s in (".", "..") for s in segments):
+        raise LifecycleError(
+            "a repository is a remote address with a host name and a path, such as github.com/OWNER/NAME; "
+            f"local paths are refused: {raw!r}",
+            usage=True,
+        )
+    return address
+
+
+def inherited_repositories(item: Item, items: dict[str, Item]) -> dict[str, Any] | None:
+    """The repositories of the nearest ancestor that names them, when the item names none itself."""
+    if item.metadata.get("repositories"):
+        return None
+    for ancestor in ancestors(items, item):
+        if ancestor.metadata.get("repositories"):
+            return {"from": ancestor.id, "addresses": list(ancestor.metadata["repositories"])}
+    return None
+
+
+@served
+def set_repositories(store: Store, item_id: str, addresses: list[str]) -> Item:
+    """Replace the repositories of an open item. The scope changes, so the revision advances."""
+    item = _require(store, item_id, usage=True)
+    _open(item)
+    repositories = sorted({repository_address(address) for address in addresses})
+    if repositories == sorted(item.metadata.get("repositories") or []):
+        raise NoChange(f"No change: {item_id} repositories are unchanged.")
+    metadata = copy.deepcopy(item.metadata)
+    metadata["repositories"] = repositories
+    metadata["revision"] = _revision(item) + 1
+    item = store.save(item_id, metadata, item.body)
+    invalidate_ancestors(store, item_id)
+    return item
+
+
+@served
+def label(store: Store, item_id: str, add: list[str], remove: list[str]) -> Item:
+    """Add and remove labels. The revision does not change."""
+    item = _require(store, item_id, usage=True)
+    _open(item)
+    bad = [name for name in [*add, *remove] if not _LABEL.match(name)]
+    if bad:
+        raise LifecycleError(
+            f"a label has 1-50 lowercase letters, digits, - or _: {', '.join(bad)}", usage=True
+        )
+    current = list(item.metadata.get("labels") or [])
+    labels = sorted((set(current) | set(add)) - set(remove))
+    if labels == sorted(current):
+        raise NoChange(f"No change: {item_id} labels are unchanged.")
+    metadata = copy.deepcopy(item.metadata)
+    metadata["labels"] = labels
+    return store.save(item_id, metadata, item.body)

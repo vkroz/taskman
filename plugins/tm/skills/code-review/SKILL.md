@@ -5,7 +5,7 @@ description: Review a requested code scope for concrete defects and maintainabil
 
 Arguments: `[scope]`.
 
-Read [the shared workflow](../../references/workflow.md) for CLI syntax, context, journals and closure rules.
+Read [the shared workflow](../../references/workflow.md) for CLI syntax, context, comments and closure rules.
 
 Read the requested code and its requirements. Trace likely defects to an observable failure or specific maintenance consequence; avoid preference-only findings. Inspect relevant tests and run bounded checks when useful.
 

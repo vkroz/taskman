@@ -9,6 +9,8 @@ from pathlib import Path
 
 import typer
 
+from taskman.storage.store import SETUP_HINT
+
 
 @dataclass(frozen=True)
 class Platform:
@@ -97,4 +99,4 @@ def install(
             # install is a no-op for an existing plugin; update is required.
             run([adapter.executable, "plugin", "update", "tm@taskman", "--scope", "user"])
         typer.echo(f"Installed Taskman plugin for {name}.")
-    typer.echo("Use a fresh session to load the plugin. Taskman data stays in the selected project's tasks directory.")
+    typer.echo(f"Use a fresh session to load the plugin. {SETUP_HINT}")

@@ -15,6 +15,12 @@ dependencies = [
 dev = [
     "pytest>=8",
 ]
+postgres = [
+    "psycopg[binary]>=3.2",
+]
+ui = [
+    "playwright==1.63.0",
+]
 
 [project.scripts]
 taskman = "taskman.cli:main"
@@ -30,3 +36,4 @@ packages = ["src/taskman"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = ["ui: workspace page tests; browser tests skip when Playwright or Chromium is missing, or report an error with TASKMAN_TEST_REQUIRE_BROWSER=1"]

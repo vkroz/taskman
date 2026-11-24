@@ -1,0 +1,204 @@
+"""`serve` and `token` commands — run the Taskman server and manage its access tokens.
+
+``serve`` and ``token create`` open the database of the storage settings
+directly. They run on the machine of the server, not on the machines that
+call it. ``token list`` and ``token revoke`` do the same when no server is set,
+or with ``--database``; with a server set, they show and revoke only the
+tokens of the person who is logged in.
+"""
+from __future__ import annotations
+
+import json
+import os
+import signal
+import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from datetime import datetime
+from typing import Any
+
+import typer
+
+from taskman.storage.settings import storage_settings
+from taskman.storage.sql_store import SqlStore, open_sql_store
+from taskman.storage.store import StorageConfigError, StorageError
+
+token_app = typer.Typer(help="Manage the access tokens of a Taskman server.", no_args_is_help=True)
+
+
+@contextmanager
+def _database() -> Iterator[SqlStore]:
+    """The server's database. A settings or storage error ends the command."""
+    try:
+        store = open_sql_store(storage_settings())
+    except StorageConfigError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(2) from None
+    try:
+        yield store
+    except StorageError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1) from None
+    finally:
+        store.close()
+
+
+_DATABASE_HELP = "Use the database of the storage settings, not the server: the tokens of every person."
+
+
+def _server_store(database: bool):
+    """The store of the Taskman server of the login, or ``None`` for direct database use."""
+    from taskman.storage.remote import open_remote_store, server_url
+
+    try:
+        return open_remote_store() if not database and server_url() else None
+    except StorageConfigError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(2) from None
+
+
+def _on_server(request: Callable[[], Any]) -> Any:
+    """The answer of a request to the server. An error answer ends the command."""
+    try:
+        return request()
+    except StorageConfigError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(2) from None
+    except StorageError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1) from None
+    except KeyError as exc:
+        typer.echo(f"Error: {exc.args[0]}.", err=True)
+        raise typer.Exit(1) from None
+
+
+def _when(value: str | None, missing: str) -> str:
+    return datetime.fromisoformat(value).strftime("%Y-%m-%d %H:%M UTC") if value else missing
+
+
+def _token_line(row: dict[str, Any]) -> str:
+    """One token as text. A token from the server has no person: it is the caller's own."""
+    person = f"{row['person']}  " if "person" in row else ""
+    revoked = f"revoked {_when(row['revoked_at'], '')}" if row["revoked_at"] else "not revoked"
+    return (f"{row['id']}  {person}{row['label'] or '-'}  created {_when(row['created_at'], '-')}  "
+            f"expires {_when(row['expires_at'], 'never')}  last used {_when(row['last_used_at'], 'never')}  {revoked}")
+
+
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="Address to listen on. Use 0.0.0.0 in a container."),
+    port: int | None = typer.Option(None, "--port", help="Port to listen on. Default: the PORT variable, or 8080."),
+) -> None:
+    """Run the Taskman server that the CLI calls."""
+    from taskman.server import make_server
+
+    if port is None:
+        try:
+            port = int(os.environ.get("PORT", "") or 8080)
+        except ValueError:
+            typer.echo("Error: PORT must be a number.", err=True)
+            raise typer.Exit(2) from None
+    from taskman.login import Logins, login_settings
+
+    try:
+        settings = login_settings()
+    except StorageConfigError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(2) from None
+    with _database() as store:
+        try:
+            server = make_server(host, port, store, logins=Logins(store, settings) if settings else None)
+        except (OSError, OverflowError) as exc:  # OverflowError: a port out of the range 0-65535
+            typer.echo(f"Error: Taskman cannot listen on {host}:{port}: {getattr(exc, 'strerror', None) or exc}", err=True)
+            raise typer.Exit(2) from None
+        if settings:
+            typer.echo(f"Browser login with Google is on for {settings.public_url}.")
+        else:
+            typer.echo("Browser login is off: TASKMAN_GOOGLE_CLIENT_ID is not set. Tokens work.")
+        # serve_forever must not be stopped from its own thread.
+        signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown).start())
+        typer.echo(f"Taskman server listens on http://{host}:{server.server_port}/  (Ctrl+C to stop)")
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            typer.echo("\nShutting down.")
+        finally:
+            server.server_close()
+
+
+@token_app.command("create")
+def token_create(
+    person: str = typer.Option(..., "--person", help="Name of the person the token stands for."),
+    label: str = typer.Option("", "--label", help="Where the token is used, for example a machine name."),
+    days: int = typer.Option(90, "--days", help="Days until the token expires."),
+    database: bool = typer.Option(False, "--database", help="Create it in the database of the storage settings. "
+                                  "Needed when a server is set."),
+) -> None:
+    """Create a token for a person in the database. The token is shown one time.
+
+    With a server set, a person gets a token on the server's /auth/token page.
+    """
+    from taskman.storage.accounts import create_token
+    from taskman.storage.remote import server_url
+
+    try:
+        server = "" if database else server_url()
+    except StorageConfigError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(2) from None
+    if server:
+        # The server has no command to create a token: this would write to a local database, not to the server.
+        typer.echo(f"Error: a server is set ({server}), and `token create` does not use it. Get your token on "
+                   f"{server}/auth/token. To create a token in the database of the storage settings, add --database.",
+                   err=True)
+        raise typer.Exit(2)
+    with _database() as store:
+        token_id, token = create_token(store, person, label, days)
+    typer.echo(f"Token {token_id} for {person.strip()}, valid for {days} days. Store it now; it is not shown again.", err=True)
+    typer.echo(token)
+
+
+@token_app.command("list")
+def token_list(
+    as_json: bool = typer.Option(False, "--json", help="Emit structured JSON."),
+    database: bool = typer.Option(False, "--database", help=_DATABASE_HELP),
+) -> None:
+    """List your tokens on the server of the login. With no server set: every token of the database.
+
+    A token's value is never shown.
+    """
+    from taskman.storage.accounts import list_tokens
+
+    remote = _server_store(database)
+    if remote is not None:
+        tokens = _on_server(remote.tokens)
+    else:
+        with _database() as store:
+            tokens = list_tokens(store)
+    if as_json:
+        typer.echo(json.dumps(tokens, indent=2))
+        return
+    if not tokens:
+        typer.echo("(no tokens)")
+    for row in tokens:
+        typer.echo(_token_line(row))
+
+
+@token_app.command("revoke")
+def token_revoke(
+    token_id: int = typer.Argument(..., help="Token ID from `taskman token list`."),
+    database: bool = typer.Option(False, "--database", help=_DATABASE_HELP),
+) -> None:
+    """Revoke a token. The next call with it fails. With a server set: only a token of your own."""
+    from taskman.storage.accounts import revoke_token
+
+    remote = _server_store(database)
+    if remote is not None:
+        _on_server(lambda: remote.revoke_token(token_id))
+        typer.echo(f"Revoked token {token_id}.")
+        return
+    with _database() as store:
+        revoked = revoke_token(store, token_id)
+    if not revoked:
+        typer.echo(f"Error: no active token has the ID {token_id}.", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Revoked token {token_id}.")

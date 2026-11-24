@@ -1,28 +1,39 @@
-"""Serialize CLI and UI mutations of the same task tree."""
-from contextlib import contextmanager
+"""Run CLI mutations under the store's write lock."""
+import inspect
 from functools import wraps
-from pathlib import Path
-from threading import RLock
-import fcntl
+from typing import Optional
 
-_thread_lock = RLock()
+import typer
 
-
-@contextmanager
-def mutation_lock(tasks_dir: Path):
-    tasks_dir.mkdir(parents=True, exist_ok=True)
-    with _thread_lock, (tasks_dir / "_taskman.lock").open("a") as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle, fcntl.LOCK_UN)
+_ACTOR_HELP = "Author of the change. Default: the person of the token on a server, the git user.name with a local database."
 
 
 def mutating(command):
+    """Run the command under the store lock, with an optional ``--actor`` (decision M1).
+
+    A command that declares its own ``actor`` parameter receives the value too.
+    """
+    signature = inspect.signature(command)
+    own_actor = "actor" in signature.parameters
+
     @wraps(command)
-    def wrapped(*args, **kwargs):
-        from taskman.commands.new import get_tasks_dir
-        with mutation_lock(get_tasks_dir()):
+    def wrapped(*args, actor=None, **kwargs):
+        from taskman.storage.store import open_store
+
+        store = open_store()
+        if actor:
+            store.actor = actor
+        if own_actor:
+            kwargs["actor"] = actor
+        with store.lock():
             return command(*args, **kwargs)
+
+    if not own_actor:
+        option = inspect.Parameter(
+            "actor",
+            inspect.Parameter.KEYWORD_ONLY,
+            default=typer.Option(None, "--actor", help=_ACTOR_HELP),
+            annotation=Optional[str],
+        )
+        wrapped.__signature__ = signature.replace(parameters=[*signature.parameters.values(), option])
     return wrapped

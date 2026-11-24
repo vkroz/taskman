@@ -1,17 +1,94 @@
 # Taskman workspace design
 
-Make the work collection the primary surface. Use a quiet light canvas, dark ink, restrained indigo accents, consistent 8px spacing, 14px body type, rounded controls and visible keyboard focus. The left navigation offers All work, Current, Backlog, Done and Consolidated history. The central hierarchical list uses aligned status, type and priority columns; clicking a title opens an optional details panel. Narrow screens stack panels without horizontal page overflow.
+The workspace is one HTML file with no build step and no external files. It works offline. It shows what Taskman derives, not raw fields: state, blockers, leaf progress, latest verification, readiness and close readiness. People finalize drafts from the item panel when the definition of ready is met. People and agents move and close open items from the status field of the item panel, or through the CLI. The page shows whether an item can close and why not.
 
-Rows have distinct expand buttons and selection checkboxes. Checking an item selects it and all descendants, including collapsed or filtered descendants in the ordinary collection. Unchecking an item deselects only that item; other selections remain unchanged. Collapse state survives refresh. Search and filters retain matching descendants with dimmed contextual ancestors; a contextual ancestor is explicitly labeled and is not counted as a match. Sorting applies within siblings with ID as a deterministic tie breaker. Filters combine with AND; comma-separated exact values within a field use OR. Contains searches nested values as text; exists detects field presence. Every discovered frontmatter key, including nested journal content and extension fields, is offered, with parent_id added as a derived attribute. Epic scope includes its descendants. Empty results offer Clear filters.
+## Layout
 
-Creation and editing use a labeled dialog. Editing supports title and description of open work and records a reason. Completed records remain read-only. Delete is intentionally limited to unreferenced draft leaves, matching the existing discard contract; finalized work remains durable. Commands explain ineligible actions. Details show metadata, body and attributed journals; Escape or Close returns space to the collection.
+- A sidebar holds the connection indicator, the views, the projects and the shortcut list. Each view and project shows its count.
+- A 48px top bar shows the view title, the project scope, the match count, the search field and **New**.
+- A toolbar holds facet filters (Project, State, Type, Assignee, Label, Draft), an advanced filter, the sort order and the Display menu.
+- The list is a tree grid with 36px rows. A row shows the type icon, the key, the title, up to two labels, a Draft chip, the verification mark, leaf progress for epics and features that have tasks, the state, the owner and the last update. A blocked row names its blockers as links. An agent owner has a glyph avatar.
+- The detail panel opens beside the list at 1150px and wider. It is 420px wide, and 480px from 1600px. On narrower screens it is a full-height sheet with a Back control.
+- Below 720px, a 48px app bar has a view select, search, the connection indicator and a **New item** button. All filters move to one sheet. Rows have two lines.
+- As the list narrows, its columns drop in this order: last update, owner name, labels, progress. Without owner names, the Owner header shows a person icon.
 
-Completed-work consolidation creates a documentation summary and a manifest under docs/taskman-history. Original task files remain byte-for-byte in place as the canonical archive; manifest membership removes them from ordinary UI and CLI collections. Explicit history views, show and context still retrieve the originals, preserving parent relationships and dependency resolution. Selecting a parent includes all descendants and requires all to be done. Selecting a completed child of an open parent is allowed; history remains retrievable and the open parent is untouched. Overlapping selections are deduplicated. Repeated consolidation of already consolidated work is rejected.
+## Views
 
-A consolidation is one atomically published JSON manifest embedding the summary and item IDs, preceded by the Markdown summary write. A failed manifest write can leave an unlisted summary, but never hide work without a summary or destroy history. Generated filenames are unique. The summary retains each item's completion summary, significant decisions and verification evidence without copying progress chatter; links retain original records. Plain UTF-8 Markdown in docs is readable outside Taskman. No model or network request is needed.
+The views are Attention (the default), Active, Ready, Blocked, Drafts, Backlog and Done. Attention, Ready, Blocked and Done are flat lists with a parent breadcrumb on each row. Attention rows show the reason. Blocked groups items by their first blocker. Done shows the newest first, grouped as Today, This week and Earlier. In Done, the default sort is named "Newest first". Active, Backlog and Drafts are trees with dimmed context ancestors. When more than one project is visible, a header separates the projects.
 
-Visual checks: no horizontal page overflow at desktop or phone widths; titles wrap without overlapping controls; statuses are readable without color alone; every input has a label; focus is visible; empty and error states identify a recovery action. Walkthrough: switch Current/Backlog/Done, scope an epic, combine keyword and metadata, sort siblings, collapse a branch, dismiss/reopen details, create/edit/discard an eligible draft, consolidate a done subtree and retrieve history. The browser must remain functional offline.
+## Filters, search and sort
 
-Implementation uses a shared Python query service for CLI and UI. `taskman browse` accepts `--where FIELD=VALUE`, `--contains FIELD=TEXT`, `--exists FIELD`, `--missing FIELD`, `--keyword`, `--epic`, `--sort` and `--descending`. Exact matches support comma-separated alternatives; nested structures use contains. `--include-archived` includes consolidated originals. JSON rows mark contextual ancestors explicitly. `taskman list` omits consolidated records; direct `show` and `context` retain ID lookup.
+A facet opens a checklist of the values in the current view, with counts. A click applies the filter at once. Values of one facet combine with OR, and facets combine with AND. Each applied filter shows as a chip that removes it. **Clear** removes the search, the facets, the advanced conditions and the epic scope. The advanced filter offers item fields with display names and applies 300ms after the last change. Search matches text in the item and its metadata. A key such as `TM-10` followed by Enter opens that item. In tree views, sort applies among siblings. Flat views sort the whole list. Manual order changes by drag within one parent and one project. Done items cannot move. An empty result names each active filter and can remove it.
 
-History documentation uses bounded excerpts: latest completion summary, last three decisions and last verification, with a link to the complete immutable original and counts when entries are omitted. This is deterministic condensation, not an AI-authored interpretation. Invalid or incomplete manifests do not hide tasks. A missing summary document restores ordinary visibility; original task files remain unchanged in every case.
+## Detail panel
+
+From top to bottom, the panel shows:
+
+1. The type, the key (a click copies it), Copy link, previous and next, and close. Copy link copies the link for a coding session: the server address and the key (`https://taskman.example.com/items/TM-42`), or the key alone when the UI uses a local database.
+2. The project and the ancestors as links.
+3. The title, the state, the status, the owner, the labels, the repositories, and the creation and update times. In open work, the title, the status, the owner, the labels and the repositories are fields that you edit in place.
+4. A menu with Add comment, Show only its sub-items, and Delete draft. Delete draft shows only for a draft that can be discarded. Otherwise the menu gives the reason, for example "has 1 child". A done item shows "Closed with evidence" and no actions.
+5. For a draft, the definition of ready: title, description, repositories and the readiness review for the current revision, each with pass or fail. The verdict is "Ready to finalize" or "Not ready" with the number of open checks. **Finalize** is disabled while a check fails, and a line below the checks names each cause. A failed or missing review adds how to record one.
+6. Close readiness for open items: finalized ("Not finalized (draft)" for a draft), dependencies, sub-items, summary and verification for the current revision. The verdict is "Ready to close" with the `taskman close` command, or "Not closable" with the number of open checks.
+7. The description as Markdown. The page builds every node with DOM text, so item text never becomes markup. A first heading equal to the title is not repeated. In open work, a click or Enter on the description changes it to a text field.
+8. Sub-items with a segmented progress bar, blocked items first. **Add sub-item** shows on open epics and features.
+9. Depends on and Blocks.
+10. One timeline of comments and field changes, newest first. Filters are All, Evidence, Decisions, Handoffs and Changes. Each comment shows its kind, actor, revision and time. A verification shows its result. A divider marks the start of each revision.
+
+## Edit in place
+
+Open work has no Edit button. A click on a field starts the edit, and the field saves when focus leaves it. Esc restores the saved value. Enter saves the title, the owner, the labels and the repositories; Ctrl+Enter or Cmd+Enter saves the description.
+
+- **Title and description**: while you edit one of them, an optional "Reason for the change" field shows below it. A reason becomes a decision comment by the store actor. Without a reason, the change has no comment; the timeline still shows the change. A draft can have an empty description. If someone changed the title or description after the page showed it, the field keeps the typed text and offers Reload theirs or Overwrite with mine.
+- **Status**: Backlog, Active or Done. A move that the lifecycle refuses now is disabled and gives the cause, for example "Active (finalize first)", "Active (finalize TM-4 first)" for a draft ancestor, "Active (blocked by TM-7)" or "Done (2 checks open)". Done closes the item.
+- **Assignee**: a text field that suggests known people and agents. An empty field removes the assignee.
+- **Labels**: Enter or a comma adds a label, and the remove button or Backspace removes one. The page lowercases labels and rejects labels that do not match `^[a-z0-9_-]{1,50}$`.
+- **Repositories**: git remote addresses, separated by spaces or commas. The server stores each one as host and path and refuses a local path. An empty field removes the own repositories. Then the placeholder shows the inherited repositories and the ancestor that names them.
+
+A failed save keeps the typed value in the field and shows the error below it. A poll does not render over a field that has an unsaved value. Opening another item while a field shows a failed save asks first: Discard and open, or Cancel. Esc during a running save keeps the value that is being saved. Completed work shows read-only fields.
+
+## Dialogs and changes
+
+All dialogs share one component with a title, a close button and a footer. The read-only shortcut sheet has only **Done**. Ctrl+Enter or Cmd+Enter submits. When a form has changes, Esc, Cancel or a click outside asks before it discards them. A submit disables its button until the server answers, so a second submit does nothing.
+
+- **Create** has a title field, type pills, a parent picker grouped by project and a project select. A parent sets and locks the project. A new project needs a second submit to confirm. The description is optional. After create, the page expands the parent, shows and flashes the new row, and offers to copy `/tm:plan KEY`.
+- **Add comment** defaults to Progress and explains each kind. A verification requires Pass, Fail or Blocked.
+- **Delete draft** asks for confirmation. Focus then moves to the next row, or to the previous row at the end of the list.
+
+Completed records remain read-only. Delete is limited to unreferenced draft leaves.
+
+## Live updates and URL
+
+The page polls every 5 seconds after the previous poll completes. It sends the last etag, so an unchanged workspace returns no rows. A poll never moves focus, clears a text selection or rebuilds a control in use. Rows are patched in place by key. A changed row flashes for 2 seconds. The open item renders again only when it changed and the user is not reading or typing in it. Its poll sends the etag of the rendered item, so an unchanged item returns no data. When the open item is deleted, the panel keeps the title and disabled actions under a notice and removes the rest. Polling stops while the page is hidden. After a network error, the page retries after 10, 30 and 60 seconds. The connection indicator shows Live, Reconnecting with Retry, or Offline since a time with the last data still visible. It has one line under the product name; its tooltip has the full text. While data shows, the error banner names the cause, "Taskman server is not reachable", and Retry stays in the indicator. A failed first load shows Retry in the banner and in the empty list. Messages after a change are toasts that disappear after 4 seconds.
+
+The URL holds the view, the project, the search, the filters, the sort and the open item, for example `/?view=ready&project=RES&label=bug&item=RES-5`. Filter changes replace the history entry. Opening an item adds one, so Back closes the panel. Collapse state and the theme choice stay in browser storage.
+
+## Keyboard
+
+The list is one tab stop. Tab from search goes to the list. ↑ and ↓ or j and k move, and the open panel follows. ← and → collapse and expand. Home and End go to the first and last item. Enter or o opens the item and moves focus to the panel. Esc closes the innermost layer and returns focus to the row. / focuses search. c creates an item under the focused epic or feature. ? shows the shortcuts.
+
+## Visual system
+
+Colours are tokens for a light and a dark theme. The theme follows the system. The Display menu can set light or dark. Colour shows meaning only: state, verification and blocked. Violet marks interaction: the primary button, focus, selection and links. Text has a contrast of at least 4.5:1, and focus rings and input borders at least 3:1. Type sizes are 12, 13, 14, 16 and 20px, with weights 400, 500 and 600. Spacing uses a 4px grid. Radii are 4, 6 and 8px. Icons are inline SVG and always have a text or label next to them.
+
+## Checks
+
+`tests/ui/test_workspace_ui.py` drives Chromium through Playwright against a seeded `taskman ui` server at 1440x900 and 390x844. It checks density, row content, views and counts, projects, URL state, the detail panel, polling safety, data integrity, edit in place, filters, the keyboard, create and comment, errors, the offline indicator, the mobile layout, contrast in both themes and escaping. Each test that changes data gets its own server on a copy of the seed. `tests/ui/test_workspace_css.py` checks without a browser that styles use only the tokens and the type, weight and radius scales. All these tests are marked `ui`: `uv run pytest -m ui` runs only them. The browser tests need the `ui` extra (`uv sync --extra ui`). They skip when Playwright is not installed or Chromium cannot start. With `TASKMAN_TEST_REQUIRE_BROWSER=1`, as in CI, they fail instead.
+
+## Query service
+
+Implementation uses a shared Python query service for CLI and UI. `taskman browse` accepts `--where FIELD=VALUE`, `--contains FIELD=TEXT`, `--exists FIELD`, `--missing FIELD`, `--keyword`, `--epic`, `--project`, `--sort` and `--descending`. Exact matches support comma-separated alternatives; nested structures use contains. JSON rows mark contextual ancestors explicitly.
+
+## Workspace server
+
+`taskman ui` serves the page at `/` and at an item path such as `/TM-7`. The page reads its state from the query string. Responses are compact JSON. Every API error is JSON with an `error` text. Mutations need the `X-Taskman: 1` header and a local `Host`.
+
+- `POST /api/query` returns the projects with open counts, the item count of each view, facet counts, and the rows of one view. A row has no description, journal or internal fields. It has derived signals: state, blockers, leaf progress, latest verification, attention reason and last update. The response has an `etag`. When the request sends the same `etag`, the response is only `{etag, unchanged: true}`.
+- The views are Attention, Active, Ready, Blocked, Drafts, Backlog and Done. Attention holds open items with a failed or blocked current verification, a handoff as the latest comment, or all close gates passed. Ready holds backlog items that can start. Blocked holds finalized open items that are not ready.
+- `GET /api/show/KEY` adds ancestors, children, dependencies, dependents, the close gates and whether the item can be discarded, with the reason when it cannot. `taskman close` uses the same close gates. The response has an `etag`. `GET /api/show/KEY?etag=ETAG` with the current `etag` returns only `{etag, unchanged: true}`.
+- `POST /api/edit` with `base_title` and `base_body` returns 409 with the current text when another actor changed the title or description after the editor opened. Comments, assignee and label changes do not cause a conflict. Without `body`, `POST /api/edit` keeps the description. The `reason` is optional; a reason that is not empty becomes a decision comment.
+- `POST /api/fields` sets the assignee and the labels in one transaction.
+- `POST /api/finalize` finalizes a draft that meets the definition of ready; it answers 400 with the failed checks otherwise. `GET /api/show/KEY` gives `ready_gates` for a draft and `link` for every item.
+- `POST /api/repositories` replaces the repositories of an open item. `GET /api/show/KEY` gives `inherited_repositories`.
+- `POST /api/move` with `status` `backlog`, `active` or `done` moves the item, as `taskman move` does. A move to `done` closes the item through the close gates.
+- `POST /api/reorder` moves an item to a one-based `position` among its siblings, as `taskman reorder --position` does. The top-level items of each project have their own order.

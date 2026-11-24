@@ -1,0 +1,79 @@
+# Checks of every pull request, and of every deployment (deploy-nemos-infra.yml calls
+# this workflow first). The commands are those of AGENTS.md, "Build, Test, and
+# Development Commands".
+name: CI
+
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    name: Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      # PostgreSQL 16, the version of the Cloud SQL instance.
+      postgres:
+        image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: taskman_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready --username=postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      TASKMAN_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/taskman_test
+      # A missing Playwright or Chromium fails the browser tests instead of skipping them.
+      TASKMAN_TEST_REQUIRE_BROWSER: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+      - name: Install the locked environment
+        working-directory: taskman
+        run: uv sync --locked --extra dev --extra postgres --extra ui
+      - name: Install Chromium for the browser tests
+        working-directory: taskman
+        run: uv run playwright install --with-deps chromium
+      - name: Tests
+        working-directory: taskman
+        run: uv run pytest
+      - name: Deployment scripts
+        run: shellcheck -x deploy/gcp/*.sh
+
+  image:
+    name: Container image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: taskman
+          push: false
+          load: true
+          tags: taskman:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test
+        # The CLI starts; the server refuses to start without database settings.
+        run: |
+          docker run --rm taskman:ci --help
+          status=0
+          docker run --rm -e TASKMAN_BACKEND=postgres taskman:ci serve || status=$?
+          test "$status" -eq 2

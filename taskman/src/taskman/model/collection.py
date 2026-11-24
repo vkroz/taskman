@@ -1,71 +1,30 @@
-"""Shared collection queries and non-destructive completed-work consolidation."""
+"""Collection queries shared by `taskman browse` and the UI."""
 
 from __future__ import annotations
 
 import json
-import os
-import tempfile
-import uuid
-from pathlib import Path
+from collections.abc import Iterable
 
-from taskman.model.layout import iter_work_items, parent_item_path
-from taskman.model.names import parse_name, special_file_name
-from taskman.model.yaml_io import read_file
-from taskman.commands.show import _to_plain
+from taskman.lifecycle import ITEM_TYPES
+from taskman.model.ordering import apply_order
+from taskman.storage.store import Item, Store, key_order
 
 
-def history_dir(tasks_dir: Path) -> Path:
-    return tasks_dir.parent / "docs" / "taskman-history"
-
-
-def histories(tasks_dir: Path) -> list[dict]:
-    records = []
-    for path in sorted(history_dir(tasks_dir).glob("*.json")):
-        try:
-            value = json.loads(path.read_text())
-            if (
-                not isinstance(value, dict)
-                or not isinstance(value.get("ids"), list)
-                or not all(isinstance(i, str) for i in value["ids"])
-            ):
-                continue
-            if not all(
-                isinstance(value.get(k), str)
-                for k in ("key", "title", "summary", "path")
-            ):
-                continue
-            # Never hide records if the published documentation has disappeared.
-            if not (history_dir(tasks_dir) / (value["key"] + ".md")).is_file():
-                continue
-            records.append(value)
-        except (OSError, ValueError, TypeError):
-            continue
-    return records
-
-
-def collection(tasks_dir: Path, include_archived=False) -> list[dict]:
-    archived = {i for h in histories(tasks_dir) for i in h["ids"]}
+def collection(store: Store) -> list[dict]:
     rows = []
-    for path in iter_work_items(tasks_dir):
-        wi = parse_name(path.name)
-        if wi.item_id in archived and not include_archived:
-            continue
-        file = path / special_file_name(wi.item_id) if path.is_dir() else path
-        data, body = read_file(file)
-        parent = parent_item_path(path, tasks_dir)
+    for item in store.items():
+        if item.error:
+            raise ValueError(item.error)
         rows.append(
             {
-                "id": wi.item_id,
-                "parent_id": parse_name(parent.name).item_id if parent else None,
-                "metadata": _to_plain(data),
-                "body": body,
-                "path": str(path),
-                "archived": wi.item_id in archived,
+                "id": item.id,
+                "parent_id": item.parent_id,
+                "metadata": item.metadata,
+                "body": item.body,
+                "path": item.location,
             }
         )
-    from taskman.model.ordering import apply_order
-
-    return apply_order(rows, tasks_dir)
+    return apply_order(rows, store.sibling_order())
 
 
 def field_value(row, key):
@@ -79,9 +38,12 @@ def text_value(value):
 
 
 def query(
-    rows: list[dict], filters=(), keyword="", epic="", sort="priority", descending=False
+    rows: list[dict], filters=(), keyword="", epic="", sort="priority", descending=False, where=None
 ):
-    """Filter matches then order siblings; return matches with contextual ancestors."""
+    """Filter matches then order siblings; return matches with contextual ancestors.
+
+    ``where`` is an optional extra condition on a row. Sort ``id`` orders keys numerically.
+    """
     if not isinstance(filters, (list, tuple)) or not all(
         isinstance(f, dict) and isinstance(f.get("field"), str) for f in filters
     ):
@@ -100,6 +62,8 @@ def query(
         return False
 
     def matches(row):
+        if where is not None and not where(row):
+            return False
         if epic and not within(row):
             return False
         if (
@@ -152,14 +116,19 @@ def query(
 
     def order(row):
         if sort == "priority":
-            return (0, row.get("order", 0), row["id"])
+            return (0, row.get("order", 0), key_order(row["id"]))
+        if sort == "id":
+            return (0, 0, key_order(row["id"]))
+        if sort == "type":  # The type order of the type filter, not the names: Bugfix comes last.
+            kind = row["metadata"].get("type")
+            return (0, ITEM_TYPES.index(kind) if kind in ITEM_TYPES else len(ITEM_TYPES), key_order(row["id"]))
         value = field_value(row, sort)
         # Numeric priorities and revisions should not sort lexicographically.
         if isinstance(value, (int, float)) or (
             isinstance(value, str) and value.isdigit()
         ):
-            return (0, float(value), row["id"])
-        return (1, text_value(value).casefold(), row["id"])
+            return (0, float(value), key_order(row["id"]))
+        return (1, text_value(value).casefold(), key_order(row["id"]))
 
     result = []
 
@@ -172,102 +141,15 @@ def query(
     return result
 
 
-def atomic_text(path: Path, text: str):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".pending-")
-    try:
-        with os.fdopen(fd, "w") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
+def in_project_order(rows: list[dict], projects: list[dict[str, str]]) -> list[dict]:
+    """Group rows by project in project order; the stable sort keeps each project's tree order."""
+    position = {p["key"]: index for index, p in enumerate(projects)}
+    return sorted(rows, key=lambda row: position.get(row["metadata"].get("project"), len(position)))
 
 
-def compact_text(text: str, limit: int = 420) -> str:
-    """Bound each evidence excerpt; the immutable original carries full detail."""
-    text = " ".join(text.split())
-    if len(text) <= limit:
-        return text
-    return text[:limit].rsplit(" ", 1)[0] + " … (full detail in original record)"
-
-
-def consolidate(tasks_dir: Path, ids: list[str], title: str) -> dict:
-    if not isinstance(title, str) or not title.strip() or len(title) > 200:
-        raise ValueError("Enter a summary title of 1–200 characters")
-    rows = collection(tasks_dir, True)
-    by_id = {r["id"]: r for r in rows}
-    if not ids:
-        raise ValueError("Select completed work to consolidate")
-    if any(id not in by_id for id in ids):
-        raise ValueError("Selected item not found")
-    selected = set(ids)
-    changed = True
-    while changed:
-        before = len(selected)
-        selected.update(r["id"] for r in rows if r["parent_id"] in selected)
-        changed = len(selected) != before
-    chosen = [r for r in rows if r["id"] in selected]
-    if any(r["metadata"].get("status") != "done" for r in chosen):
-        raise ValueError("Every selected item and descendant must be done")
-    if any(r["archived"] for r in chosen):
-        raise ValueError(
-            "Selection includes already consolidated work; select unconsolidated items"
-        )
-    key = uuid.uuid4().hex
-    directory = history_dir(tasks_dir)
-    lines = [
-        "# " + title.strip(),
-        "",
-        "Completed work retained in Taskman; original requirements and evidence remain available by ID.",
-        "",
-    ]
-    for row in chosen:
-        meta = row["metadata"]
-        lines += [
-            "## " + str(meta.get("title", row["id"])),
-            "",
-            "Taskman ID: " + row["id"],
-            "",
-        ]
-        journal = meta.get("journal") or []
-        summaries = [e for e in journal if e.get("kind") == "summary"]
-        decisions = [e for e in journal if e.get("kind") == "decision"]
-        evidence = [e for e in journal if e.get("kind") == "verification"]
-        if not summaries:
-            lines += [
-                "No completion summary recorded. See original specification below.",
-                "",
-            ]
-        for e in summaries[-1:] + decisions[-3:] + evidence[-1:]:
-            lines += [
-                f"**{e.get('kind', '').title()}** ({e.get('actor', 'unknown')})"
-                + (" — " + str(e["result"]) if "result" in e else ""),
-                compact_text(
-                    str(e.get("text", "")), 420 if e.get("kind") == "summary" else 220
-                ),
-                "",
-            ]
-        if len(decisions) > 3 or len(evidence) > 1:
-            lines += [
-                f"Original record contains {len(decisions)} decisions and {len(evidence)} verification entries; excerpts above show the latest.",
-                "",
-            ]
-        original = Path(row["path"])
-        if original.is_dir():
-            original = original / special_file_name(row["id"])
-        relative = os.path.relpath(original, directory)
-        lines += [f"[Full requirements, decisions and evidence]({relative})", ""]
-    summary = "\n".join(lines)
-    result = {
-        "key": key,
-        "title": title.strip(),
-        "ids": sorted(selected),
-        "summary": summary,
-        "path": str(Path("docs") / "taskman-history" / f"{key}.md"),
-    }
-    atomic_text(directory / f"{key}.md", summary)
-    atomic_text(directory / f"{key}.json", json.dumps(result, indent=2))
-    return result
+def in_manual_order(store: Store, items: Iterable[Item]) -> list[Item]:
+    """The items in the manual order of the UI: by project, then depth-first, siblings by rank, then key."""
+    rows = in_project_order(query(collection(store)), store.projects())
+    position = {row["id"]: index for index, row in enumerate(rows)}
+    # An item that another process adds after this read comes last.
+    return sorted(items, key=lambda item: position.get(item.id, len(position)))

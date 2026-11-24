@@ -13,3 +13,6 @@ htmlcov/
 # Virtual envs
 .venv/
 venv/
+
+# Local secrets for compose.yaml
+.secrets/

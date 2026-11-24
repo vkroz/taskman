@@ -1,63 +1,30 @@
-"""Durable sibling ordering stored outside immutable work-item records."""
+"""Sibling order: the store keeps a rank per item.
+
+Children are ordered under their parent. Top-level items are ordered within
+their project, under the group key ``root:<PROJECT>``.
+"""
 
 from __future__ import annotations
 
-import json
-import os
-import tempfile
-from pathlib import Path
+from taskman.storage.store import Store, key_order, served
 
 
-_ORDER_FILE = ".taskman-order.json"
-_ROOT = "root"
+def sibling_group(row: dict) -> str:
+    """The parent ID, or ``root:<PROJECT>`` for a top-level item."""
+    return row["parent_id"] or f"root:{row['metadata'].get('project')}"
 
 
-def _read(tasks_dir: Path) -> dict[str, list[str]]:
-    path = tasks_dir / _ORDER_FILE
-    if not path.exists():
-        return {}
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise ValueError(f"Cannot read persisted task order: {exc}") from exc
-    parents = value.get("parents") if isinstance(value, dict) else None
-    if not isinstance(parents, dict) or not all(
-        isinstance(key, str)
-        and isinstance(ids, list)
-        and all(isinstance(item_id, str) for item_id in ids)
-        for key, ids in parents.items()
-    ):
-        raise ValueError("Persisted task order is invalid")
-    return parents
-
-
-def _write(tasks_dir: Path, parents: dict[str, list[str]]) -> None:
-    tasks_dir.mkdir(parents=True, exist_ok=True)
-    path = tasks_dir / _ORDER_FILE
-    handle, temporary = tempfile.mkstemp(prefix=".taskman-order-", dir=tasks_dir)
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8") as output:
-            json.dump({"version": 1, "parents": parents}, output, indent=2)
-            output.write("\n")
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(temporary, path)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
-
-
-def apply_order(rows: list[dict], tasks_dir: Path) -> list[dict]:
+def apply_order(rows: list[dict], parents: dict[str, list[str]]) -> list[dict]:
     """Add numeric sibling order without changing work-item metadata."""
-    parents = _read(tasks_dir)
     groups: dict[str, list[dict]] = {}
     for row in rows:
-        groups.setdefault(row["parent_id"] or _ROOT, []).append(row)
+        groups.setdefault(sibling_group(row), []).append(row)
     for parent, siblings in groups.items():
         saved = parents.get(parent, [])
         rank = {item_id: index for index, item_id in enumerate(saved)}
         fallback = sorted(
             (row for row in siblings if row["id"] not in rank),
-            key=lambda row: (str(row["metadata"].get("priority", "")), row["id"]),
+            key=lambda row: key_order(row["id"]),
         )
         complete = saved + [row["id"] for row in fallback]
         complete_rank = {item_id: index for index, item_id in enumerate(complete)}
@@ -66,24 +33,25 @@ def apply_order(rows: list[dict], tasks_dir: Path) -> list[dict]:
     return rows
 
 
-def ordered_siblings(tasks_dir: Path, item_id: str) -> list[dict]:
-    """Return ordinary siblings in their persisted order."""
+def ordered_siblings(store: Store, item_id: str) -> list[dict]:
+    """Return the item's siblings, itself included, in their persisted order."""
     from taskman.model.collection import collection
 
-    rows = collection(tasks_dir)
+    rows = collection(store)
     by_id = {row["id"]: row for row in rows}
     if item_id not in by_id:
         raise ValueError(f"item not found: {item_id}")
-    parent_id = by_id[item_id]["parent_id"]
+    group = sibling_group(by_id[item_id])
     return sorted(
-        (row for row in rows if row["parent_id"] == parent_id),
-        key=lambda row: (row["order"], row["id"]),
+        (row for row in rows if sibling_group(row) == group),
+        key=lambda row: (row["order"], key_order(row["id"])),
     )
 
 
-def reorder_item(tasks_dir: Path, item_id: str, position: int) -> list[str]:
-    """Move an item to a one-based sibling position and atomically persist it."""
-    siblings = ordered_siblings(tasks_dir, item_id)
+@served
+def reorder_item(store: Store, item_id: str, position: int) -> list[str]:
+    """Move an item to a one-based position among its siblings; a top-level item stays in its project."""
+    siblings = ordered_siblings(store, item_id)
     if not isinstance(position, int) or isinstance(position, bool):
         raise ValueError("Position must be an integer")
     if position < 1 or position > len(siblings):
@@ -95,7 +63,5 @@ def reorder_item(tasks_dir: Path, item_id: str, position: int) -> list[str]:
     moved = siblings.pop(current)
     siblings.insert(target, moved)
     order = [row["id"] for row in siblings]
-    parents = _read(tasks_dir)
-    parents[moved["parent_id"] or _ROOT] = order
-    _write(tasks_dir, parents)
+    store.save_order(sibling_group(moved), order, item_id)
     return order

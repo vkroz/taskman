@@ -13,14 +13,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from pathlib import Path
 
 import typer
 
-from taskman.commands.new import get_tasks_dir
-from taskman.model.layout import iter_work_items
-from taskman.model.names import NameParseError, parse_name, special_file_name
-from taskman.model.yaml_io import FrontmatterError, read_file
+from taskman.storage.store import key_order, open_store
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,48 +52,36 @@ def _classify_match(
 def search(
     query: str = typer.Argument(..., help="Substring to search for."),
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON."),
+    project: str | None = typer.Option(None, "--project", help="Only items of this project key."),
 ) -> None:
     """Search the work-item tree for a query string."""
-    tasks_dir = get_tasks_dir()
     matches: list[_Match] = []
-    for path in iter_work_items(tasks_dir):
-        try:
-            wi = parse_name(path.name)
-        except NameParseError:
+    for item in open_store().items():
+        if item.error or (project is not None and item.metadata.get("project") != project):
             continue
-        body_file = (
-            path / special_file_name(wi.item_id) if path.is_dir() else path
-        )
-        if not body_file.exists():
-            continue
-        try:
-            data, body = read_file(body_file)
-        except FrontmatterError:
-            continue
-        title = str(data.get("title", ""))
         rank = _classify_match(
             query,
-            item_id=wi.item_id,
-            slug=wi.slug,
-            title=title,
-            body=body,
+            item_id=item.id,
+            slug=item.slug,
+            title=item.title,
+            body=item.body,
         )
         if rank is None:
             continue
         matches.append(
             _Match(
                 rank=rank,
-                item_id=wi.item_id,
-                item_type=wi.item_type,
-                status=wi.status,
-                priority=wi.priority,
-                slug=wi.slug,
-                title=title,
-                path=str(path),
+                item_id=item.id,
+                item_type=item.type,
+                status=item.status,
+                priority=item.priority,
+                slug=item.slug,
+                title=item.title,
+                path=item.location,
             )
         )
 
-    matches.sort(key=lambda m: (m.rank, m.item_id))
+    matches.sort(key=lambda m: (m.rank, key_order(m.item_id)))
 
     if as_json:
         typer.echo(
@@ -125,6 +109,6 @@ def search(
         return
     for m in matches:
         typer.echo(
-            f"  [{m.rank}] {m.priority} {m.item_type:5} {m.item_id} "
+            f"  [{m.rank}] {m.priority} {m.item_type:6} {m.item_id} "
             f"{m.status:7} {m.slug:30} {m.title}"
         )

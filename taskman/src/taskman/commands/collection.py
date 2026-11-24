@@ -1,56 +1,33 @@
-"""CLI access to the same queries, editing and history operations as the UI."""
+"""CLI access to the same queries, editing and ordering operations as the UI."""
 
 import json
 import typer
-from taskman.commands.new import get_tasks_dir
-from taskman.commands.context import load_item, read_body
-from taskman.model.collection import (
-    collection,
-    query,
-    consolidate as do_consolidate,
-    histories,
-)
-from taskman.model.yaml_io import write_file
-from taskman.model.revisions import invalidate_ancestors
+from taskman import lifecycle
+from taskman.commands.context import read_body
+from taskman.model.collection import collection, query
 from taskman.model.ordering import reorder_item
+from taskman.storage.store import open_store
 
 
-def edit_item(tasks_dir, item_id, title, body, reason):
-    path, file, data, _ = load_item(tasks_dir, item_id)
-    if data.get("status") == "done":
-        raise ValueError("Completed work is immutable; create a follow-up task")
-    if not isinstance(title, str) or not title.strip() or len(title) > 200:
-        raise ValueError("Enter a title of 1–200 characters")
-    if not isinstance(body, str) or not body.strip():
-        raise ValueError("Description must not be empty")
-    if not isinstance(reason, str) or not reason.strip():
-        raise ValueError("Explain why the task changed")
-    from datetime import datetime, timezone
-
-    data["title"] = title.strip()
-    data["revision"] = int(data.get("revision", 0)) + 1
-    data.setdefault("journal", []).append(
-        {
-            "kind": "decision",
-            "actor": "Taskman user",
-            "at": datetime.now(timezone.utc).isoformat(),
-            "text": reason.strip(),
-            "revision": data["revision"],
-        }
-    )
-    write_file(file, data, body)
-    invalidate_ancestors(tasks_dir, path)
+def edit_item(store, item_id, title, body, reason):
+    """Edit a title and description and journal the reason. Raises ValueError on a rule failure."""
+    lifecycle.edit(store, item_id, title, body, reason)
 
 
 def edit(
     item_id: str,
     title: str = typer.Option(...),
-    body_file: str = typer.Option(...),
+    body_file: str | None = typer.Option(
+        None, "--body-file", help="New Markdown description; - reads stdin. Without it, the description stays."
+    ),
     reason: str = typer.Option(...),
 ):
-    """Edit an open title and description and journal the reason."""
+    """Edit the title, and optionally the description, of an open item and journal the reason."""
+    if not reason.strip():
+        raise typer.BadParameter("Explain why the task changed")
+    body = read_body(body_file) if body_file is not None else None
     try:
-        edit_item(get_tasks_dir(), item_id, title, read_body(body_file), reason)
+        edit_item(open_store(), item_id, title, body, reason)
     except ValueError as e:
         raise typer.BadParameter(str(e)) from e
     typer.echo(f"Updated: {item_id}")
@@ -71,7 +48,7 @@ def browse(
     epic: str = typer.Option(""),
     sort: str = typer.Option("priority"),
     descending: bool = typer.Option(False),
-    include_archived: bool = typer.Option(False),
+    project: str | None = typer.Option(None, "--project", help="Only items of this project key."),
 ):
     """Query all metadata and emit hierarchy-preserving JSON with context markers."""
     filters = []
@@ -85,10 +62,12 @@ def browse(
     filters += [
         {"field": key, "op": "exists", "value": "false"} for key in missing or []
     ]
+    if project is not None:
+        filters.append({"field": "project", "op": "eq", "value": project})
     typer.echo(
         json.dumps(
             query(
-                collection(get_tasks_dir(), include_archived),
+                collection(open_store()),
                 filters,
                 keyword,
                 epic,
@@ -101,27 +80,13 @@ def browse(
     )
 
 
-def consolidate(ids: list[str] = typer.Argument(...), title: str = typer.Option(...)):
-    """Summarize completed subtrees; retain immutable originals and hide ordinary rows."""
-    try:
-        result = do_consolidate(get_tasks_dir(), ids, title)
-    except ValueError as e:
-        raise typer.BadParameter(str(e)) from e
-    typer.echo(json.dumps(result, indent=2))
-
-
-def history():
-    """Retrieve consolidation summaries and original task IDs."""
-    typer.echo(json.dumps(histories(get_tasks_dir()), indent=2))
-
-
 def reorder(
     item_id: str = typer.Argument(..., help="Item ID to move."),
     position: int = typer.Option(..., "--position", min=1, help="One-based sibling position."),
 ):
-    """Move an item to a persisted position within its current parent."""
+    """Move an item to a persisted position among its siblings; a top-level item stays in its project."""
     try:
-        order = reorder_item(get_tasks_dir(), item_id, position)
+        order = reorder_item(open_store(), item_id, position)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(json.dumps({"id": item_id, "position": position, "order": order}, indent=2))

@@ -4,24 +4,28 @@ Taskman owns the shared work records; coding agents own execution. A workflow su
 
 ## Work records
 
-Items have a stable ID, title, type, requirements, status and optional parent and dependencies. Types are epic, feature/story (`feat`) and task. A task is a leaf; other nesting is flexible. Requirements may link existing project documents rather than duplicate them.
+Items have a stable ID, title, type, requirements, status and optional parent and dependencies. Types are epic, feature/story (`feat`), task and bugfix. A task or bugfix is a leaf; other nesting is flexible. Requirements may link existing project documents rather than duplicate them.
+
+Items persist in a SQL database: SQLite (the default, one file shared by all repositories) or Postgres, which connects by URL or through a Cloud SQL unix socket. Items belong to projects and have keys such as `TM-42`; a key identifies the item and its project. Each item also has an assignee, labels and an activity entry for each field change. Taskman does not read `tasks/` Markdown files from earlier versions. [The data model](data-model.md) defines the entities and how each lifecycle rule applies to them.
 
 New items start as drafts. Agreed items can be finalized and activated when their dependencies and inherited dependencies are complete. Planning records decomposition and ordering; independent work may execute concurrently in the coding host.
 
-Open tasks can be refined to reach the agreed outcome. Significant decisions, reasons, scope changes, progress and handoffs go in an attributed journal. Completion includes a concise summary and evidence of local acceptance checks. After closure, the task and its evidence are immutable; corrections are new tasks referencing the original.
+Open tasks can be refined to reach the agreed outcome. Significant decisions, reasons, scope changes, progress and handoffs go in attributed comments. Completion includes a concise summary and evidence of local acceptance checks. After closure, the task and its evidence are immutable; corrections are new tasks referencing the original.
 
-The CLI rejects closure without a current summary and passing verification, or with unfinished dependencies or children. Changes to the body, type, dependencies, implementation journal or children invalidate prior completion evidence. Taskman checks record consistency and revision, but does not execute tests or judge the truth of an agent's assertion. Source revision and dirty working-tree details belong in verification evidence; code changes outside Taskman are not automatically detected.
+The CLI rejects closure without a current summary and passing verification, or with unfinished dependencies or children. Changes to the description, type, dependencies or children, and new decision or progress comments, invalidate prior completion evidence. Taskman checks record consistency and revision, but does not execute tests or judge the truth of an agent's assertion. Source revision and dirty working-tree details belong in verification evidence; code changes outside Taskman are not automatically detected.
 
 ## Agents and interface
 
-Codex and Claude Code share the same task tree and can take different roles within one lifecycle. A fresh agent reads the target, ancestors, descendants, dependencies and journals through `taskman context`. Agent handoffs must not depend on private conversation history.
+Codex and Claude Code share the same work items and can take different roles within one lifecycle. A fresh agent reads the target, ancestors, descendants, dependencies, comments and activity through `taskman context`. Agent handoffs must not depend on private conversation history.
 
-The CLI supports every operation available through the UI. The UI creates and edits open work, discards unreferenced draft leaves, and displays hierarchy, dependencies, status and journals, refreshing as agents work. Metadata filters and sibling sorting preserve hierarchy context. Completed-work consolidation creates documentation excerpts and hides individual rows from ordinary collections while retaining immutable originals and ID lookup. Execution is controlled through coding tools. Deployment is outside local completion.
+The CLI supports every operation available through the UI. The UI creates and edits open work in place, moves it between statuses within the lifecycle rules, discards unreferenced draft leaves, adds comments, sets assignees and labels, and displays hierarchy, dependencies, derived state, close readiness, verification evidence, comments and activity across projects, refreshing as agents work. Its views show the work that needs attention, is active, ready, blocked, drafted, in the backlog or done. Metadata filters and sibling sorting preserve hierarchy context. Execution is controlled through coding tools. Deployment of users' applications is outside local completion.
+
+Taskman can also run as one HTTP (Hypertext Transfer Protocol) server, from one container image, that serves the work items of many projects. Callers use the CLI with a Taskman token and need no cloud credentials. The server takes all settings from environment variables; a secret can also come from a file. The server runs on a developer computer with Docker Compose, or on Cloud Run with Cloud SQL for PostgreSQL. On Cloud Run, a separate step upgrades the schema before a new revision serves traffic. [Run the Taskman server on Google Cloud](deploy-gcp.md) gives the steps.
 
 One CLI installs the shared plugin through platform adapters. Codex and Claude Code are the initial supported hosts. Adding another host should change installation integration, not task storage or lifecycle semantics.
 
 ## Acceptance baseline
 
-Verify UI and CLI creation, nested decomposition, dependency ordering, journal updates, local validation and immutable closure. Verify that another agent can recover the context and record an independent review. Parent acceptance must assess integrated behavior as well as completed children.
+Verify UI and CLI creation, nested decomposition, dependency ordering, comments, local validation and immutable closure. Verify that another agent can recover the context and record an independent review. Parent acceptance must assess integrated behavior as well as completed children.
 
 The bounded Diviner pilot uses three read-only tasks. It tests Taskman and does not authorize development of Diviner or connection to its live services. Detailed findings and limitations are in [the evaluation report](evaluation.md).
