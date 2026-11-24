@@ -216,7 +216,7 @@ def test_every_command_refuses_the_file_backend_settings(tmp_path, monkeypatch, 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(variable, value)
     names = _command_names()
-    assert {"list", "new", "close", "ui", "comment"} <= set(names)
+    assert {"list", "new", "close", "comment"} <= set(names)
     for args in [[name] for name in names] + [["db", "upgrade"], ["token", "list"]]:
         result = runner.invoke(app, args)
         assert result.exit_code == 2, (args, result.output)

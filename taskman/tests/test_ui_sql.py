@@ -4,13 +4,12 @@ from __future__ import annotations
 import json
 import threading
 import urllib.request
-from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
 
 import pytest
 
 from taskman import lifecycle
-from taskman.commands.ui import _make_handler
+from taskman.server import make_server
 from taskman.storage.schema import upgrade
 from taskman.storage.settings import StorageSettings
 from taskman.storage.sql import connect
@@ -19,7 +18,7 @@ from tests import ready
 
 
 def _serve(store):
-    server = ThreadingHTTPServer(("localhost", 0), _make_handler(store))
+    server = make_server("localhost", 0, store, log=False, local_person=store.actor)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://localhost:{server.server_port}"
 
@@ -44,7 +43,7 @@ def api(tmp_path):
     conn, dialect = connect(settings)
     upgrade(conn, dialect)
     conn.close()
-    # The store is opened here and used from the server threads, as `taskman ui` does.
+    # The store is opened here and used from the server threads, as `taskman serve` does.
     store = open_sql_store(settings, actor="ui-user")
     server, call = _serve(store)
     yield call
@@ -126,6 +125,6 @@ def test_done_items_cannot_be_reordered_or_changed(api, tmp_path):
     assert "immutable" in api("/api/reorder", {"id": "TM-1", "position": 2}, status=400)["error"]
     assert "immutable" in api("/api/comment", {"id": "TM-1", "kind": "decision", "text": "late"}, status=400)["error"]
     assert "immutable" in api("/api/assign", {"id": "TM-1", "assignee": "codex"}, status=400)["error"]
-    assert "Unknown endpoint" in api("/api/consolidate", {"ids": ["TM-1"], "title": "Summary"}, status=404)["error"]
+    assert "Not found" in api("/api/consolidate", {"ids": ["TM-1"], "title": "Summary"}, status=404)["error"]["message"]
     api("/api/reorder", {"id": "TM-2", "position": 1})
     assert [row["id"] for row in api("/api/query", {})["rows"]] == ["TM-2", "TM-1"]

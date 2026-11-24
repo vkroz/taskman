@@ -24,7 +24,7 @@ A facet opens a checklist of the values in the current view, with counts. A clic
 
 From top to bottom, the panel shows:
 
-1. The type, the key (a click copies it), Copy link, previous and next, and close. Copy link copies the link for a coding session: the server address and the key (`https://taskman.example.com/items/TM-42`), or the key alone when the UI uses a local database.
+1. The type, the key (a click copies it), Copy link, previous and next, and close. Copy link copies the link for a coding session: the server address and the key, for example `http://127.0.0.1:8080/items/TM-42`. The link opens the page with that item.
 2. The project and the ancestors as links.
 3. The title, the state, the status, the owner, the labels, the repositories, and the creation and update times. In open work, the title, the status, the owner, the labels and the repositories are fields that you edit in place.
 4. A menu with Add comment, Show only its sub-items, and Delete draft. Delete draft shows only for a draft that can be discarded. Otherwise the menu gives the reason, for example "has 1 child". A done item shows "Closed with evidence" and no actions.
@@ -73,7 +73,7 @@ Colours are tokens for a light and a dark theme. The theme follows the system. T
 
 ## Checks
 
-`tests/ui/test_workspace_ui.py` drives Chromium through Playwright against a seeded `taskman ui` server at 1440x900 and 390x844. It checks density, row content, views and counts, projects, URL state, the detail panel, polling safety, data integrity, edit in place, filters, the keyboard, create and comment, errors, the offline indicator, the mobile layout, contrast in both themes and escaping. Each test that changes data gets its own server on a copy of the seed. `tests/ui/test_workspace_css.py` checks without a browser that styles use only the tokens and the type, weight and radius scales. All these tests are marked `ui`: `uv run pytest -m ui` runs only them. The browser tests need the `ui` extra (`uv sync --extra ui`). They skip when Playwright is not installed or Chromium cannot start. With `TASKMAN_TEST_REQUIRE_BROWSER=1`, as in CI, they fail instead.
+`tests/ui/test_workspace_ui.py` drives Chromium through Playwright against a seeded `taskman serve` in local mode at 1440x900 and 390x844. It checks density, row content, views and counts, projects, URL state, the detail panel, polling safety, data integrity, edit in place, filters, the keyboard, create and comment, errors, the offline indicator, the mobile layout, contrast in both themes and escaping. Each test that changes data gets its own server on a copy of the seed. `tests/ui/test_workspace_css.py` checks without a browser that styles use only the tokens and the type, weight and radius scales. All these tests are marked `ui`: `uv run pytest -m ui` runs only them. The browser tests need the `ui` extra (`uv sync --extra ui`). They skip when Playwright is not installed or Chromium cannot start. With `TASKMAN_TEST_REQUIRE_BROWSER=1`, as in CI, they fail instead.
 
 ## Query service
 
@@ -81,7 +81,7 @@ Implementation uses a shared Python query service for CLI and UI. `taskman brows
 
 ## Workspace server
 
-`taskman ui` serves the page at `/` and at an item path such as `/TM-7`. The page reads its state from the query string. Responses are compact JSON. Every API error is JSON with an `error` text. Mutations need the `X-Taskman: 1` header and a local `Host`.
+The Taskman server serves the page in local mode (`taskman serve` with `TASKMAN_LOCAL_MODE=1`), at `/` and at an item path such as `/items/TM-7`. The page reads its state from the query string. Responses are compact JSON. Every error of a data call is JSON with an `error` text; the other answers of the server give an `error` object with a `message`, and the page shows the message of both. Each request needs the `Host` `127.0.0.1` or `localhost`, with any port. Mutations also need the `X-Taskman: 1` header. For local use, the Docker Compose stack (`taskman/compose.yaml`) runs the server in local mode at `http://127.0.0.1:8080/`. Without local mode, the server does not serve the page. The CLI with a direct database, without a server, has no UI.
 
 - `POST /api/query` returns the projects with open counts, the item count of each view, facet counts, and the rows of one view. A row has no description, journal or internal fields. It has derived signals: state, blockers, leaf progress, latest verification, attention reason and last update. The response has an `etag`. When the request sends the same `etag`, the response is only `{etag, unchanged: true}`.
 - The views are Attention, Active, Ready, Blocked, Drafts, Backlog and Done. Attention holds open items with a failed or blocked current verification, a handoff as the latest comment, or all close gates passed. Ready holds backlog items that can start. Blocked holds finalized open items that are not ready.

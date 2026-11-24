@@ -84,11 +84,34 @@ def _token_line(row: dict[str, Any]) -> str:
             f"expires {_when(row['expires_at'], 'never')}  last used {_when(row['last_used_at'], 'never')}  {revoked}")
 
 
+def _local_person() -> str | None:
+    """The author of the workspace page's changes in local mode, or ``None`` without local mode.
+
+    A wrong setting ends the command.
+    """
+    mode = os.environ.get("TASKMAN_LOCAL_MODE", "").strip()
+    if mode in ("", "0"):
+        return None
+    if mode != "1":
+        typer.echo("Error: TASKMAN_LOCAL_MODE must be 1 (local mode on) or 0 (off).", err=True)
+        raise typer.Exit(2)
+    person = os.environ.get("TASKMAN_LOCAL_PERSON", "").strip()
+    if not 1 <= len(person) <= 60:
+        typer.echo("Error: local mode needs TASKMAN_LOCAL_PERSON: the name of the person, 1 to 60 characters, "
+                   "who is the author of the changes in the workspace page.", err=True)
+        raise typer.Exit(2)
+    return person
+
+
 def serve(
     host: str = typer.Option("127.0.0.1", "--host", help="Address to listen on. Use 0.0.0.0 in a container."),
     port: int | None = typer.Option(None, "--port", help="Port to listen on. Default: the PORT variable, or 8080."),
 ) -> None:
-    """Run the Taskman server that the CLI calls."""
+    """Run the Taskman server that the CLI calls.
+
+    With TASKMAN_LOCAL_MODE=1, it also serves the workspace page without sign-in, to a browser on this
+    computer. TASKMAN_LOCAL_PERSON names the author of the page's changes.
+    """
     from taskman.server import make_server
 
     if port is None:
@@ -104,9 +127,11 @@ def serve(
     except StorageConfigError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(2) from None
+    person = _local_person()
     with _database() as store:
         try:
-            server = make_server(host, port, store, logins=Logins(store, settings) if settings else None)
+            server = make_server(host, port, store, logins=Logins(store, settings) if settings else None,
+                                 local_person=person)
         except (OSError, OverflowError) as exc:  # OverflowError: a port out of the range 0-65535
             typer.echo(f"Error: Taskman cannot listen on {host}:{port}: {getattr(exc, 'strerror', None) or exc}", err=True)
             raise typer.Exit(2) from None
@@ -114,6 +139,9 @@ def serve(
             typer.echo(f"Browser login with Google is on for {settings.public_url}.")
         else:
             typer.echo("Browser login is off: TASKMAN_GOOGLE_CLIENT_ID is not set. Tokens work.")
+        if person:
+            typer.echo(f"Local mode is on: the workspace page is at / without sign-in. {person} is the author "
+                       "of its changes.")
         # serve_forever must not be stopped from its own thread.
         signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown).start())
         typer.echo(f"Taskman server listens on http://{host}:{server.server_port}/  (Ctrl+C to stop)")

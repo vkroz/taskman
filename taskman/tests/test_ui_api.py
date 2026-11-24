@@ -4,14 +4,12 @@ from __future__ import annotations
 import json
 import threading
 import urllib.request
-from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
 
 import pytest
 
-from taskman import lifecycle
-from taskman.commands import ui
-from taskman.commands.ui import _make_handler
+from taskman import lifecycle, workspace
+from taskman.server import make_server
 from taskman.storage.schema import upgrade
 from taskman.storage.sql import connect
 from taskman.storage.sql_store import open_sql_store
@@ -24,7 +22,7 @@ HEADERS = {"Content-Type": "application/json", "X-Taskman": "1"}
 class Api:
     def __init__(self, store):
         self.store = store
-        self.server = ThreadingHTTPServer(("localhost", 0), _make_handler(store))
+        self.server = make_server("localhost", 0, store, log=False, local_person=store.actor)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.base = f"http://localhost:{self.server.server_port}"
 
@@ -262,9 +260,10 @@ def test_show_names_why_a_draft_cannot_be_discarded(api):
 
 def test_get_errors_are_json_and_item_paths_serve_the_page(seeded, monkeypatch):
     assert seeded("/api/show/RES-99", status=404) == {"error": "item not found: RES-99"}
-    assert "Not found" in seeded("/api/nothing", status=404)["error"]
-    assert "Not found" in seeded("/tm-7", status=404)["error"]
-    for path in ("/", "/TM-7", "/RES-99", "/?item=TM-7&view=done"):
+    # Other paths are the server's: its errors are objects.
+    for path in ("/api/nothing", "/tm-7", "/TM-7", "/items/tm-7"):
+        assert "Not found" in seeded(path, status=404)["error"]["message"]
+    for path in ("/", "/items/TM-7", "/items/RES-99", "/?item=TM-7&view=done"):
         status, content_type, text = seeded.raw(path)
         assert (status, content_type) == (200, "text/html; charset=utf-8")
         assert 'id="preview"' in text
@@ -272,7 +271,7 @@ def test_get_errors_are_json_and_item_paths_serve_the_page(seeded, monkeypatch):
     with pytest.raises(HTTPError) as error:
         urllib.request.urlopen(request)
     assert (error.value.code, json.load(error.value)["error"]) == (403, "Only local Taskman UI requests are accepted.")
-    monkeypatch.setattr(ui, "show", lambda store, item_id, etag: 1 / 0)
+    monkeypatch.setattr(workspace, "show", lambda store, item_id, etag, server: 1 / 0)
     assert "division by zero" in seeded("/api/show/TM-7", status=500)["error"]
 
 
@@ -415,17 +414,9 @@ def test_finalize_applies_the_definition_of_ready(api, store):
     assert "not found" in api("/api/finalize", {"id": "TM-99"}, status=400)["error"]
 
 
-def test_the_link_holds_the_server_address_and_the_key():
-    class Remote:
-        url = "https://taskman.example.com"
-
-    assert ui.item_link(Remote(), "TM-4") == "https://taskman.example.com/items/TM-4"
-    assert ui.item_link(object(), "TM-4") == "TM-4"
-
-
-def test_show_gives_the_link(api):
+def test_show_gives_the_link_of_the_server_address_and_the_key(api):
     key = _create(api, "Item", project="TM")
-    assert api(f"/api/show/{key}")["link"] == key
+    assert api(f"/api/show/{key}")["link"] == f"{api.base}/items/{key}"
 
 
 # ---- /api/repositories -------------------------------------------------------

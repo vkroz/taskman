@@ -14,7 +14,7 @@ Taskman is one Python program. It runs as a command-line tool (CLI) and as a ser
 | Server | `taskman serve`. It alone opens the database. It checks the token of each call, runs each operation through the lifecycle in one transaction, and answers in JSON. |
 | Tokens | A token is a secret string that stands for one person. The database keeps only a SHA-256 fingerprint of each token. |
 | Settings | Select the server, or the backend and the connection, from environment variables and from a `.env` file at the repository root. |
-| Workspace UI | A local HTTP server and one web page. It uses the same lifecycle and store as the CLI. |
+| Workspace UI | One web page and its data calls, served by the server in local mode. It uses the same lifecycle and store as the CLI. |
 | Installer | Installs the shared plugin into Codex and Claude Code through platform adapters. |
 
 ## Flow of a change
@@ -89,12 +89,16 @@ The `/auth/token` page also lists the person's tokens, with a Revoke button for 
 
 ## Workspace UI
 
-`taskman ui` serves the page at `127.0.0.1`. The server accepts only requests with a local `Host` header. Requests that change data must also send the `X-Taskman` header. The page polls the server every 5 seconds. All server threads share one store, and the store serializes access to its connection.
+In local mode, `taskman serve` serves the page and its data calls without sign-in. `TASKMAN_LOCAL_MODE=1` turns local mode on. `TASKMAN_LOCAL_PERSON` names the author of each change that the page makes. Without that name, the server does not start in local mode. The Docker Compose stack runs the server in local mode, on `127.0.0.1:8080` of the computer.
+
+In local mode, the server refuses with 403 each request of the page whose `Host` is not `127.0.0.1` or `localhost`, with any port or no port. Thus a page of another site that changes the address of its domain to 127.0.0.1 (DNS rebinding) cannot use the server, because the browser sends that domain. Requests that change data must also send the `X-Taskman: 1` header. Without local mode, the page and its data calls answer 404. The token API, the health checks and browser login work the same in both modes.
+
+The page polls the server every 5 seconds. All server threads share one store. The server sets the author of the store under the store lock, for each request: the person of local mode for the page, and the person of the token for the API. The CLI with a direct database has no UI.
 
 ## Limits
 
 - Browser login supports Google only.
-- The server does not serve the workspace page. `taskman ui` serves it on the computer of the user.
+- The server serves the workspace page only in local mode, without sign-in. A hosted server does not serve it.
 - The server uses one database connection for all calls. On Postgres, the first statement of a transaction has a 5-second time limit. After it, the connection counts as lost. When a transaction starts on a closed, broken or lost connection, the server opens a new connection and tries the start again, at most 3 more times, after 0.5, 1 and 2 seconds. It does not try again a transaction that failed after its start, so a change is never written twice. After a database restart, `/readyz` answers 200 again at the first call after the database is back, in the same server process. While the database is away, `/readyz` answers 503. On Cloud Run, a liveness probe on `/readyz` replaces an instance after 3 failed checks.
 - With browser login on, anyone can open `/auth/token` and `/auth/cli` without a token. Each request adds a row to the `logins` table and deletes old rows, under the database write lock. A row stays 1 day when Google signed in a person who may use the server, and 1 hour in all other cases. A sign-in that returns with an error, or that fails a later check, stays 1 hour. Taskman does not limit the rate of these requests.
 - Taskman does not read `tasks/` Markdown files from earlier versions, and imports nothing from them (decision D4).

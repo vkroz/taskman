@@ -4,6 +4,10 @@ The server alone opens the database. A caller proves who they are with a
 token (``Authorization: Bearer ...``); the person of the token is the author
 of every change. Changes arrive as whole operations and run here, under the
 store lock, so the lifecycle rules are checked next to the data.
+
+In local mode the server also serves the workspace page and its data calls,
+without sign-in, to a browser on the same computer. One person, named in the
+settings, is the author of the changes that the page makes.
 """
 from __future__ import annotations
 
@@ -17,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlsplit
 
-from taskman import lifecycle
+from taskman import lifecycle, workspace
 from taskman.model.ordering import reorder_item
 from taskman.login import LoginError, Logins, error_page, token_error_page
 from taskman.storage.accounts import list_tokens, person_for_token, revoke_own_token, revoke_token
@@ -103,7 +107,9 @@ def author_name(person: str, actor: Any) -> str:
     return f"{actor.strip()} for {person}"
 
 
-def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None) -> type[BaseHTTPRequestHandler]:
+def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None,
+                 local_person: str | None = None) -> type[BaseHTTPRequestHandler]:
+    """The request handler. ``local_person`` turns on local mode: the workspace page, with that person as author."""
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "taskman"
@@ -240,6 +246,9 @@ def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None
 
         def do_GET(self) -> None:  # noqa: N802
             url = urlsplit(self.path)
+            if local_person and workspace.is_page_request("GET", url.path):
+                workspace.answer(self, store, local_person)
+                return
             if url.path.startswith("/auth/"):
                 self._login_page(url.path, dict(parse_qsl(url.query)))
                 return
@@ -291,6 +300,9 @@ def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None
         # ---- POST ------------------------------------------------------
 
         def do_POST(self) -> None:  # noqa: N802
+            if local_person and workspace.is_page_request("POST", urlsplit(self.path).path):
+                workspace.answer(self, store, local_person)
+                return
             if urlsplit(self.path).path == "/auth/token/revoke":
                 self._revoke_page()
                 return
@@ -344,8 +356,9 @@ def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None
 
 
 def make_server(host: str, port: int, store: SqlStore, log: bool = True,
-                logins: Logins | None = None) -> ThreadingHTTPServer:
-    """A server for ``store``, with browser login when ``logins`` is given. The caller runs ``serve_forever``."""
-    server = ThreadingHTTPServer((host, port), make_handler(store, log, logins))
+                logins: Logins | None = None, local_person: str | None = None) -> ThreadingHTTPServer:
+    """A server for ``store``, with browser login when ``logins`` is given and local mode when ``local_person``
+    is given. The caller runs ``serve_forever``."""
+    server = ThreadingHTTPServer((host, port), make_handler(store, log, logins, local_person))
     server.daemon_threads = True
     return server

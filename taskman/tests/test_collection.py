@@ -7,7 +7,7 @@ from taskman.cli import app
 from taskman.model.collection import collection, in_manual_order, query
 from taskman.model.ordering import ordered_siblings, reorder_item
 from taskman.commands.collection import edit_item
-from taskman.commands.ui import workspace
+from taskman.workspace import workspace
 from taskman.storage.sql_store import open_sql_store
 from tests import sql_helpers as sql
 
@@ -75,16 +75,15 @@ def test_edit_and_delete_preserve_closed_and_referenced_work(store):
 
 def test_http_query_edit_and_discard(store):
     import threading
-    from http.server import ThreadingHTTPServer
     from urllib.request import Request, urlopen
     from urllib.error import HTTPError
-    from taskman.commands.ui import _make_handler
+    from taskman.server import make_server
 
     id = sql.new("Draft")
     done = sql.new("Done")
     sql.prepare(done)
     sql.run("close", done)
-    server = ThreadingHTTPServer(("localhost", 0), _make_handler(store))
+    server = make_server("localhost", 0, store, log=False, local_person=store.actor)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
     def post(endpoint, data, headers=None):

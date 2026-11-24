@@ -2,15 +2,20 @@
 # The taskman containers reach Postgres only through its unix socket, which a
 # named volume shares at /cloudsql/local. Cloud Run uses /cloudsql/<connection name>.
 #
+# The server runs in local mode: http://127.0.0.1:8080/ is the workspace page,
+# without sign-in. TASKMAN_LOCAL_PERSON in .env names the author of its changes;
+# use the same name for `token create --person`.
+#
 # Run from this directory:
 #   mkdir -p .secrets && python3 -c "import secrets; print(secrets.token_urlsafe(24))" > .secrets/db_password
+#   echo 'TASKMAN_LOCAL_PERSON=you@example.com' > .env
 #   docker compose up -d --build
 #   docker compose run --rm server token create --person "you@example.com"
 
 x-taskman: &taskman
   build: .
   image: taskman:local
-  environment:
+  environment: &taskman-environment
     TASKMAN_BACKEND: postgres
     TASKMAN_DB_SOCKET: /cloudsql/local
     TASKMAN_DB_NAME: taskman
@@ -55,9 +60,14 @@ services:
 
   server:
     <<: *taskman
+    environment:
+      <<: *taskman-environment
+      TASKMAN_LOCAL_MODE: "1"
+      TASKMAN_LOCAL_PERSON: ${TASKMAN_LOCAL_PERSON:?set TASKMAN_LOCAL_PERSON in taskman/.env to the name of the person who uses the workspace page}
     depends_on:
       upgrade:
         condition: service_completed_successfully
+    # Local mode has no sign-in: only this computer reaches the port.
     ports:
       - "127.0.0.1:8080:8080"
     healthcheck:

@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from taskman.commands.ui import render_page
+from taskman.workspace import render_page
 
 pytestmark = pytest.mark.ui
 

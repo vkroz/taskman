@@ -2178,7 +2178,9 @@
             { status: response.status });
         }
         if (!response.ok) {
-          throw Object.assign(new Error(value.error || `Request failed (HTTP ${response.status})`),
+          // The page's data calls send an error text; the other answers of the server send an error object.
+          const message = typeof value.error === "string" ? value.error : value.error && value.error.message;
+          throw Object.assign(new Error(message || `Request failed (HTTP ${response.status})`),
             { status: response.status, body: value });
         }
         return value;
@@ -2200,7 +2202,7 @@
       function readURL() {
         const url = new URL(location.href);
         const p = url.searchParams;
-        const pathKey = url.pathname.slice(1);
+        const pathKey = url.pathname.startsWith("/items/") ? url.pathname.slice("/items/".length) : "";
         S.view = VIEWS.some((v) => v.key === p.get("view")) ? p.get("view") : "attention";
         S.project = p.get("project") || "";
         S.q = p.get("q") || "";

@@ -265,7 +265,7 @@ def test_close_and_convert_name_children_by_key(cli):
 
 def test_command_help_needs_no_database(tmp_path, monkeypatch):
     _env(monkeypatch, tmp_path)
-    for command in ("depend", "label", "list", "new", "ui"):
+    for command in ("depend", "label", "list", "new"):
         assert "Usage" in run(command, "--help")
     assert not (tmp_path / "taskman.db").exists()
 

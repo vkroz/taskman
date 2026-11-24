@@ -6,7 +6,6 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -14,7 +13,7 @@ import pytest
 from typer.testing import CliRunner
 
 from taskman.cli import app
-from taskman.commands.ui import _make_handler
+from taskman.server import make_server
 from taskman.storage.sql_store import open_sql_store
 from tests import sql_helpers
 
@@ -50,7 +49,7 @@ def complete(item):
 @contextmanager
 def server(settings):
     store = open_sql_store(settings, actor="UI")
-    http = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(store))
+    http = make_server("127.0.0.1", 0, store, log=False, local_person=store.actor)
     thread = threading.Thread(target=http.serve_forever, daemon=True)
     thread.start()
     try:

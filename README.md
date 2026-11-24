@@ -77,7 +77,6 @@ Closed tasks are immutable. Further changes belong in a new task that references
 ## View and check
 
 ```sh
-taskman ui
 taskman list --recursive --json
 taskman context TASK_ID
 taskman context TASK_ID --since CURSOR
@@ -86,7 +85,7 @@ taskman validate
 
 `context` ends with a `cursor`. `context --since CURSOR` prints only the comments and field changes of the item after that cursor, and the next cursor. A description change shows as a note with the current revision of the item, without its text. When nothing is new, the output is one line. So an agent that refreshes during its work adds only the new content to its context.
 
-The UI refreshes as agents change tasks. `taskman validate` checks the dependency graph for unknown dependencies and cycles; acceptance testing is separate. Use `taskman help` for storage rules and `taskman COMMAND --help` for syntax.
+The [workspace UI](#workspace-ui) of the server refreshes as agents change tasks. `taskman validate` checks the dependency graph for unknown dependencies and cycles; acceptance testing is separate. Use `taskman help` for storage rules and `taskman COMMAND --help` for syntax.
 
 The plugin supplies define, design, review, plan, implement and validate skills, plus optional code review, commenting, commit and documentation skills. Skills use the same task records on either platform.
 
@@ -187,12 +186,15 @@ taskman serve                               # listens on 127.0.0.1 and the port 
 ```sh
 cd taskman
 mkdir -p .secrets && python3 -c "import secrets; print(secrets.token_urlsafe(24))" > .secrets/db_password
+echo 'TASKMAN_LOCAL_PERSON=you@example.com' > .env
 docker compose up -d --build
 docker compose run --rm server token create --person "you@example.com"
 export TASKMAN_SERVER_URL=http://127.0.0.1:8080 TASKMAN_TOKEN=<printed token>
 ```
 
-Replace `<printed token>` with the token that `token create` printed. Git ignores `taskman/.secrets/`. The server accepts calls only from this computer, on `127.0.0.1:8080`. After you get a new version, run `docker compose up -d --build` again: the stack upgrades the schema before the server starts. `docker compose down` stops the stack and keeps the data.
+Replace `<printed token>` with the token that `token create` printed. Git ignores `taskman/.env` and `taskman/.secrets/`. The server accepts calls only from this computer, on `127.0.0.1:8080`.
+
+The stack runs the server in local mode: open `http://127.0.0.1:8080/` for the [workspace UI](#workspace-ui), without sign-in. `TASKMAN_LOCAL_PERSON` in `.env` names the author of the changes that you make in the page. Use the same name in `.env` and in `token create --person`, so that your changes in the page and in the CLI have the same author. Without `TASKMAN_LOCAL_PERSON`, every `docker compose` command stops with an error that names it. After you get a new version, run `docker compose up -d --build` again: the stack upgrades the schema before the server starts. `docker compose down` stops the stack and keeps the data.
 
 On Linux with umask 077, the container user cannot read the password file: run `chmod 644 .secrets/db_password`. The server does not connect again after Postgres restarts: run `docker compose restart server`. To change the password, change it in Postgres or delete all local data with `docker compose down -v`: Postgres reads the file only when it creates its data volume.
 
@@ -292,9 +294,11 @@ Python code is under `taskman/src/taskman/`; plugin sources are under `plugins/t
 
 ### Workspace UI
 
-Run `taskman ui` for the local workspace. The sidebar selects a view (Attention, Active, Ready, Blocked, Drafts, Backlog or Done) and a project. Search, facet filters and the epic scope apply at once and stay in the URL. Sort orders siblings; drag an open item to change its position within its parent and project. Select a row to open its details; Back or Esc closes them. [docs/ui-design.md](docs/ui-design.md) describes the page.
+The Taskman server serves the workspace page in local mode. Start the server with Docker Compose, as [Run the server in a container](#run-the-server-in-a-container) shows, and open `http://127.0.0.1:8080/`. Without Compose, set `TASKMAN_LOCAL_MODE=1` and `TASKMAN_LOCAL_PERSON=<your name>`, then run `taskman serve`. Local mode has no sign-in: keep the server on `127.0.0.1`. The server accepts the requests of the page only with the `Host` `127.0.0.1` or `localhost`, and accepts changes only with the `X-Taskman: 1` header. Without local mode, the server does not serve the page. The CLI with a direct database, without a server, has no UI.
 
-Create work with **New**; a top-level item needs a project key. Details show the state, blockers, close readiness and one timeline of comments and changes. In open work, click the title, the description, the status, the assignee, the labels or the repositories to change them. Each field saves when it loses focus; Esc cancels. A reason for a title or description change is optional; a given reason becomes a decision comment. The status offers only the moves that the lifecycle allows now, and Done needs all close checks. The menu offers **Add comment** with a kind (and a result for a verification or a review) and **Delete draft** for draft leaves with no incoming dependencies. Finalized and completed work cannot be deleted. Completed work shows read-only fields. A draft shows its definition of ready: each check with pass or fail, and **Finalize**, which stays disabled while a check fails and names the cause. **Copy link** in the item header copies the server address and the key, for example `https://taskman.example.com/items/TM-42`, to paste into a coding session; without a server it copies the key.
+The sidebar selects a view (Attention, Active, Ready, Blocked, Drafts, Backlog or Done) and a project. Search, facet filters and the epic scope apply at once and stay in the URL. Sort orders siblings; drag an open item to change its position within its parent and project. Select a row to open its details; Back or Esc closes them. [docs/ui-design.md](docs/ui-design.md) describes the page.
+
+Create work with **New**; a top-level item needs a project key. Details show the state, blockers, close readiness and one timeline of comments and changes. In open work, click the title, the description, the status, the assignee, the labels or the repositories to change them. Each field saves when it loses focus; Esc cancels. A reason for a title or description change is optional; a given reason becomes a decision comment. The status offers only the moves that the lifecycle allows now, and Done needs all close checks. The menu offers **Add comment** with a kind (and a result for a verification or a review) and **Delete draft** for draft leaves with no incoming dependencies. Finalized and completed work cannot be deleted. Completed work shows read-only fields. A draft shows its definition of ready: each check with pass or fail, and **Finalize**, which stays disabled while a check fails and names the cause. **Copy link** in the item header copies the server address and the key, for example `http://127.0.0.1:8080/items/TM-42`, to paste into a coding session. The link opens the page with that item.
 
 The same operations are available from the CLI:
 

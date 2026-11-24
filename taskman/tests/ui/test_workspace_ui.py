@@ -1,4 +1,4 @@
-"""Browser smoke tests of the workspace page against a seeded ``taskman ui`` server.
+"""Browser smoke tests of the workspace page against a seeded ``taskman serve`` in local mode.
 
 Each test drives Chromium through Playwright. A session server serves read-only
 checks; tests that change data get their own server on a copy of the seed. The
@@ -64,17 +64,21 @@ def _free_port() -> int:
         return sock.getsockname()[1]
 
 
-class Server:
-    """``taskman ui`` on a SQLite database file, in its own process."""
+PERSON = "Ada Lovelace"  # the person of local mode: the author of the page's changes
+TASKMAN = str(Path(sys.executable).with_name("taskman"))
 
-    def __init__(self, db: Path, home: Path, extra: dict[str, str] | None = None) -> None:
+
+class Server:
+    """``taskman serve`` in local mode on a SQLite database file, in its own process."""
+
+    def __init__(self, db: Path, home: Path) -> None:
         self.port = _free_port()
         self.base = f"http://127.0.0.1:{self.port}"
         env = {k: v for k, v in os.environ.items() if not k.startswith("TASKMAN_")}
-        # TMPDIR keeps the server's pid file away from a real `taskman ui`.
-        env.update(HOME=str(home), TMPDIR=str(home), TASKMAN_BACKEND="sqlite", TASKMAN_DATABASE_URL=f"sqlite://{db}")
-        env.update(extra or {})
-        command = [str(Path(sys.executable).with_name("taskman")), "ui", "--port", str(self.port), "--no-browser"]
+        env.update(HOME=str(home), TASKMAN_BACKEND="sqlite", TASKMAN_DATABASE_URL=f"sqlite://{db}",
+                   TASKMAN_LOCAL_MODE="1", TASKMAN_LOCAL_PERSON=PERSON)
+        self.env = env
+        command = [TASKMAN, "serve", "--port", str(self.port)]
         self.process = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         deadline = time.monotonic() + 20
         while True:
@@ -84,7 +88,7 @@ class Server:
             except OSError:
                 if time.monotonic() > deadline or self.process.poll() is not None:
                     self.stop()
-                    raise RuntimeError("taskman ui did not start")
+                    raise RuntimeError("taskman serve did not start")
                 time.sleep(0.1)
 
     def api(self, path: str, data: dict | None = None):
@@ -92,6 +96,11 @@ class Server:
         request = urllib.request.Request(self.base + path, data=body, headers=HEADERS)
         with urllib.request.urlopen(request) as response:
             return json.load(response)
+
+    def cli(self, *args: str):
+        """The JSON output of a CLI command on the server's database."""
+        done = subprocess.run([TASKMAN, *args], env=self.env, capture_output=True, text=True, check=True)
+        return json.loads(done.stdout)
 
     def stop(self) -> None:
         self.process.terminate()
@@ -474,7 +483,7 @@ def test_projects(rw, desktop):
 def test_url_state(ro, desktop):
     visit(desktop, ro, "/?item=TM-7")
     expect(detail_key(desktop)).to_have_text("TM-7")
-    visit(desktop, ro, "/TM-7")
+    visit(desktop, ro, "/items/TM-7")
     expect(detail_key(desktop)).to_have_text("TM-7")
     assert desktop.url.endswith("/?item=TM-7")
 
@@ -496,7 +505,7 @@ def test_url_state(ro, desktop):
     expect(row(desktop, "TM-1")).to_have_attribute("aria-expanded", "false")
     assert row(desktop, "TM-7").count() == 0
 
-    visit(desktop, ro, "/RES-99")
+    visit(desktop, ro, "/items/RES-99")
     expect(desktop.locator("#preview [role=alert]")).to_contain_text("RES-99 was not found")
 
 
@@ -896,58 +905,18 @@ def test_a_long_repository_address_stays_inside_the_card_on_a_phone(chromium, rw
     assert card.evaluate("c => c.scrollWidth <= c.clientWidth && c.getBoundingClientRect().right <= innerWidth")
 
 
-@pytest.fixture
-def remote_ui(seed_db, tmp_path):
-    """`taskman ui` that reaches a local `taskman serve` on a copy of the seed, as with a shared server."""
-    db = _copy(seed_db, tmp_path)
-    env = {k: v for k, v in os.environ.items() if not k.startswith("TASKMAN_")}
-    env.update(HOME=str(tmp_path), TMPDIR=str(tmp_path), TASKMAN_BACKEND="sqlite", TASKMAN_DATABASE_URL=f"sqlite://{db}")
-    taskman = str(Path(sys.executable).with_name("taskman"))
-    token = subprocess.run([taskman, "token", "create", "--person", "Vlad"], env=env, capture_output=True,
-                           text=True, check=True).stdout.strip().splitlines()[-1]
-    port = _free_port()
-    serve = subprocess.Popen([taskman, "serve", "--port", str(port)], env=env,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    url = f"http://127.0.0.1:{port}"
-    try:
-        eventually(lambda: _answers(url + "/readyz"), timeout=20)
-        ui = Server(tmp_path / "unused.db", tmp_path, {"TASKMAN_SERVER_URL": url, "TASKMAN_TOKEN": token})
-        ui.server_url = url
-        yield ui
-        ui.stop()
-    finally:
-        serve.terminate()
-        serve.wait(timeout=5)
-
-
-def _answers(url: str) -> bool:
-    try:
-        with urllib.request.urlopen(url, timeout=1):
-            return True
-    except OSError:
-        return False
-
-
 @pytest.mark.parametrize("viewport", ["desktop", "mobile"])
-def test_copy_link_with_a_server_copies_the_server_address_and_the_key(chromium, remote_ui, request, viewport):
+def test_copy_link_copies_the_server_address_and_the_key(chromium, ro, request, viewport):
     page = request.getfixturevalue(viewport)
-    visit(page, remote_ui, "/?item=RES-5")
+    visit(page, ro, "/?item=RES-5")
     expect(detail_key(page)).to_have_text("RES-5")
     _copied(page)
     page.get_by_role("button", name="Copy link").click()
     expect(page.locator("#toasts")).to_contain_text("Copied link")
-    assert page.evaluate("window.copied") == [f"{remote_ui.server_url}/items/RES-5"]
-
-
-@pytest.mark.parametrize("viewport", ["desktop", "mobile"])
-def test_copy_link_without_a_server_copies_the_key(chromium, rw, request, viewport):
-    page = request.getfixturevalue(viewport)
-    visit(page, rw, "/?item=RES-5")
+    assert page.evaluate("window.copied") == [f"{ro.base}/items/RES-5"]
+    # The link opens the item.
+    visit(page, ro, "/items/RES-5")
     expect(detail_key(page)).to_have_text("RES-5")
-    _copied(page)
-    page.get_by_role("button", name="Copy link").click()
-    expect(page.locator("#toasts")).to_contain_text("Copied link")
-    assert page.evaluate("window.copied") == ["RES-5"]
 
 
 def test_text_typed_while_a_save_reloads_the_item_is_kept(rw, desktop):
@@ -1053,6 +1022,25 @@ def test_status_field_names_the_ancestor_that_refuses_the_move(rw, desktop, tmp_
     expect(detail_key(desktop)).to_have_text(under_blocked)
     expect(desktop.locator(active)).to_be_disabled()
     expect(desktop.locator(active)).to_have_text("Active (blocked by TM-6)")
+
+
+def test_an_error_object_of_the_server_shows_its_message(rw, desktop):
+    # The page's data calls send an error text; the other answers of the server send an object.
+    visit(desktop, rw, "/?item=RES-5")
+    expect(detail_key(desktop)).to_have_text("RES-5")
+    title = desktop.locator("#title-field")
+    alert = desktop.locator("#preview .edit-extras", has=desktop.locator("#title-reason")).locator("[role=alert]")
+    desktop.route("**/api/edit", lambda route: route.fulfill(status=500, content_type="application/json",
+        body=json.dumps({"error": {"kind": "server", "message": "The Taskman server failed."}})))
+    title.click()
+    title.fill("Typed again")
+    title.blur()
+    expect(alert).to_have_text("The Taskman server failed.")
+    desktop.unroute("**/api/edit")
+    title.click()
+    title.blur()
+    eventually(lambda: rw.api("/api/show/RES-5")["frontmatter"]["title"] == "Typed again")
+    expect(alert).to_be_hidden()
 
 
 def test_failed_save_keeps_the_text_and_shows_the_error(rw, desktop, tmp_path):
@@ -1363,6 +1351,23 @@ def test_a_review_comment_takes_pass_or_fail(rw, desktop):
     entry = desktop.locator('#preview .entry[data-kind="review"]')
     expect(entry.locator(".kind")).to_have_text("Review")
     expect(entry.locator(".result")).to_have_text("Pass")
+
+
+def test_a_change_from_the_page_has_the_person_of_local_mode_as_author(rw, desktop):
+    visit(desktop, rw, "/?item=RES-5")
+    open_menu_item(desktop, "Add comment")
+    desktop.fill("dialog[open] textarea[name=text]", "Checked in the browser")
+    desktop.keyboard.press("Control+Enter")
+    expect(desktop.locator("dialog[open]")).to_have_count(0)
+    assignee = desktop.locator("#assignee-field")
+    assignee.fill("Codex")
+    assignee.press("Enter")
+    eventually(lambda: rw.api("/api/show/RES-5")["frontmatter"]["assignee"] == "Codex")
+    # The CLI reads the same database: the comment and the field change name the person of the setting.
+    journal = rw.cli("show", "RES-5", "--json")["frontmatter"]["journal"]
+    assert (journal[-1]["actor"], journal[-1]["text"]) == (PERSON, "Checked in the browser")
+    change = rw.cli("activity", "RES-5", "--json")[-1]
+    assert (change["field"], change["new"], change["author"]) == ("assignee", "Codex", PERSON)
 
 
 # ---- 12. errors and connection (P0-13) ----

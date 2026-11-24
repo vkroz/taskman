@@ -113,7 +113,7 @@ Key numbers come from the project's next number in the same transaction. Two wri
 
 | Today | SQL backends |
 | --- | --- |
-| `new`, `finalize`, `update`, `edit`, `depend`, `move`, `convert`, `close`, `discard`, `reorder`, `list`, `show`, `context`, `ready`, `dependents`, `waiting-on`, `search`, `browse`, `ui` | Same commands. They accept and print keys such as `TM-42`. `new` without `--parent` needs `--project KEY`. Listing commands accept `--project KEY`. |
+| `new`, `finalize`, `update`, `edit`, `depend`, `move`, `convert`, `close`, `discard`, `reorder`, `list`, `show`, `context`, `ready`, `dependents`, `waiting-on`, `search`, `browse` | Same commands. They accept and print keys such as `TM-42`. `new` without `--parent` needs `--project KEY`. Listing commands accept `--project KEY`. |
 | `record` | `comment` adds a comment with the same options (`--kind`, `--actor`, `--result`, and `--body` or `--body-file`). `record` remains an alias for older plugin installs; the plugin skills use `comment`. |
 | none | `assign KEY NAME`, `unassign KEY`, `label KEY --add L --remove L`, `repo KEY [ADDRESS...]`, `activity KEY`. `list`, `browse` and the UI filter by assignee and label. |
 | `validate` | Checks dependency links for unknown keys and cycles. |

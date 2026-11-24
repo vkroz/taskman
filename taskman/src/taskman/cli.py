@@ -26,7 +26,6 @@ from taskman.commands.serve import serve as _serve
 from taskman.commands.serve import token_app
 from taskman.commands.auth import auth_app
 from taskman.commands.show import show as _show
-from taskman.commands.ui import ui as _ui
 from taskman.commands.validate import validate as _validate
 from taskman.commands.context import activity, assign, comment, context, update, depend, discard, label, repo, unassign
 from taskman.model.locking import mutating
@@ -125,7 +124,6 @@ app.command("validate")(_storage_errors(_validate))
 app.command("ready")(_storage_errors(_ready))
 app.command("waiting-on")(_storage_errors(_waiting_on))
 app.command("search")(_storage_errors(_search))
-app.command("ui")(_storage_errors(_ui))
 app.command("help")(_help)
 app.command("channel")(_channel)
 app.command("locate")(_storage_errors(_locate))
