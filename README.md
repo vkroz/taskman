@@ -15,14 +15,6 @@ taskman install --platform codex --platform claude-code
 
 Choose either platform or repeat `--platform` for both. `taskman` and `tm` are equivalent commands. Start a fresh coding session after installing the plugin.
 
-A Taskman server deploys from the `staging` branch. People and agents who use a server install the CLI from `staging`, so that the CLI matches the server:
-
-```sh
-uv tool install --force 'git+https://github.com/vkroz/taskman.git@staging#subdirectory=taskman'
-```
-
-`taskman install` installs the plugin of the default branch.
-
 For a local checkout under development:
 
 ```sh
