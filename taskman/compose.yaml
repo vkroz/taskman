@@ -3,14 +3,14 @@
 # named volume shares at /cloudsql/local. Cloud Run uses /cloudsql/<connection name>.
 #
 # The server runs in local mode: http://127.0.0.1:8080/ is the workspace page,
-# without sign-in. TASKMAN_LOCAL_PERSON in .env names the author of its changes;
-# use the same name for `token create --person`.
+# without sign-in. TASKMAN_LOCAL_PERSON in .env names the author of its changes
+# and the person of the tokens that Settings > Tokens creates.
 #
 # Run from this directory:
 #   mkdir -p .secrets && python3 -c "import secrets; print(secrets.token_urlsafe(24))" > .secrets/db_password
 #   echo 'TASKMAN_LOCAL_PERSON=you@example.com' > .env
 #   docker compose up -d --build
-#   docker compose run --rm server token create --person "you@example.com"
+# Then create the token of the CLI at http://127.0.0.1:8080/settings/tokens.
 
 x-taskman: &taskman
   build: .

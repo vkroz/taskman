@@ -1574,41 +1574,152 @@ def test_bugfix_is_created_filtered_and_takes_no_sub_items(rw, desktop):
     expect(desktop.locator("dialog[open] textarea[name=text]")).to_be_focused()
 
 
-# ---- 18. token page of the server ----
-# The server's /auth/token page shares this module's browser: one Playwright per test session.
+# ---- 18. Settings > Tokens (TASKMAN-53) ----
 
 
-def test_a_person_revokes_an_own_token_on_the_token_page(sqlite_env, chromium):
-    """The page has a strict Content-Security-Policy and sends no referrer; a real browser still posts its form."""
-    from taskman.storage.accounts import create_token, list_tokens
-    from tests.conftest import RunningServer
-    from tests.test_login import FakeGoogle, get, settings
+def account_menu(page) -> list[str]:
+    """Open the account menu and return the names of its items."""
+    page.click("#account")
+    expect(page.locator(".popover[role=menu]")).to_be_visible()
+    return page.locator(".popover .menu-item").all_text_contents()
 
-    google = FakeGoogle()
-    server = RunningServer(sqlite_env, login=settings(), post_form=google.post_form)
-    context = chromium.new_context()
+
+def auth_status(base: str, token: str) -> subprocess.CompletedProcess:
+    """``taskman auth status`` against the server at ``base`` with ``token``, as an agent machine runs it."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("TASKMAN_")}
+    env.update(TASKMAN_SERVER_URL=base, TASKMAN_TOKEN=token)
+    return subprocess.run([TASKMAN, "auth", "status"], env=env, capture_output=True, text=True)
+
+
+def bearer_status(base: str, token: str) -> int:
+    request = urllib.request.Request(f"{base}/api/v1/whoami", headers={"Authorization": f"Bearer {token}"})
     try:
-        laptop_id, laptop = create_token(server.store, "ada@example.com", "laptop", days=90)
-        _, headers, _ = get(f"{server.url}/auth/token")
-        query = google.sign_in(headers["Location"])
-        page = context.new_page()
-        messages: list[str] = []
-        page.on("console", lambda message: messages.append(message.text))
-        page.goto(f"{server.url}/auth/callback?state={query['state']}&code={query['code']}")
-        laptop_row = page.locator("tr", has=page.locator("td", has_text="laptop"))
-        # TASKMAN-35: the accessible name of the button names its token.
-        laptop_row.get_by_role("button", name=f"Revoke token {laptop_id} (laptop)", exact=True).click()
-        page.get_by_text(f"Revoked token {laptop_id}.").wait_for()
-        assert laptop_row.get_by_role("button").count() == 0
-        request = urllib.request.Request(f"{server.url}/api/v1/whoami", headers={"Authorization": f"Bearer {laptop}"})
-        with pytest.raises(urllib.error.HTTPError) as refused:
-            urllib.request.urlopen(request, timeout=10)
-        assert refused.value.code == 401
-        assert list_tokens(server.store, "ada@example.com")[-1]["revoked_at"] is None
-        assert not [text for text in messages if "Content Security Policy" in text]
-    finally:
-        context.close()
-        server.stop()
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+
+
+def test_a_person_creates_and_revokes_a_token_in_settings(rw, desktop):
+    """Criteria 1, 2, 4 and 9 in local mode: the account menu opens Settings > Tokens for the .env person."""
+    visit(desktop, rw, "/")
+    expect(desktop.locator("#account .account-name")).to_have_text(PERSON)
+    expect(desktop.locator("#account")).to_have_attribute("aria-label", f"Account menu for {PERSON}")
+    # Local mode has no sign-in, so the menu has no Sign out. The keyboard opens Settings.
+    assert account_menu(desktop) == ["Settings"]
+    expect(desktop.locator("#account")).to_have_attribute("aria-expanded", "true")
+    expect(desktop.get_by_role("menuitem", name="Settings")).to_be_focused()
+    desktop.keyboard.press("Enter")
+    desktop.wait_for_url(rw.base + "/settings/tokens")
+    expect(desktop.get_by_role("heading", name="Tokens")).to_be_visible()
+    expect(desktop.locator(".settings-nav a[aria-current=page]")).to_have_text("Tokens")
+    expect(desktop.locator("#token-list")).to_have_text("You have no tokens.")
+    expect(desktop.locator("#account .account-name")).to_have_text(PERSON)
+    assert desktop.title() == "Tokens · Settings · Taskman"
+
+    # An empty name is refused with a message, and nothing is created.
+    desktop.click("text=Create token")
+    expect(desktop.locator("#token-error")).to_have_text("Enter a name of 1 to 60 characters")
+    expect(desktop.locator("#token-list")).to_have_text("You have no tokens.")
+    expect(desktop.locator("#token-days")).to_have_value("90")
+
+    desktop.fill("#token-name", "ci-agent")
+    desktop.select_option("#token-days", "30")
+    desktop.click("text=Create token")
+    value = desktop.locator("#token-value")
+    expect(value).to_have_text(re.compile(r"^tmn_[A-Za-z0-9_-]{43}$"))
+    token = value.text_content()
+    expect(desktop.locator("#token-new")).to_contain_text("Copy the token “ci-agent” now. Taskman does not show it again.")
+    expect(desktop.locator("#token-new").get_by_role("button", name="Copy")).to_be_focused()
+    expect(desktop.locator("#token-error")).to_be_hidden()
+    expect(desktop.locator("#token-name")).to_have_value("")
+    row_item = desktop.locator(".token-row", has_text="ci-agent")
+    expect(row_item.locator(".token-status")).to_have_text("Active")
+    expires = desktop.evaluate("""() => new Date(Date.now() + 30 * 86400000)
+      .toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })""")
+    expect(row_item.locator(".token-dates")).to_contain_text(f"Expires {expires}")
+    expect(row_item.locator(".token-dates")).to_contain_text("Never used")
+    expect(row_item.locator(".token-dates")).to_contain_text("Created ")
+    # The value is in the page only: not in the address, the history, browser storage or the cookies.
+    kept = desktop.evaluate("""() => location.href + JSON.stringify(history.state) + JSON.stringify(localStorage)
+      + JSON.stringify(sessionStorage) + document.cookie""")
+    assert token not in kept
+    assert desktop.evaluate(CONTRAST)["failures"] == []
+
+    # The new token works for the person of local mode.
+    status = auth_status(rw.base, token)
+    assert status.returncode == 0 and status.stdout == f"Logged in to {rw.base} as {PERSON}. Token from TASKMAN_TOKEN.\n"
+
+    desktop.reload()
+    expect(row_item.locator(".token-dates")).to_contain_text("Last used ")
+    expect(desktop.locator("#token-new")).to_be_hidden()
+    assert token not in desktop.content()
+
+    # Cancel changes nothing.
+    row_item.get_by_role("button", name="Revoke ci-agent").click()
+    dialog = desktop.locator("dialog[open]")
+    expect(dialog.locator("h2")).to_have_text("Revoke the token “ci-agent”?")
+    expect(dialog.get_by_role("button", name="Revoke")).to_be_focused()
+    dialog.get_by_role("button", name="Cancel").click()
+    expect(dialog).to_have_count(0)
+    expect(row_item).to_be_visible()
+    assert bearer_status(rw.base, token) == 200
+
+    row_item.get_by_role("button", name="Revoke ci-agent").click()
+    desktop.locator("dialog[open]").get_by_role("button", name="Revoke").click()
+    expect(desktop.locator("#token-list")).to_have_text("You have no tokens.")
+    expect(desktop.locator("#toasts")).to_contain_text("Revoked “ci-agent”")
+    assert bearer_status(rw.base, token) == 401
+    assert auth_status(rw.base, token).returncode != 0
+    desktop.click(".back-link")
+    desktop.wait_for_url(rw.base + "/")
+    expect(desktop.locator("#rows .row").first).to_be_visible()
+
+
+def test_a_revoke_of_a_token_revoked_elsewhere_removes_its_row(rw, desktop):
+    """A token that the CLI or another tab revoked first leaves the list; the dialog does not stay open."""
+    created = rw.api("/api/tokens/create", {"name": "stale-agent", "days": 7})
+    desktop.goto(rw.base + "/settings/tokens")
+    row_item = desktop.locator(".token-row", has_text="stale-agent")
+    expect(row_item).to_be_visible()
+    assert rw.api("/api/tokens/revoke", {"id": created["id"]}) == {"ok": True}
+    row_item.get_by_role("button", name="Revoke stale-agent").click()
+    desktop.locator("dialog[open]").get_by_role("button", name="Revoke").click()
+    expect(desktop.locator("dialog[open]")).to_have_count(0)
+    expect(desktop.locator("#toasts")).to_contain_text("“stale-agent” is already revoked")
+    expect(desktop.locator("#token-list")).to_have_text("You have no tokens.")
+
+
+def test_settings_tokens_fits_a_phone(rw, mobile):
+    visit(mobile, rw, "/")
+    expect(mobile.locator("#account .avatar")).to_be_visible()
+    expect(mobile.locator("#account .account-name")).to_be_hidden()
+    assert mobile.eval_on_selector("#new-m", "b => innerWidth - b.getBoundingClientRect().right") <= 16
+    account_menu(mobile)
+    mobile.get_by_role("menuitem", name="Settings").tap()
+    mobile.wait_for_url(rw.base + "/settings/tokens")
+    mobile.fill("#token-name", "phone-agent")
+    mobile.click("text=Create token")
+    expect(mobile.locator("#token-value")).to_have_text(re.compile(r"^tmn_"))
+    revoke = mobile.get_by_role("button", name="Revoke phone-agent")
+    expect(revoke).to_be_visible()
+    assert revoke.evaluate("b => b.getBoundingClientRect().right <= innerWidth")
+    assert mobile.evaluate("document.documentElement.scrollWidth") == 390
+
+
+@pytest.mark.parametrize("width,path", [(900, "/"), (1000, "/"), (1149, "/"), (1150, "/"),
+                                        (1280, "/items/TM-7"), (1440, "/items/TM-7"), (1600, "/items/TM-7")])
+def test_account_button_keeps_the_top_bar_in_the_main_column(ro, desktop, width, path):
+    """The account button and New stay inside the main column; they never cover the detail panel."""
+    desktop.set_viewport_size({"width": width, "height": 700})
+    visit(desktop, ro, path)
+    if path != "/":
+        expect(detail_key(desktop)).to_have_text("TM-7")
+    expect(desktop.locator("#account .avatar")).to_be_visible()
+    main = desktop.eval_on_selector("#main", "e => e.getBoundingClientRect().right")
+    for selector in ("#account", "#new"):
+        assert desktop.eval_on_selector(selector, "e => e.getBoundingClientRect().right") <= main, selector
+    assert desktop.evaluate("document.documentElement.scrollWidth") == width
 
 
 # ---- 19. the workspace page on a hosted server ----
@@ -1679,7 +1790,7 @@ def test_the_hosted_page_reloads_through_sign_in_when_its_session_ends(sqlite_en
         assert visits["count"] == 1 and [person for person, _ in sessions()] == ["ada@example.com"]
         cookie = next(c for c in context.cookies() if c["name"] == SESSION_COOKIE)
         assert cookie["httpOnly"] and cookie["secure"] and cookie["sameSite"] == "Lax"
-        expect(page.locator("#sign-out")).to_be_visible()
+        expect(page.locator("#account .account-name")).to_have_text("ada@example.com")
 
         # The session expires, as 7 days after the sign-in. The next poll gets 401 and the page reloads.
         with server.store.lock():
@@ -1694,7 +1805,8 @@ def test_the_hosted_page_reloads_through_sign_in_when_its_session_ends(sqlite_en
         # A new session of the same person; the sign-in removed the expired one.
         assert [person for person, _ in sessions()] == ["ada@example.com"]
 
-        page.click("#sign-out")
+        assert account_menu(page) == ["Settings", "Sign out"]
+        page.get_by_role("menuitem", name="Sign out").click()
         page.wait_for_url(server.url + "/auth/signed-out")
         expect(page.locator("h1")).to_have_text("You signed out")
         assert sessions()[-1][1] is not None
@@ -1754,7 +1866,8 @@ def test_a_second_tab_reloads_itself_after_a_new_sign_in_in_the_first(sqlite_env
         assert two.url == address and visits["count"] == 2
         expect(two.get_by_text("This change does not come from")).to_have_count(0)
 
-        two.click("#sign-out")
+        account_menu(two)
+        two.get_by_role("menuitem", name="Sign out").click()
         two.wait_for_url(server.url + "/auth/signed-out")
         assert sessions()[-1][1] is not None
         assert not [c for c in context.cookies() if c["name"] == SESSION_COOKIE]
@@ -1788,20 +1901,21 @@ def test_a_phone_signs_out_also_when_its_session_already_ended(sqlite_env, chrom
         page = context.new_page()
         page.goto(server.url + "/?view=backlog")
         expect(page.get_by_text("Phone item")).to_be_visible()
-        expect(page.locator("#sign-out")).to_be_hidden()
-        page.click("#sign-out-m")
+        account_menu(page)
+        page.get_by_role("menuitem", name="Sign out").tap()
         page.wait_for_url(server.url + "/auth/signed-out")
         expect(page.locator("h1")).to_have_text("You signed out")
         assert not [c for c in context.cookies() if c["name"] == SESSION_COOKIE]
 
         page.goto(server.url + "/")
-        expect(page.locator("#sign-out-m")).to_be_visible()
+        expect(page.locator("#account")).to_be_visible()
         assert visits["count"] == 2
         # The session expires while the page is open. Sign out goes to the signed-out page, not through sign-in.
         with server.store.lock():
             server.store.conn.execute("UPDATE sessions SET expires_at = ?",
                                       ((datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),))
-        page.click("#sign-out-m")
+        account_menu(page)
+        page.get_by_role("menuitem", name="Sign out").tap()
         page.wait_for_url(server.url + "/auth/signed-out")
         expect(page.locator("h1")).to_have_text("You signed out")
         assert visits["count"] == 2
@@ -1821,8 +1935,65 @@ def test_the_local_page_has_no_sign_out(chromium, sqlite_env):
         page = context.new_page()
         page.goto(server.url + "/")
         expect(page.locator("#view-title")).to_be_visible()
-        expect(page.locator("#sign-out-m")).to_be_hidden()
-        expect(page.locator("#sign-out")).to_be_hidden()
+        assert account_menu(page) == ["Settings"]
     finally:
         context.close()
         server.stop()
+
+
+def test_a_signed_in_person_manages_tokens_in_settings_on_a_hosted_server(sqlite_env, chromium):
+    """Criteria 1, 2 and 7 on a hosted server: /auth/token opens Settings > Tokens through sign-in."""
+    import dataclasses
+
+    from taskman.login import Provider
+    from taskman.storage.accounts import create_token, list_tokens
+    from tests.conftest import RunningServer
+    from tests.test_login import PROVIDER, FakeGoogle, settings
+
+    google = FakeGoogle()
+    stub, visits = _stub_sign_in(google)
+    server = RunningServer(sqlite_env, login=settings(), post_form=google.post_form)
+    provider = Provider(authorize_url=f"http://127.0.0.1:{stub.server_port}/auth", token_url=PROVIDER.token_url,
+                        issuers=PROVIDER.issuers)
+    server.logins.settings = dataclasses.replace(server.logins.settings, public_url=server.url, provider=provider)
+    visits["back"] = server.url
+    context = chromium.new_context(**DESKTOP)
+    try:
+        create_token(server.store, "ada@example.com", "laptop", 90)
+        create_token(server.store, "bob@example.com", "bob-vm", 90)
+        page = context.new_page()
+        problems: list[str] = []
+        page.on("pageerror", lambda error: problems.append(str(error)))
+        page.on("console", lambda message: problems.append(message.text)
+                if "Content Security Policy" in message.text else None)
+        page.goto(server.url + "/auth/token")
+        page.wait_for_url(server.url + "/settings/tokens")
+        assert visits["count"] == 1 and len(list_tokens(server.store, "ada@example.com")) == 1
+        laptop = page.locator(".token-row", has_text="laptop")
+        expect(laptop.locator(".token-status")).to_have_text("Active")
+        expect(laptop.locator(".token-dates")).to_contain_text("Never used")
+        expect(page.locator(".token-row")).to_have_count(1)  # not the token of another person
+        expect(page.locator("#account .account-name")).to_have_text("ada@example.com")
+
+        page.fill("#token-name", "ci-agent")
+        page.select_option("#token-days", "30")
+        page.click("text=Create token")
+        expect(page.locator("#token-value")).to_have_text(re.compile(r"^tmn_"))
+        token = page.locator("#token-value").text_content()
+        status = auth_status(server.url, token)
+        assert status.returncode == 0 and status.stdout.startswith(f"Logged in to {server.url} as ada@example.com.")
+        expect(page.locator(".token-row").first).to_contain_text("ci-agent")
+        page.reload()
+        expect(page.locator(".token-row")).to_have_count(2)
+        expect(page.locator("#token-new")).to_be_hidden()
+        assert token not in page.content() and visits["count"] == 1
+
+        assert account_menu(page) == ["Settings", "Sign out"]
+        page.get_by_role("menuitem", name="Sign out").click()
+        page.wait_for_url(server.url + "/auth/signed-out")
+        assert not problems, problems
+    finally:
+        context.close()
+        server.stop()
+        stub.shutdown()
+        stub.server_close()

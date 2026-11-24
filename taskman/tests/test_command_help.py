@@ -58,7 +58,8 @@ def test_help_documents_self_service_tokens() -> None:
     assert "A token is valid for 90 days." in text
     assert "`taskman token list` shows your own tokens (ID, label, created, expires, last used, revoked)" in text
     assert "`taskman token revoke ID` revokes one of them, also the token in use." in text
-    assert "/auth/token page shows the same list" in text and "Nobody sees or revokes another person's tokens" in text
+    assert "Settings > Tokens (/settings/tokens) lists, creates and revokes your tokens" in text
+    assert "Nobody sees or revokes another person's tokens" in text and "/auth/token" not in text
     assert "With `--database`, or with no server set" in text
 
 

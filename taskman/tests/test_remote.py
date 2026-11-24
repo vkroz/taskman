@@ -352,8 +352,8 @@ def test_token_create_with_a_server_set_refuses_and_names_the_token_page(remote_
     before = list_tokens(remote_env.store)
     error = run("token", "create", "--person", "Ada", code=2)
     assert error == (f"Error: a server is set ({remote_env.url}), and `token create` does not use it. Get your token "
-                     f"on {remote_env.url}/auth/token. To create a token in the database of the storage settings, "
-                     "add --database.\n")
+                     f"on Settings > Tokens at {remote_env.url}/settings/tokens. To create a token in the database of "
+                     "the storage settings, add --database.\n")
     assert list_tokens(remote_env.store) == before
     token = run("token", "create", "--person", "Ada", "--label", "build-vm", "--database").splitlines()[-1]
     assert token.startswith("tmn_")

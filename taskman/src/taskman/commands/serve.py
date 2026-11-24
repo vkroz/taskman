@@ -173,7 +173,7 @@ def token_create(
 ) -> None:
     """Create a token for a person in the database. The token is shown one time.
 
-    With a server set, a person gets a token on the server's /auth/token page.
+    With a server set, a person gets a token on the Settings > Tokens screen of the server's workspace page.
     """
     from taskman.storage.accounts import create_token
     from taskman.storage.remote import server_url
@@ -186,8 +186,8 @@ def token_create(
     if server:
         # The server has no command to create a token: this would write to a local database, not to the server.
         typer.echo(f"Error: a server is set ({server}), and `token create` does not use it. Get your token on "
-                   f"{server}/auth/token. To create a token in the database of the storage settings, add --database.",
-                   err=True)
+                   f"Settings > Tokens at {server}/settings/tokens. To create a token in the database of the storage "
+                   "settings, add --database.", err=True)
         raise typer.Exit(2)
     with _database() as store:
         token_id, token = create_token(store, person, label, days)

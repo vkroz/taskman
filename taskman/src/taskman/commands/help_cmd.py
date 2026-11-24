@@ -206,15 +206,15 @@ ENVIRONMENT
 
   A token is valid for 90 days. Against a server, `taskman token list` shows
   your own tokens (ID, label, created, expires, last used, revoked) and
-  `taskman token revoke ID` revokes one of them, also the token in use. The
-  server's /auth/token page shows the same list, with a revoke button for
-  each token. Nobody sees or revokes another person's tokens through the
-  server, and no command or page shows a token's value again. With
-  `--database`, or with no server set, `taskman token list` and `taskman
-  token revoke` use the database directly: an operator lists and revokes the
-  tokens of every person. `taskman token create` uses only the database. With
-  a server set, it needs `--database`; without it, it names the server's
-  /auth/token page.
+  `taskman token revoke ID` revokes one of them, also the token in use. On
+  the server's workspace page, Settings > Tokens (/settings/tokens) lists,
+  creates and revokes your tokens. Nobody sees or revokes another person's
+  tokens through the server, and no command or page shows a token's value
+  again. With `--database`, or with no server set, `taskman token list` and
+  `taskman token revoke` use the database directly: an operator lists and
+  revokes the tokens of every person. `taskman token create` uses only the
+  database. With a server set, it needs `--database`; without it, it names
+  Settings > Tokens.
 
   Browser login on the server needs TASKMAN_GOOGLE_CLIENT_ID,
   TASKMAN_GOOGLE_CLIENT_SECRET (or _FILE), TASKMAN_PUBLIC_URL, and

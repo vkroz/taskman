@@ -24,6 +24,7 @@ import taskman.login
 from taskman import workspace
 from taskman.cli import app
 from taskman.login import LOGIN_COOKIE, SESSION_COOKIE, _return_path, csrf_token
+from taskman.storage.accounts import list_tokens
 from tests.conftest import RunningServer
 from tests.sql_helpers import new, run, show
 from tests.test_login import PROVIDER, FakeGoogle, NoRedirect, settings
@@ -90,10 +91,10 @@ def cookie_of(secret: str) -> dict:
 
 
 def state(server, key: str) -> tuple:
-    """Everything a refused change could alter."""
+    """Everything a refused change could alter, the tokens of Settings > Tokens included."""
     item = server.store.get(key)
     return (item.metadata, item.body, server.store.activity(key), [i.id for i in server.store.items()],
-            server.store.sibling_order())
+            server.store.sibling_order(), list_tokens(server.store))
 
 
 # ---- sign-in -------------------------------------------------------------
@@ -448,11 +449,13 @@ def test_the_auth_pages_keep_their_strict_policy(hosted, google):
         assert call(hosted, path)[1]["Content-Security-Policy"] == AUTH_POLICY, path
 
 
-def test_local_mode_keeps_its_page_without_a_policy_or_key(sqlite_env):
+def test_local_mode_keeps_its_page_without_a_script_policy_or_key(sqlite_env):
     running = RunningServer(sqlite_env, local_person="Ada")
     try:
         status, headers, text = call(running, "/")
-        assert status == 200 and "Content-Security-Policy" not in headers and '<meta name="taskman-csrf"' not in text
+        # Only frame protection: the local page has no script policy and no CSRF key.
+        assert status == 200 and headers["Content-Security-Policy"] == "frame-ancestors 'none'"
+        assert '<meta name="taskman-csrf"' not in text
     finally:
         running.stop()
 

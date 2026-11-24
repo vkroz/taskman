@@ -31,7 +31,7 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 from taskman import lifecycle, workspace
 from taskman.model.ordering import reorder_item
 from taskman.login import (LOGIN_COOKIE, LOGIN_TIME, SESSION_COOKIE, SESSION_TIME, LoginError, Logins, csrf_token,
-                           error_page, signed_out_page, token_error_page, ui_error_page, ui_not_set_up_page)
+                           error_page, signed_out_page, ui_error_page, ui_not_set_up_page)
 from taskman.storage.accounts import list_tokens, person_for_token, revoke_own_token, revoke_token
 from taskman.storage.sql_store import SqlStore
 from taskman.storage.store import Item, StorageError, item_data
@@ -228,9 +228,13 @@ def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None
 
         def _login_page(self, path: str, query: dict[str, str]) -> None:
             try:
+                if path == "/auth/token":
+                    # A person makes tokens on Settings > Tokens. An old link opens it, through sign-in when needed.
+                    self._send_page(302, "", "/settings/tokens")
+                    return
                 if logins is None:
                     raise LoginError(404, "Browser login is not set up on this server. Use a personal access token.")
-                if path in ("/auth/cli", "/auth/token", "/auth/ui"):
+                if path in ("/auth/cli", "/auth/ui"):
                     address, browser = logins.start(path[len("/auth/"):], query, self._cookie_value(LOGIN_COOKIE))
                     # The workspace page's sign-in cookie: only this browser can finish the sign-in.
                     cookie = _cookie(browser, int(LOGIN_TIME.total_seconds()), LOGIN_COOKIE) if browser else None
@@ -239,11 +243,9 @@ def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None
                     kind, *result = logins.finish(query, self._cookie_value(LOGIN_COOKIE))
                     if kind == "redirect":
                         self._send_page(302, "", result[0])
-                    elif kind == "session":
+                    else:
                         return_path, secret = result
                         self._send_page(302, "", return_path, _cookie(secret, int(SESSION_TIME.total_seconds())))
-                    else:
-                        self._send_page(200, result[0])
                 elif path == "/auth/signed-out":
                     self._send_page(200, signed_out_page())
                 else:
@@ -252,21 +254,6 @@ def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None
                 self._send_page(exc.status, (ui_error_page if exc.kind == "ui" else error_page)(exc.message))
             except Exception:  # noqa: BLE001 - the browser gets a page, never a traceback
                 self._send_page(500, error_page("The Taskman server failed."))
-
-        def _revoke_page(self) -> None:
-            """Revoke a token from the token page. The form carries the page key of the person's sign-in."""
-            try:
-                if logins is None:
-                    raise LoginError(404, "Browser login is not set up on this server. Use a personal access token.")
-                try:
-                    form = dict(parse_qsl(self._raw_body().decode("utf-8", "replace")))
-                except _Refused as exc:
-                    raise LoginError(exc.status, "The form is empty or too large.") from None
-                self._send_page(*logins.revoke(form))
-            except LoginError as exc:
-                self._send_page(exc.status, token_error_page(exc.message))
-            except Exception:  # noqa: BLE001 - the browser gets a page, never a traceback
-                self._send_page(500, token_error_page("The Taskman server failed."))
 
         def _exchange(self) -> tuple[int, dict[str, Any]]:
             if logins is None:
@@ -415,9 +402,6 @@ def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None
                 return
             if logins and workspace.is_page_request("POST", path):
                 self._hosted()
-                return
-            if path == "/auth/token/revoke":
-                self._revoke_page()
                 return
             if path == "/auth/logout":
                 self._logout()

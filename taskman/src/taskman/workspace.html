@@ -433,6 +433,7 @@
         align-items: center;
         gap: var(--s2);
         width: min(320px, 40%);
+        min-width: 0; /* it narrows to make room for the account button */
         height: 32px;
         padding: 0 var(--s2);
         border: 1px solid var(--border-input);
@@ -446,6 +447,7 @@
       }
       .search input {
         flex: 1;
+        min-width: 0;
         border: 0;
         padding: 0;
         outline: none;
@@ -1643,6 +1645,154 @@
         display: none !important;
       }
 
+      /* ===== account menu and Settings > Tokens ===== */
+      .account {
+        gap: var(--s2);
+        max-width: 200px;
+        padding: 0 var(--s2);
+      }
+      .account-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      /* Next to the detail panel, the top bar has room for the avatar only. */
+      .app.has-detail .account-name {
+        display: none;
+      }
+      .settings-page {
+        min-height: 100vh;
+        background: var(--surface);
+      }
+      .settings-top {
+        display: flex;
+        align-items: center;
+        gap: var(--s3);
+        height: 48px;
+        padding: 0 var(--s4);
+        border-bottom: 1px solid var(--border);
+      }
+      .settings-top h1 {
+        font-size: 16px;
+        line-height: 24px;
+        font-weight: 600;
+      }
+      .settings-top .account {
+        margin-left: auto;
+      }
+      .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--s1);
+        font-weight: 500;
+      }
+      .settings-body {
+        display: grid;
+        grid-template-columns: 224px minmax(0, 720px);
+        gap: var(--s5);
+        padding: var(--s5) var(--s4);
+      }
+      .settings-nav a {
+        display: flex;
+        align-items: center;
+        height: 28px;
+        padding: 0 var(--s2);
+        border-radius: var(--r2);
+        color: var(--text);
+      }
+      .settings-nav a:hover {
+        background: var(--surface-2);
+        text-decoration: none;
+      }
+      .settings-nav a[aria-current="page"] {
+        background: var(--accent-soft);
+        font-weight: 500;
+      }
+      .settings-main {
+        display: grid;
+        align-content: start;
+        min-width: 0;
+        gap: var(--s4);
+      }
+      .settings-main h2 {
+        font-size: 20px;
+        line-height: 28px;
+        font-weight: 600;
+      }
+      .token-form {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: end;
+        gap: var(--s3);
+      }
+      .token-form .field:first-child {
+        flex: 1;
+        min-width: 200px;
+      }
+      .token-new {
+        display: grid;
+        gap: var(--s2);
+        padding: var(--s3);
+        border: 1px solid var(--accent);
+        border-radius: var(--r3);
+        background: var(--accent-soft);
+        overflow-wrap: anywhere;
+      }
+      .token-value {
+        display: flex;
+        align-items: center;
+        gap: var(--s2);
+      }
+      .token-value code {
+        flex: 1;
+        min-width: 0;
+        padding: var(--s1) var(--s2);
+        font-size: 13px;
+        line-height: 20px;
+        word-break: break-all;
+        background: var(--surface);
+      }
+      .token-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        border: 1px solid var(--border);
+        border-radius: var(--r3);
+      }
+      .token-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: var(--s1) var(--s3);
+        padding: var(--s3);
+      }
+      .token-row + .token-row {
+        border-top: 1px solid var(--border);
+      }
+      .token-row .btn {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+      }
+      .token-head {
+        display: flex;
+        align-items: center;
+        gap: var(--s2);
+        min-width: 0;
+      }
+      .token-name {
+        font-weight: 500;
+        overflow-wrap: anywhere;
+      }
+      .token-dates {
+        font-size: 12px;
+        line-height: 16px;
+        color: var(--text-2);
+      }
+      .token-status[data-status="expired"] {
+        color: var(--fail);
+        background: var(--danger-soft);
+      }
+
       @media (min-width: 1600px) {
         .app.has-detail {
           grid-template-columns: 224px minmax(0, 1fr) 480px;
@@ -1671,6 +1821,9 @@
         }
         html.sheet-open {
           overflow: hidden;
+        }
+        .topbar .account-name {
+          display: none;
         }
       }
       /* Phones: app bar, 2-line rows, filters in one sheet. */
@@ -1739,8 +1892,16 @@
         .mbar select {
           height: 28px;
         }
-        #sign-out-m {
-          margin-left: auto;
+        .account .account-name {
+          display: none;
+        }
+        .settings-top {
+          padding: 0 var(--s3);
+        }
+        .settings-body {
+          grid-template-columns: minmax(0, 1fr);
+          gap: var(--s4);
+          padding: var(--s4) var(--s3);
         }
         .row {
           height: 52px;
@@ -1826,7 +1987,6 @@
           <button class="btn ghost sm" id="shortcuts-btn" type="button">
             <span data-icon="keyboard"></span>Shortcuts <kbd>?</kbd>
           </button>
-          <button class="btn ghost sm" id="sign-out" type="button" hidden>Sign out</button>
         </div>
       </aside>
       <main class="main" id="main">
@@ -1846,6 +2006,8 @@
               <span data-icon="search"></span>
             </button>
             <span class="conn m-only" data-conn></span>
+            <button class="btn ghost account" id="account" type="button" aria-haspopup="menu" aria-expanded="false"
+              aria-label="Account menu"></button>
             <button class="btn primary d-only" id="new" type="button" aria-keyshortcuts="c">
               <span data-icon="plus"></span>New <kbd>C</kbd>
             </button>
@@ -1859,7 +2021,6 @@
               <span data-icon="filter"></span><span id="filters-label">Filters</span>
             </button>
             <select id="project-select" aria-label="Project"></select>
-            <button class="btn ghost sm" id="sign-out-m" type="button" hidden>Sign out</button>
           </div>
           <div class="applied" id="applied" hidden></div>
           <div class="message error" id="message" role="alert" hidden></div>
@@ -1882,6 +2043,43 @@
         </div>
       </main>
       <aside class="detail" id="preview" aria-label="Item details" hidden></aside>
+    </div>
+    <div class="settings-page" id="settings" hidden>
+      <header class="settings-top">
+        <a class="back-link" href="/"><span data-icon="back"></span>Work items</a>
+        <h1>Settings</h1>
+        <span id="account-slot"></span>
+      </header>
+      <div class="settings-body">
+        <nav class="settings-nav" aria-label="Settings sections">
+          <a href="/settings/tokens" aria-current="page">Tokens</a>
+        </nav>
+        <section class="settings-main" aria-labelledby="tokens-title">
+          <h2 id="tokens-title">Tokens</h2>
+          <p class="muted">
+            A token lets an agent or a machine without a browser use Taskman as you. On that machine, run
+            <code>taskman auth login --with-token</code> and paste the token, or set it as <code>TASKMAN_TOKEN</code>.
+          </p>
+          <form class="token-form" id="token-form" novalidate>
+            <label class="field"
+              ><span>Name</span><input id="token-name" name="name" autocomplete="off" placeholder="ci-agent"
+            /></label>
+            <label class="field"
+              ><span>Expires in</span
+              ><select id="token-days" name="days">
+                <option value="7">7 days</option>
+                <option value="30">30 days</option>
+                <option value="90" selected>90 days</option>
+                <option value="365">365 days</option>
+              </select></label
+            >
+            <button class="btn primary" type="submit">Create token</button>
+          </form>
+          <div class="field-error" id="token-error" role="alert" hidden></div>
+          <div class="token-new" id="token-new" hidden></div>
+          <div id="token-list"><p class="muted">Loading…</p></div>
+        </section>
+      </div>
     </div>
     <div id="scrim" hidden></div>
     <div id="toasts" role="status" aria-live="polite"></div>
@@ -2260,7 +2458,10 @@
         history[mode === "push" ? "pushState" : "replaceState"]({ panel }, "", url);
       }
       const queryKey = () => JSON.stringify(queryBody());
+      // /settings and /settings/tokens show Settings > Tokens in place of the work items.
+      const SETTINGS = /^\/settings(\/|$)/.test(location.pathname);
       window.addEventListener("popstate", () => {
+        if (SETTINGS) return;
         const before = queryKey();
         const item = S.item;
         readURL();
@@ -2317,6 +2518,7 @@
         pollTimer = setTimeout(() => refresh(), delay * 1000);
       }
       document.addEventListener("visibilitychange", () => {
+        if (SETTINGS) return;
         if (document.hidden) {
           clearTimeout(pollTimer);
           if (inflight) inflight.abort();
@@ -2737,6 +2939,7 @@
       /** A project shows its name only when it differs from the key. */
       const projectLabel = (p) => (!p.key ? p.name : p.name && p.name !== p.key ? `${p.key} · ${p.name}` : p.key);
       function renderTop() {
+        renderAccount(S.data && S.data.actor);
         setText($("#view-title"), viewName());
         setText($("#scope"), `· ${S.project || "All projects"}`);
         document.title = `${viewName()} · Taskman`;
@@ -4420,7 +4623,7 @@
         if (open && S.item !== id) openItem(id, { focus: inPanel });
       }
       document.addEventListener("keydown", (event) => {
-        if (event.defaultPrevented) return;
+        if (event.defaultPrevented || SETTINGS) return;
         if (document.querySelector("dialog[open]")) return; // dialogs handle their own keys
         const target = event.target;
         const typing = target.closest && target.closest("input,textarea,select,[contenteditable]");
@@ -4505,6 +4708,120 @@
       }
 
       // =====================================================================
+      // Account menu and Settings > Tokens
+      // =====================================================================
+      /** The person's name at the top of the page opens the account menu. */
+      function renderAccount(name) {
+        const button = $("#account");
+        swap(button, name || "", () => (name ? [Avatar(name), h("span", { class: "account-name", text: name })] : [icon("person")]));
+        setAttr(button, "aria-label", name ? `Account menu for ${name}` : "Account menu");
+        setAttr(button, "title", name || null);
+      }
+      function openAccountMenu() {
+        const items = [["Settings", () => location.assign("/settings/tokens")]];
+        // Only a hosted server has a session to end; local mode has no sign-in.
+        if (CSRF) items.push(["Sign out", signOut]);
+        menu($("#account"), items, "Account");
+      }
+      async function signOut() {
+        try {
+          await api("/auth/logout", {});
+        } catch (error) {
+          // 401: the session already ended, so the person is signed out.
+          if (error.status !== 401) return toast(`Sign-out failed: ${error.message}`);
+        }
+        location.assign("/auth/signed-out");
+      }
+      const day = (iso) => new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+      function bootSettings() {
+        document.title = "Tokens · Settings · Taskman";
+        if (location.pathname !== "/settings/tokens") history.replaceState(null, "", "/settings/tokens");
+        $("#app").hidden = true;
+        $("#settings").hidden = false;
+        $("#account-slot").replaceWith($("#account"));
+        renderAccount(null);
+        $("#token-form").addEventListener("submit", createToken);
+        // The value of a new token lives only in this page: leaving the page removes it, also from the back cache.
+        window.addEventListener("pagehide", () => showNewToken(null));
+        loadTokens();
+      }
+      async function loadTokens() {
+        try {
+          const result = await api("/api/tokens", {});
+          renderAccount(result.person);
+          const list = result.tokens.length
+            ? h("ul", { class: "token-list", "aria-label": "Your tokens" }, result.tokens.map(TokenRow))
+            : h("p", { class: "muted", text: "You have no tokens." });
+          $("#token-list").replaceChildren(list);
+        } catch (error) {
+          $("#token-list").replaceChildren(h("div", { class: "message error", role: "alert", text: error.message }));
+        }
+      }
+      function TokenRow(token) {
+        const name = token.name || "Unnamed token";
+        const expired = token.status === "expired";
+        const dates = [`Created ${day(token.created_at)}`,
+          token.expires_at ? `${expired ? "Expired" : "Expires"} ${day(token.expires_at)}` : "Never expires",
+          token.last_used_at ? `Last used ${day(token.last_used_at)}` : "Never used"];
+        return h("li", { class: "token-row", "data-id": token.id },
+          h("div", { class: "token-head" }, h("span", { class: "token-name", text: name }),
+            h("span", { class: "chip token-status", "data-status": token.status, text: expired ? "Expired" : "Active" })),
+          h("div", { class: "token-dates", text: dates.join(" · ") }),
+          Button("Revoke", { size: "sm", attrs: { "aria-label": `Revoke ${name}` }, onclick: () => confirmRevoke(token.id, name) }));
+      }
+      async function createToken(event) {
+        event.preventDefault();
+        const form = event.target;
+        const submit = $("button[type=submit]", form);
+        if (submit.disabled) return;
+        const error = $("#token-error");
+        error.hidden = true;
+        submit.disabled = true;
+        try {
+          showNewToken(await api("/api/tokens/create", { name: $("#token-name").value, days: Number($("#token-days").value) }));
+          form.reset();
+          await loadTokens();
+        } catch (failure) {
+          error.textContent = failure.message;
+          error.hidden = false;
+        } finally {
+          submit.disabled = false;
+        }
+      }
+      /** Show the value of a new token one time. Only this page holds it: never the address, the history or storage. */
+      function showNewToken(created) {
+        const box = $("#token-new");
+        box.replaceChildren();
+        box.hidden = !created;
+        if (!created) return;
+        const copy = Button("Copy", { size: "sm", onclick: () => copyText(created.token, "the token") });
+        box.append(h("p", {}, h("strong", { text: `Copy the token “${created.name}” now. Taskman does not show it again.` })),
+          h("div", { class: "token-value" }, h("code", { id: "token-value", text: created.token }), copy));
+        copy.focus();
+      }
+      function confirmRevoke(id, name) {
+        const dlg = Dialog({
+          title: `Revoke the token “${name}”?`,
+          submit: "Revoke",
+          danger: true,
+          body: [h("p", { text: `An agent or a machine that uses “${name}” loses access at its next request. You cannot undo it.` })],
+          initialFocus: (self) => self.submitButton,
+          onSubmit: async () => {
+            try {
+              await api("/api/tokens/revoke", { id });
+              toast(`Revoked “${name}”`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              // Another tab or `taskman token revoke` revoked it first: the row is stale.
+              toast(`“${name}” is already revoked`);
+            }
+            dlg.close();
+            await loadTokens();
+          },
+        });
+      }
+
+      // =====================================================================
       // Boot
       // =====================================================================
       function syncHeadHeight() {
@@ -4513,6 +4830,8 @@
       }
       function boot() {
         for (const slot of $$("[data-icon]")) slot.append(icon(slot.dataset.icon));
+        $("#account").onclick = () => togglePopover($("#account"), openAccountMenu);
+        if (SETTINGS) return bootSettings();
         buildToolbar();
         loadCollapsed();
         readURL();
@@ -4553,21 +4872,6 @@
         $("#new").onclick = () => openCreate({ parent: S.detail && !LEAF_TYPES.includes(S.detail.row.type) && S.detail.row.status !== "done" ? S.detail.row.id : null });
         $("#new-m").onclick = $("#new").onclick;
         $("#shortcuts-btn").onclick = openShortcuts;
-        if (CSRF) {
-          // The sidebar holds Sign out; phones hide the sidebar and show it in the bar under the title.
-          for (const button of [$("#sign-out"), $("#sign-out-m")]) {
-            button.hidden = false;
-            button.onclick = async () => {
-              try {
-                await api("/auth/logout", {});
-              } catch (error) {
-                // 401: the session already ended, so the person is signed out.
-                if (error.status !== 401) return toast(`Sign-out failed: ${error.message}`);
-              }
-              location.assign("/auth/signed-out");
-            };
-          }
-        }
         $("#filters-btn").onclick = openFilterSheet;
         $("#view-select").onchange = (event) => setView(event.target.value);
         $("#project-select").onchange = (event) => setProject(event.target.value);

@@ -10,6 +10,7 @@ import hashlib
 import html
 import json
 import re
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from taskman import lifecycle
 from taskman.model.collection import collection, in_project_order, query
+from taskman.storage.accounts import create_token, list_tokens, revoke_token
 from taskman.storage.store import Item, Store, StorageError, key_order
 
 
@@ -26,11 +28,14 @@ VIEWS = ("attention", "active", "ready", "blocked", "drafts", "backlog", "done")
 # Sort names the UI offers, and the row field each one orders by.
 SORTS = {"manual": "priority", "key": "id", "title": "title", "state": "state", "type": "type",
          "assignee": "assignee", "created": "created_at", "updated": "updated_at"}
-# The page opens at / and, with one item, at /items/KEY.
-_PAGE_PATH = re.compile(r"^/(items/[A-Z][A-Z0-9]*-\d+)?$")
-# The data calls that the page posts.
+# The page opens at / and, with one item, at /items/KEY. Settings > Tokens opens at /settings and /settings/tokens.
+_PAGE_PATH = re.compile(r"^/(items/[A-Z][A-Z0-9]*-\d+|settings(/tokens)?)?$")
+# The data calls that the page posts. The token calls act only on the tokens of the page's person.
 POSTS = ('/api/items', '/api/query', '/api/edit', '/api/discard', '/api/reorder', '/api/comment', '/api/assign',
-         '/api/label', '/api/fields', '/api/move', '/api/repositories', '/api/finalize')
+         '/api/label', '/api/fields', '/api/move', '/api/repositories', '/api/finalize',
+         '/api/tokens', '/api/tokens/create', '/api/tokens/revoke')
+# The expiry choices of a new token, in days.
+TOKEN_EXPIRY_DAYS = (7, 30, 90, 365)
 # Any port: Compose can map another port of the computer. A rebinding page sends its own domain name.
 _LOCAL_HOST = re.compile(r"^(127\.0\.0\.1|localhost)(:\d{1,5})?$", re.IGNORECASE)
 _INLINE = re.compile(r"<(script|style)>(.*?)</\1>", re.DOTALL)
@@ -298,14 +303,53 @@ def _unchanged_ok(change) -> dict:
     return {'ok': True}
 
 
-def _json(request: BaseHTTPRequestHandler, status: int, data: dict) -> None:
+def _json(request: BaseHTTPRequestHandler, status: int, data: dict, headers: dict[str, str] | None = None) -> None:
     body = json.dumps(data, default=str, separators=(',', ':')).encode('utf-8')
     request.send_response(status)
     request.send_header('Content-Type', 'application/json')
     request.send_header('Content-Length', str(len(body)))
     request.send_header('Cache-Control', 'no-store')
+    for name, value in (headers or {}).items():
+        request.send_header(name, value)
     request.end_headers()
     request.wfile.write(body)
+
+
+def _own_tokens(store: Store, person: str) -> list[dict[str, Any]]:
+    """The tokens of ``person`` that are not revoked, newest first, with their status. Never a token value."""
+    now = datetime.now(timezone.utc)
+    return [{"id": row["id"], "name": row["label"], "created_at": row["created_at"], "expires_at": row["expires_at"],
+             "last_used_at": row["last_used_at"],
+             "status": "expired" if row["expires_at"] and datetime.fromisoformat(row["expires_at"]) <= now
+             else "active"}
+            for row in reversed(list_tokens(store, person)) if not row["revoked_at"]]
+
+
+def _tokens(request: BaseHTTPRequestHandler, store: Store, person: str, path: str, data: dict) -> None:
+    """Settings > Tokens: list, create or revoke a token of ``person``, and of no other person."""
+    if path == '/api/tokens/create':
+        name, days = data.get('name'), data.get('days')
+        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 60:
+            raise ValueError('Enter a name of 1 to 60 characters')
+        # Postgres text holds no NUL, and an invisible or reordering character makes a name look empty or false.
+        if not name.isprintable():
+            raise ValueError('A name cannot hold control or invisible characters')
+        if not isinstance(days, int) or isinstance(days, bool) or days not in TOKEN_EXPIRY_DAYS:
+            raise ValueError('Choose an expiry of 7, 30, 90 or 365 days')
+        token_id, token = create_token(store, person, name, days)
+        # The only answer that holds the value: no cache keeps it, and no request sends its address on.
+        _json(request, 201, {'id': token_id, 'name': name.strip(), 'token': token},
+              {'Referrer-Policy': 'no-referrer'})
+    elif path == '/api/tokens/revoke':
+        token_id = data.get('id')
+        valid = isinstance(token_id, int) and not isinstance(token_id, bool) and 0 < token_id < 2 ** 63
+        # The token of another person counts as no token, so the answer tells nothing about it.
+        if valid and revoke_token(store, token_id, person):
+            _json(request, 200, {'ok': True})
+        else:
+            _json(request, 404, {'error': 'No active token of yours has this ID'})
+    else:
+        _json(request, 200, {'person': person, 'tokens': _own_tokens(store, person)})
 
 
 def _post(request: BaseHTTPRequestHandler, store: Store, person: str) -> None:
@@ -319,6 +363,9 @@ def _post(request: BaseHTTPRequestHandler, store: Store, person: str) -> None:
         data = json.loads(request.rfile.read(length))
         if not isinstance(data, dict):
             raise ValueError('Expected an object')
+        if path.startswith('/api/tokens'):
+            _tokens(request, store, person, path, data)
+            return
         if path != '/api/items':
             from taskman.model.ordering import reorder_item
             status = 200
@@ -440,5 +487,9 @@ def _get(request: BaseHTTPRequestHandler, store: Store, server: str, csrf: str |
         request.send_header("Content-Security-Policy", content_policy(page))
         # The page holds the key of the session's changes: no cache keeps it.
         request.send_header("Cache-Control", "no-store")
+    else:
+        # The local page creates and revokes tokens: no other site may frame it and lure a click.
+        request.send_header("Content-Security-Policy", "frame-ancestors 'none'")
+        request.send_header("X-Frame-Options", "DENY")
     request.end_headers()
     request.wfile.write(body)

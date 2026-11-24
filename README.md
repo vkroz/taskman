@@ -188,13 +188,17 @@ cd taskman
 mkdir -p .secrets && python3 -c "import secrets; print(secrets.token_urlsafe(24))" > .secrets/db_password
 echo 'TASKMAN_LOCAL_PERSON=you@example.com' > .env
 docker compose up -d --build
-docker compose run --rm server token create --person "you@example.com"
-export TASKMAN_SERVER_URL=http://127.0.0.1:8080 TASKMAN_TOKEN=<printed token>
 ```
 
-Replace `<printed token>` with the token that `token create` printed. Git ignores `taskman/.env` and `taskman/.secrets/`. The server accepts calls only from this computer, on `127.0.0.1:8080`.
+Then get the token of the CLI:
 
-The stack runs the server in local mode: open `http://127.0.0.1:8080/` for the [workspace UI](#workspace-ui), without sign-in. `TASKMAN_LOCAL_PERSON` in `.env` names the author of the changes that you make in the page. Use the same name in `.env` and in `token create --person`, so that your changes in the page and in the CLI have the same author. Without `TASKMAN_LOCAL_PERSON`, every `docker compose` command stops with an error that names it. After you get a new version, run `docker compose up -d --build` again: the stack upgrades the schema before the server starts. `docker compose down` stops the stack and keeps the data.
+1. Open `http://127.0.0.1:8080/settings/tokens` (Settings > Tokens). The page has no sign-in in local mode.
+2. Type a name, for example `laptop`, select an expiry, and click **Create token**. The page shows the token one time.
+3. Run `export TASKMAN_SERVER_URL=http://127.0.0.1:8080 TASKMAN_TOKEN=<token>`, with the token in place of `<token>`.
+
+Git ignores `taskman/.env` and `taskman/.secrets/`. The server accepts calls only from this computer, on `127.0.0.1:8080`.
+
+The stack runs the server in local mode: open `http://127.0.0.1:8080/` for the [workspace UI](#workspace-ui), without sign-in. `TASKMAN_LOCAL_PERSON` in `.env` names the author of the changes that you make in the page. The tokens that you create on Settings > Tokens are tokens of the same person, so your changes in the page and in the CLI have the same author. Without `TASKMAN_LOCAL_PERSON`, every `docker compose` command stops with an error that names it. After you get a new version, run `docker compose up -d --build` again: the stack upgrades the schema before the server starts. `docker compose down` stops the stack and keeps the data.
 
 On Linux with umask 077, the container user cannot read the password file: run `chmod 644 .secrets/db_password`. The server does not connect again after Postgres restarts: run `docker compose restart server`. To change the password, change it in Postgres or delete all local data with `docker compose down -v`: Postgres reads the file only when it creates its data volume.
 
@@ -214,7 +218,7 @@ The command opens a browser. You sign in with your Google account, and the CLI s
 
 On a machine without a browser, for example a cloud virtual machine:
 
-1. On any computer, open `https://taskman.example.com/auth/token` and sign in. The page shows a personal access token one time.
+1. On any computer, open `https://taskman.example.com/settings/tokens` and sign in. Settings > Tokens opens. Create a token with a name and an expiry. The page shows the token one time.
 2. On the machine, run `taskman auth login --server https://taskman.example.com --with-token` and paste the token.
 
 An agent cloud environment sets `TASKMAN_SERVER_URL` and `TASKMAN_TOKEN` instead, as [Connect an agent cloud environment](#connect-an-agent-cloud-environment) shows. `TASKMAN_TOKEN` wins over a saved login.
@@ -223,14 +227,14 @@ The person of the token is the author of each change. With `--actor claude`, the
 
 ### Manage your tokens
 
-Each login, each `/auth/token` page and each token of an operator is a separate token. To see your tokens and to stop one that you no longer use, or that someone else may have:
+Each login, each token from Settings > Tokens and each token of an operator is a separate token. To see your tokens and to stop one that you no longer use, or that someone else may have:
 
 ```bash
 taskman token list          # ID, label, created, expires, last used, revoked
 taskman token revoke 7      # the next request with token 7 is refused
 ```
 
-The `/auth/token` page shows the same list after you sign in, with a Revoke button for each token. The buttons work for 10 minutes after the sign-in. You see and revoke only your own tokens. No command or page shows the value of a token again. When you revoke the token that this computer uses, the next command fails with "refused the token": log in again.
+In the workspace UI, click your name at the top of the page, then **Settings**. Settings > Tokens (`/settings/tokens`) shows your tokens that are not revoked: the name, the dates of creation, expiry and last use, and the status Active or Expired. A login of `taskman auth login` shows with the host name of its computer, unless `--label` gave another name. On this screen you also create a token with a name of 1 to 60 characters and an expiry of 7, 30, 90 or 365 days (default 90). The screen shows the value of a new token one time, with a **Copy** button. **Revoke** asks for a confirmation that names the token. On a hosted server, only a signed-in browser creates tokens: a request with a token alone cannot make a new token. In local mode, the screen has no sign-in and creates tokens for the person that `TASKMAN_LOCAL_PERSON` names, so keep the server on `127.0.0.1`. The old address `/auth/token` opens Settings > Tokens. You see and revoke only your own tokens. No command or page shows the value of a token again. When you revoke the token that this computer uses, the next command fails with "refused the token": log in again.
 
 ### Connect an agent cloud environment
 
@@ -239,7 +243,7 @@ A cloud agent session starts without the CLI, the server address and a token. Se
 1. Network access: allow the exact host of the server, for example `taskman.example.com`. Do not allow a wildcard such as `*.run.app`, because it opens every service in that domain. Allow all HTTP methods: the CLI sends each change as a POST request.
 2. Setup step: install the CLI from the branch that the server deploys from. Use the `staging` command in [Install](#install).
 3. `TASKMAN_SERVER_URL`: set the server address as a plain variable, for example `https://taskman.example.com`. The address is not a secret.
-4. Token: on your computer, open `https://taskman.example.com/auth/token` and sign in. The page shows a token one time. Give it to the environment in one of two ways:
+4. Token: on your computer, open Settings > Tokens at `https://taskman.example.com/settings/tokens` and sign in. Create a token with the name of the environment, for example `claude-cloud`. The page shows the token one time. Give it to the environment in one of two ways:
    - The platform proxy adds the token to each request: save the token as a network secret for the host. For a Claude Code network secret, use the header `Authorization` and the prefix `Bearer`. Then set the plain variable `TASKMAN_TOKEN=proxy-injected`. The proxy replaces this placeholder.
    - The platform has no such proxy: save the token in the secret store of the platform as `TASKMAN_TOKEN`.
 5. Check: in a new session, run `taskman auth status`. It must print `Logged in to https://taskman.example.com as <person>`. Any other output means that a setting is missing or wrong.
@@ -267,7 +271,7 @@ Browser login needs a Google OAuth (Open Authorization) client of type "Web appl
 | `TASKMAN_ALLOWED_EMAILS` | Comma-separated email addresses that may sign in. |
 | `TASKMAN_ALLOWED_DOMAINS` | Comma-separated Google Workspace domains. Every member of these organizations may sign in. Google must report the account as managed by the organization; an address in the domain alone is not enough. Set this, `TASKMAN_ALLOWED_EMAILS`, or both. |
 
-Browser login also turns on the workspace page of the server. Open the public address, for example `https://taskman.example.com/` or a link from **Copy link**, and sign in with Google. After the sign-in, the page opens at the address that you opened. You are the author of each change that you make on the page. A session lasts 7 days from the sign-in; use does not extend it. When the session ends, the page signs you in again and returns to the same address. **Sign out**, at the bottom of the sidebar, ends the session on the server. On a phone, **Sign out** is in the bar under the title of the list. The session cookie needs HTTPS: give `TASKMAN_PUBLIC_URL` an `https://` address. Local mode and browser login exclude each other: the server does not start with `TASKMAN_LOCAL_MODE=1` and `TASKMAN_GOOGLE_CLIENT_ID` both set.
+Browser login also turns on the workspace page of the server. Open the public address, for example `https://taskman.example.com/` or a link from **Copy link**, and sign in with Google. After the sign-in, the page opens at the address that you opened. You are the author of each change that you make on the page. A session lasts 7 days from the sign-in; use does not extend it. When the session ends, the page signs you in again and returns to the same address. Your name at the top of the page opens the account menu. Its **Settings** item opens Settings > Tokens, and its **Sign out** item ends the session on the server. The session cookie needs HTTPS: give `TASKMAN_PUBLIC_URL` an `https://` address. Local mode and browser login exclude each other: the server does not start with `TASKMAN_LOCAL_MODE=1` and `TASKMAN_GOOGLE_CLIENT_ID` both set.
 
 ## Develop Taskman
 
