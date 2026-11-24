@@ -8,9 +8,16 @@ store lock, so the lifecycle rules are checked next to the data.
 In local mode the server also serves the workspace page and its data calls,
 without sign-in, to a browser on the same computer. One person, named in the
 settings, is the author of the changes that the page makes.
+
+With browser login (hosted mode), the server serves the workspace page to a
+person who signs in with Google. A session cookie names the person, who is
+the author of the changes that the page makes. Each change of the page must
+come from the server's own origin and carry the page's CSRF (cross-site
+request forgery) key.
 """
 from __future__ import annotations
 
+import hmac
 import inspect
 import json
 import re
@@ -23,7 +30,8 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 
 from taskman import lifecycle, workspace
 from taskman.model.ordering import reorder_item
-from taskman.login import LoginError, Logins, error_page, token_error_page
+from taskman.login import (LOGIN_COOKIE, LOGIN_TIME, SESSION_COOKIE, SESSION_TIME, LoginError, Logins, csrf_token,
+                           error_page, signed_out_page, token_error_page, ui_error_page, ui_not_set_up_page)
 from taskman.storage.accounts import list_tokens, person_for_token, revoke_own_token, revoke_token
 from taskman.storage.sql_store import SqlStore
 from taskman.storage.store import Item, StorageError, item_data
@@ -107,6 +115,20 @@ def author_name(person: str, actor: Any) -> str:
     return f"{actor.strip()} for {person}"
 
 
+def _cookie(secret: str, seconds: int, name: str = SESSION_COOKIE) -> str:
+    """A cookie of the sign-in: only for this server over HTTPS, never for a script, and not sent by other sites'
+    posts. The session cookie by default."""
+    return f"{name}={secret}; Max-Age={seconds}; Path=/; Secure; HttpOnly; SameSite=Lax"
+
+
+def _origin(url: str) -> str:
+    """The origin of ``url`` as a browser sends it in ``Origin``: the host in lower case, no default port."""
+    parts = urlsplit(url)
+    host = f"[{parts.hostname}]" if ":" in (parts.hostname or "") else parts.hostname
+    port = "" if parts.port in (None, {"http": 80, "https": 443}.get(parts.scheme)) else f":{parts.port}"
+    return f"{parts.scheme}://{host}{port}"
+
+
 def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None,
                  local_person: str | None = None) -> type[BaseHTTPRequestHandler]:
     """The request handler. ``local_person`` turns on local mode: the workspace page, with that person as author."""
@@ -128,9 +150,11 @@ def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None
                 self.requestline = f"{self.command} {url.path} {self.request_version}"
             super().log_request(code, size)
 
-        def _send(self, status: int, data: dict[str, Any]) -> None:
+        def _send(self, status: int, data: dict[str, Any], cookie: str | None = None) -> None:
             body = json.dumps(data, default=str, separators=(",", ":")).encode("utf-8")
             self.send_response(status)
+            if cookie is not None:
+                self.send_header("Set-Cookie", cookie)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
@@ -185,11 +209,13 @@ def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None
 
         # ---- browser login ---------------------------------------------
 
-        def _send_page(self, status: int, text: str, location: str | None = None) -> None:
+        def _send_page(self, status: int, text: str, location: str | None = None, cookie: str | None = None) -> None:
             body = text.encode("utf-8")
             self.send_response(status)
             if location:
                 self.send_header("Location", location)
+            if cookie is not None:
+                self.send_header("Set-Cookie", cookie)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
@@ -204,18 +230,26 @@ def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None
             try:
                 if logins is None:
                     raise LoginError(404, "Browser login is not set up on this server. Use a personal access token.")
-                if path in ("/auth/cli", "/auth/token"):
-                    self._send_page(302, "", logins.start(path[len("/auth/"):], query))
+                if path in ("/auth/cli", "/auth/token", "/auth/ui"):
+                    address, browser = logins.start(path[len("/auth/"):], query, self._cookie_value(LOGIN_COOKIE))
+                    # The workspace page's sign-in cookie: only this browser can finish the sign-in.
+                    cookie = _cookie(browser, int(LOGIN_TIME.total_seconds()), LOGIN_COOKIE) if browser else None
+                    self._send_page(302, "", address, cookie)
                 elif path == "/auth/callback":
-                    kind, result = logins.finish(query)
+                    kind, *result = logins.finish(query, self._cookie_value(LOGIN_COOKIE))
                     if kind == "redirect":
-                        self._send_page(302, "", result)
+                        self._send_page(302, "", result[0])
+                    elif kind == "session":
+                        return_path, secret = result
+                        self._send_page(302, "", return_path, _cookie(secret, int(SESSION_TIME.total_seconds())))
                     else:
-                        self._send_page(200, result)
+                        self._send_page(200, result[0])
+                elif path == "/auth/signed-out":
+                    self._send_page(200, signed_out_page())
                 else:
                     raise LoginError(404, f"Not found: {path}")
             except LoginError as exc:
-                self._send_page(exc.status, error_page(exc.message))
+                self._send_page(exc.status, (ui_error_page if exc.kind == "ui" else error_page)(exc.message))
             except Exception:  # noqa: BLE001 - the browser gets a page, never a traceback
                 self._send_page(500, error_page("The Taskman server failed."))
 
@@ -242,13 +276,88 @@ def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None
             except LoginError as exc:
                 raise _Refused(exc.status, "login", exc.message) from None
 
+        # ---- the workspace page with sign-in (hosted mode) ---------------
+
+        def _cookie_value(self, cookie: str) -> str:
+            """The value of a cookie of the request, or ``""``."""
+            for part in self.headers.get("Cookie", "").split(";"):
+                name, _, value = part.strip().partition("=")
+                if name == cookie:
+                    return value
+            return ""
+
+        def _session(self) -> str:
+            """The session secret of the request's cookie, or ``""``."""
+            return self._cookie_value(SESSION_COOKIE)
+
+        def _refused(self, person: str | None, secret: str) -> bool:
+            """Refuse a data call without a valid session (401), and a change that does not come from the
+            server's own origin with the page's key (403). Checked before any change runs."""
+            if person is None:
+                # A data call cannot follow a sign-in: the page reloads itself on 401.
+                status, kind, message = 401, "session", "Your Taskman session ended. Sign in again."
+            elif self.command == "POST" and (
+                    self.headers.get("Origin") != _origin(logins.settings.public_url)
+                    or not self.headers.get("X-Taskman-CSRF")):
+                status, kind, message = 403, "csrf", "This change does not come from a Taskman page of this server."
+            elif self.command == "POST" and not hmac.compare_digest(self.headers.get("X-Taskman-CSRF", "").encode(),
+                                                                    csrf_token(secret).encode()):
+                # A page of this server with the key of an earlier session, such as a second tab after a new
+                # sign-in in the first: the page reloads itself and gets the key of the current session.
+                status, kind, message = 403, "stale", "This page is from an earlier sign-in. Reload the page."
+            else:
+                return False
+            self._send(status, {"error": {"kind": kind, "message": message}})
+            return True
+
+        def _hosted(self) -> None:
+            """A request of the workspace page in hosted mode: the page, a data call, or a change."""
+            url = urlsplit(self.path)
+            secret = self._session()
+            try:
+                person = logins.session_person(secret)
+            except Exception:  # noqa: BLE001 - the page gets JSON, never a traceback
+                self._send(500, {"error": {"kind": "server", "message": "The Taskman server failed."}})
+                return
+            if self.command == "GET" and not url.path.startswith("/api/"):
+                if person is None:
+                    # Google signs the person in, then the browser returns to this address.
+                    self._login_page("/auth/ui", {"path": self.path})
+                else:
+                    workspace.respond(self, store, person, logins.settings.public_url, csrf_token(secret))
+            elif not self._refused(person, secret):
+                workspace.respond(self, store, person, logins.settings.public_url)
+
+        def _logout(self) -> None:
+            """Sign out of the workspace page: end the session and clear its cookie."""
+            if logins is None or local_person:
+                self._send(404, {"error": {"kind": "missing",
+                                           "message": "Browser login is not set up on this server."}})
+                return
+            secret = self._session()
+            try:
+                if self._refused(logins.session_person(secret), secret):
+                    return
+                logins.end_session(secret)
+            except Exception:  # noqa: BLE001 - the page gets JSON, never a traceback
+                self._send(500, {"error": {"kind": "server", "message": "The Taskman server failed."}})
+                return
+            self._send(200, {}, _cookie("", 0))
+
         # ---- GET -------------------------------------------------------
 
         def do_GET(self) -> None:  # noqa: N802
             url = urlsplit(self.path)
-            if local_person and workspace.is_page_request("GET", url.path):
-                workspace.answer(self, store, local_person)
-                return
+            if workspace.is_page_request("GET", url.path):
+                if local_person:
+                    workspace.answer(self, store, local_person)
+                    return
+                if logins:
+                    self._hosted()
+                    return
+                if not url.path.startswith("/api/"):
+                    self._send_page(200, ui_not_set_up_page())
+                    return
             if url.path.startswith("/auth/"):
                 self._login_page(url.path, dict(parse_qsl(url.query)))
                 return
@@ -300,11 +409,18 @@ def make_handler(store: SqlStore, log: bool = True, logins: Logins | None = None
         # ---- POST ------------------------------------------------------
 
         def do_POST(self) -> None:  # noqa: N802
-            if local_person and workspace.is_page_request("POST", urlsplit(self.path).path):
+            path = urlsplit(self.path).path
+            if local_person and workspace.is_page_request("POST", path):
                 workspace.answer(self, store, local_person)
                 return
-            if urlsplit(self.path).path == "/auth/token/revoke":
+            if logins and workspace.is_page_request("POST", path):
+                self._hosted()
+                return
+            if path == "/auth/token/revoke":
                 self._revoke_page()
+                return
+            if path == "/auth/logout":
+                self._logout()
                 return
             self._answer(self._post)
 

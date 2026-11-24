@@ -110,7 +110,8 @@ def serve(
     """Run the Taskman server that the CLI calls.
 
     With TASKMAN_LOCAL_MODE=1, it also serves the workspace page without sign-in, to a browser on this
-    computer. TASKMAN_LOCAL_PERSON names the author of the page's changes.
+    computer. TASKMAN_LOCAL_PERSON names the author of the page's changes. With the Google sign-in settings,
+    it serves the workspace page to people who sign in. Local mode and sign-in exclude each other.
     """
     from taskman.server import make_server
 
@@ -122,12 +123,20 @@ def serve(
             raise typer.Exit(2) from None
     from taskman.login import Logins, login_settings
 
+    # Before the checks of each mode, so that the person learns first that the two modes exclude each other.
+    if (os.environ.get("TASKMAN_LOCAL_MODE", "").strip() == "1"
+            and os.environ.get("TASKMAN_GOOGLE_CLIENT_ID", "").strip()):
+        typer.echo("Error: local mode (TASKMAN_LOCAL_MODE) and Google sign-in (TASKMAN_GOOGLE_CLIENT_ID) exclude each "
+                   "other. For a hosted server, unset TASKMAN_LOCAL_MODE. For the local Compose stack, unset the "
+                   "Google sign-in settings (TASKMAN_GOOGLE_CLIENT_ID and the other TASKMAN_GOOGLE_* settings).",
+                   err=True)
+        raise typer.Exit(2)
+    person = _local_person()
     try:
         settings = login_settings()
     except StorageConfigError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(2) from None
-    person = _local_person()
     with _database() as store:
         try:
             server = make_server(host, port, store, logins=Logins(store, settings) if settings else None,
@@ -136,7 +145,8 @@ def serve(
             typer.echo(f"Error: Taskman cannot listen on {host}:{port}: {getattr(exc, 'strerror', None) or exc}", err=True)
             raise typer.Exit(2) from None
         if settings:
-            typer.echo(f"Browser login with Google is on for {settings.public_url}.")
+            typer.echo(f"Browser login with Google is on for {settings.public_url}. The workspace page is at "
+                       f"{settings.public_url}/ after sign-in.")
         else:
             typer.echo("Browser login is off: TASKMAN_GOOGLE_CLIENT_ID is not set. Tokens work.")
         if person:

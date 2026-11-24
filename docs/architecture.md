@@ -14,7 +14,7 @@ Taskman is one Python program. It runs as a command-line tool (CLI) and as a ser
 | Server | `taskman serve`. It alone opens the database. It checks the token of each call, runs each operation through the lifecycle in one transaction, and answers in JSON. |
 | Tokens | A token is a secret string that stands for one person. The database keeps only a SHA-256 fingerprint of each token. |
 | Settings | Select the server, or the backend and the connection, from environment variables and from a `.env` file at the repository root. |
-| Workspace UI | One web page and its data calls, served by the server in local mode. It uses the same lifecycle and store as the CLI. |
+| Workspace UI | One web page and its data calls, served by the server in local mode, or after a Google sign-in on a hosted server. It uses the same lifecycle and store as the CLI. |
 | Installer | Installs the shared plugin into Codex and Claude Code through platform adapters. |
 
 ## Flow of a change
@@ -91,15 +91,28 @@ The `/auth/token` page also lists the person's tokens, with a Revoke button for 
 
 In local mode, `taskman serve` serves the page and its data calls without sign-in. `TASKMAN_LOCAL_MODE=1` turns local mode on. `TASKMAN_LOCAL_PERSON` names the author of each change that the page makes. Without that name, the server does not start in local mode. The Docker Compose stack runs the server in local mode, on `127.0.0.1:8080` of the computer.
 
-In local mode, the server refuses with 403 each request of the page whose `Host` is not `127.0.0.1` or `localhost`, with any port or no port. Thus a page of another site that changes the address of its domain to 127.0.0.1 (DNS rebinding) cannot use the server, because the browser sends that domain. Requests that change data must also send the `X-Taskman: 1` header. Without local mode, the page and its data calls answer 404. The token API, the health checks and browser login work the same in both modes.
+In local mode, the server refuses with 403 each request of the page whose `Host` is not `127.0.0.1` or `localhost`, with any port or no port. Thus a page of another site that changes the address of its domain to 127.0.0.1 (DNS rebinding) cannot use the server, because the browser sends that domain. Requests that change data must also send the `X-Taskman: 1` header. The token API and the health checks work the same in local mode and in hosted mode.
 
-The page polls the server every 5 seconds. All server threads share one store. The server sets the author of the store under the store lock, for each request: the person of local mode for the page, and the person of the token for the API. The CLI with a direct database has no UI.
+In hosted mode, browser login is on and local mode is off. The server does not start when both `TASKMAN_LOCAL_MODE=1` and `TASKMAN_GOOGLE_CLIENT_ID` are set.
+
+- A page request (`/` or `/items/KEY`) without a valid session goes to Google, as `/auth/token` does. The login remembers the requested address, path and query. The server returns the browser only to a path of its own: a path that starts with `//`, or that has a `\`, goes to `/`.
+- The redirect to Google also sets the sign-in cookie `__Host-taskman_login` (HttpOnly, Secure, SameSite=Lax, Path=/, 10 minutes). The login keeps the SHA-256 fingerprint of its value. `/auth/callback` creates a session only for the browser that sends this cookie, so a callback address that a person sends to another browser gets 400 and no session. Two tabs of one browser share the cookie, so both can sign in at the same time.
+- After the sign-in, the server creates a session and sets the cookie `__Host-taskman_session` (HttpOnly, Secure, SameSite=Lax, Path=/). The `sessions` table keeps the SHA-256 fingerprint of the session secret, the person, the start and the expiry. Every server instance accepts the session. A session ends 7 days after the sign-in or at sign-out; use does not renew it. A new sign-in deletes the sessions that ended or expired.
+- A data call without a valid session gets 401 JSON. The page then reloads itself: the reload goes through the sign-in and returns to the same address.
+- Each change of the page (each POST data call and `/auth/logout`) must send an `Origin` equal to the origin of `TASKMAN_PUBLIC_URL`, and the header `X-Taskman-CSRF` (cross-site request forgery). The value is an HMAC-SHA256 of the session secret, so only the session's own page knows it. The server puts it in a `<meta>` tag of the page. The server checks both before it runs any change; a failed check gets 403 and changes nothing. A key that is not the key of the cookie's session, from the server's own origin, gets 403 with the kind `stale`: the page holds the key of an earlier session, as in a second tab after a new sign-in. The page then reloads itself and gets the key of the current session.
+- The page has a Content Security Policy: only its own inline scripts and styles run, by their SHA-256 hashes, and it connects only to its own server. Other sites cannot frame it. The `/auth/*` pages keep `default-src 'none'`.
+- Sign out posts to `/auth/logout`. The server ends the session, clears the cookie, and the page opens `/auth/signed-out`. When the session already ended, the page also opens `/auth/signed-out`.
+- Copy link gives `TASKMAN_PUBLIC_URL/items/KEY`.
+
+Without local mode and without browser login, `/` and `/items/KEY` answer a page that says that browser login is not set up and names its settings. The data calls answer 404.
+
+The page polls the server every 5 seconds. All server threads share one store. The server sets the author of the store under the store lock, for each request: the person of local mode or of the session for the page, and the person of the token for the API. The CLI with a direct database has no UI.
 
 ## Limits
 
 - Browser login supports Google only.
-- The server serves the workspace page only in local mode, without sign-in. A hosted server does not serve it.
+- The session cookie is `Secure`: a hosted server needs an `https://` public address. Browsers accept it over HTTP only on `localhost` and `127.0.0.1`.
 - The server uses one database connection for all calls. On Postgres, the first statement of a transaction has a 5-second time limit. After it, the connection counts as lost. When a transaction starts on a closed, broken or lost connection, the server opens a new connection and tries the start again, at most 3 more times, after 0.5, 1 and 2 seconds. It does not try again a transaction that failed after its start, so a change is never written twice. After a database restart, `/readyz` answers 200 again at the first call after the database is back, in the same server process. While the database is away, `/readyz` answers 503. On Cloud Run, a liveness probe on `/readyz` replaces an instance after 3 failed checks.
-- With browser login on, anyone can open `/auth/token` and `/auth/cli` without a token. Each request adds a row to the `logins` table and deletes old rows, under the database write lock. A row stays 1 day when Google signed in a person who may use the server, and 1 hour in all other cases. A sign-in that returns with an error, or that fails a later check, stays 1 hour. Taskman does not limit the rate of these requests.
+- With browser login on, anyone can open `/auth/token`, `/auth/cli`, `/auth/ui` and the workspace page without a token or session. Each request adds a row to the `logins` table and deletes old rows, under the database write lock. A row stays 1 day when Google signed in a person who may use the server, and 1 hour in all other cases. A sign-in that returns with an error, or that fails a later check, stays 1 hour. Taskman does not limit the rate of these requests.
 - Taskman does not read `tasks/` Markdown files from earlier versions, and imports nothing from them (decision D4).
 - There is no consolidation of completed work (decision D8).

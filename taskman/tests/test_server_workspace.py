@@ -193,12 +193,18 @@ def test_reorder_persists_and_rejects_an_invalid_position(local):
 # ---- without local mode ----
 
 
-def test_without_local_mode_the_page_and_its_data_calls_are_not_found(server):
+def test_without_local_mode_and_sign_in_the_page_says_that_login_is_not_set_up(server):
     key = sql.new("Hidden")
     before = server.store.get(key).metadata
-    for path in ("/", f"/items/{key}", f"/api/show/{key}"):
-        status, _, text = request(server.url, path, headers={"Host": "127.0.0.1"})
-        assert status == 404 and json.loads(text)["error"]["kind"] == "missing", path
+    for path in ("/", f"/items/{key}"):
+        status, content_type, text = request(server.url, path, headers={"Host": "127.0.0.1"})
+        assert (status, content_type) == (200, "text/html; charset=utf-8"), path
+        assert "Browser login is not set up" in text and "Hidden" not in text and 'id="preview"' not in text
+        for setting in ("TASKMAN_GOOGLE_CLIENT_ID", "TASKMAN_GOOGLE_CLIENT_SECRET", "TASKMAN_PUBLIC_URL",
+                        "TASKMAN_ALLOWED_EMAILS", "TASKMAN_ALLOWED_DOMAINS", "TASKMAN_LOCAL_MODE=1"):
+            assert setting in text, setting
+    status, _, text = request(server.url, f"/api/show/{key}", headers={"Host": "127.0.0.1"})
+    assert status == 404 and json.loads(text)["error"]["kind"] == "missing"
     for path, data in (("/api/query", {}), ("/api/comment", {"id": key, "kind": "progress", "text": "No"}),
                        ("/api/items", {"title": "No", "project": "TM"})):
         status, _, text = request(server.url, path, data, {**UI, "Host": "127.0.0.1"})

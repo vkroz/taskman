@@ -1739,6 +1739,9 @@
         .mbar select {
           height: 28px;
         }
+        #sign-out-m {
+          margin-left: auto;
+        }
         .row {
           height: 52px;
           padding: 0 var(--s3);
@@ -1823,6 +1826,7 @@
           <button class="btn ghost sm" id="shortcuts-btn" type="button">
             <span data-icon="keyboard"></span>Shortcuts <kbd>?</kbd>
           </button>
+          <button class="btn ghost sm" id="sign-out" type="button" hidden>Sign out</button>
         </div>
       </aside>
       <main class="main" id="main">
@@ -1855,6 +1859,7 @@
               <span data-icon="filter"></span><span id="filters-label">Filters</span>
             </button>
             <select id="project-select" aria-label="Project"></select>
+            <button class="btn ghost sm" id="sign-out-m" type="button" hidden>Sign out</button>
           </div>
           <div class="applied" id="applied" hidden></div>
           <div class="message error" id="message" role="alert" hidden></div>
@@ -2160,15 +2165,23 @@
       // =====================================================================
       // API
       // =====================================================================
+      // On a hosted server, the page holds the key of the session's changes; in local mode, it has none.
+      const CSRF = document.querySelector('meta[name="taskman-csrf"]')?.content || "";
       async function api(path, data, signal) {
         let response;
-        const init = data === undefined ? { signal } : { method: "POST", signal, body: JSON.stringify(data),
-          headers: { "Content-Type": "application/json", "X-Taskman": "1" } };
+        const headers = { "Content-Type": "application/json", "X-Taskman": "1" };
+        if (CSRF) headers["X-Taskman-CSRF"] = CSRF;
+        const init = data === undefined ? { signal } : { method: "POST", signal, body: JSON.stringify(data), headers };
         try {
           response = await fetch(path, init);
         } catch (error) {
           if (error.name === "AbortError") throw error;
           throw Object.assign(new Error("Taskman server is not reachable"), { network: true });
+        }
+        if (response.status === 401 && CSRF && path !== "/auth/logout") {
+          // The session ended: the reload goes through sign-in and returns to this address.
+          location.reload();
+          return new Promise(() => {});
         }
         let value;
         try {
@@ -2176,6 +2189,11 @@
         } catch (error) {
           throw Object.assign(new Error(`The server sent an unreadable response (HTTP ${response.status})`),
             { status: response.status });
+        }
+        if (response.status === 403 && CSRF && value.error && value.error.kind === "stale") {
+          // Another tab signed in again: the reload gets the key of the current session.
+          location.reload();
+          return new Promise(() => {});
         }
         if (!response.ok) {
           // The page's data calls send an error text; the other answers of the server send an error object.
@@ -4535,6 +4553,21 @@
         $("#new").onclick = () => openCreate({ parent: S.detail && !LEAF_TYPES.includes(S.detail.row.type) && S.detail.row.status !== "done" ? S.detail.row.id : null });
         $("#new-m").onclick = $("#new").onclick;
         $("#shortcuts-btn").onclick = openShortcuts;
+        if (CSRF) {
+          // The sidebar holds Sign out; phones hide the sidebar and show it in the bar under the title.
+          for (const button of [$("#sign-out"), $("#sign-out-m")]) {
+            button.hidden = false;
+            button.onclick = async () => {
+              try {
+                await api("/auth/logout", {});
+              } catch (error) {
+                // 401: the session already ended, so the person is signed out.
+                if (error.status !== 401) return toast(`Sign-out failed: ${error.message}`);
+              }
+              location.assign("/auth/signed-out");
+            };
+          }
+        }
         $("#filters-btn").onclick = openFilterSheet;
         $("#view-select").onchange = (event) => setView(event.target.value);
         $("#project-select").onchange = (event) => setProject(event.target.value);

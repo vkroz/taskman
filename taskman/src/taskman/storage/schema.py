@@ -100,6 +100,16 @@ def _allow_review_comments(conn: Any, dialect: Dialect) -> None:
     }, "add the review comment kind")
 
 
+_OLD_LOGIN_KIND_CHECK = "CHECK (kind IN ('cli', 'token'))"
+_NEW_LOGIN_KIND_CHECK = "CHECK (kind IN ('cli', 'token', 'ui'))"
+
+
+def _allow_ui_logins(conn: Any, dialect: Dialect) -> None:
+    """Let a login have the kind ``ui``: a sign-in of the workspace page."""
+    _widen_checks(conn, dialect, "logins", {"logins_kind_check": (_OLD_LOGIN_KIND_CHECK, _NEW_LOGIN_KIND_CHECK)},
+                  "add the sign-in of the workspace page")
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         1,
@@ -250,6 +260,27 @@ MIGRATIONS: tuple[Migration, ...] = (
         ),
     ),
     Migration(7, "review comments", (), run=_allow_review_comments),
+    Migration(
+        8,
+        "browser sessions",
+        (
+            # The address of the workspace page that a sign-in returns to.
+            "ALTER TABLE logins ADD COLUMN return_path TEXT",
+            # The fingerprint of the sign-in cookie of the browser that started a sign-in of the workspace page.
+            "ALTER TABLE logins ADD COLUMN browser_hash TEXT",
+            """
+            CREATE TABLE sessions (
+                id {pk},
+                secret_hash TEXT NOT NULL UNIQUE,
+                person TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                ended_at TEXT
+            )
+            """,
+        ),
+        run=_allow_ui_logins,
+    ),
 )
 
 CURRENT_VERSION = MIGRATIONS[-1].version

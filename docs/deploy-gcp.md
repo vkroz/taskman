@@ -440,7 +440,7 @@ gcloud secrets versions disable <old version> --secret taskman-google-client-sec
 
 Set `ALLOWED_DOMAINS`, `ALLOWED_EMAILS`, or both, in `deploy/gcp/nemos-infra.env`, as comma-separated lists without spaces. `ALLOWED_DOMAINS` admits the members of a Google Workspace organization. A personal Gmail account has no Workspace domain: put its address in `ALLOWED_EMAILS`. To change who may sign in, change the lists and merge to `staging`. `deploy.sh` stops before it changes anything when `GOOGLE_CLIENT_ID` is set and `PUBLIC_URL` is empty, or both lists are empty. To turn browser login off, empty `GOOGLE_CLIENT_ID` and merge to `staging`.
 
-When browser login is on, anyone can open `/auth/token` and `/auth/cli` on the public service. Each request adds a row to the `logins` table under the database write lock, and Taskman does not limit the rate of these requests. Each new request deletes a row after 1 day when Google signed in a person who may use the server, and after 1 hour in all other cases, also when the sign-in returned with an error.
+When browser login is on, anyone can open `/auth/token`, `/auth/cli` and the workspace page on the public service. Each request adds a row to the `logins` table under the database write lock, and Taskman does not limit the rate of these requests. Each new request deletes a row after 1 day when Google signed in a person who may use the server, and after 1 hour in all other cases, also when the sign-in returned with an error.
 
 ### Fix a failed login
 
@@ -455,6 +455,12 @@ When a login fails, the Taskman page or the Google page names an OAuth error cod
 Each person logs in from a computer with a browser, as [First login from a computer](#first-login-from-a-computer) shows. On a machine without a browser, open `https://taskman-1037430670088.us-central1.run.app/auth/token` on any computer and sign in. The page shows a personal access token one time. On the machine, run `taskman auth login --server https://taskman-1037430670088.us-central1.run.app --with-token` and paste the token. To connect an agent cloud environment, follow [Connect an agent cloud environment](../README.md#connect-an-agent-cloud-environment) in the README. Without browser login, an operator creates the token, as "Run operator commands" shows.
 
 Each person lists and revokes their own tokens with `taskman token list` and `taskman token revoke ID` against the server, or on the `/auth/token` page after the sign-in. [Manage your tokens](../README.md#manage-your-tokens) in the README gives the steps.
+
+### Open the workspace page
+
+With browser login on, open `https://taskman-1037430670088.us-central1.run.app/` in a browser, or a link from **Copy link**, such as `https://taskman-1037430670088.us-central1.run.app/items/TASKMAN-55`. The server sends you to Google. Sign in with an account that `ALLOWED_DOMAINS` or `ALLOWED_EMAILS` admits. Google sends you back to the address that you opened. Another account gets a page that says that it may not use the server.
+
+You are the author of each change that you make on the page. The session lasts 7 days from the sign-in, and use does not extend it. When it ends, the page signs you in again and returns to the same address. **Sign out**, at the bottom of the sidebar, ends the session on the server. On a phone, **Sign out** is in the bar under the title of the list. Each sign-in adds a row to the `logins` table, as the token page does, and a row to the `sessions` table. A new sign-in deletes the sessions that ended or expired. Without browser login, the page at `/` says that browser login is not set up.
 
 ## Run operator commands
 

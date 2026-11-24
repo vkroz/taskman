@@ -1609,3 +1609,220 @@ def test_a_person_revokes_an_own_token_on_the_token_page(sqlite_env, chromium):
     finally:
         context.close()
         server.stop()
+
+
+# ---- 19. the workspace page on a hosted server ----
+# A stub sign-in page stands in for Google: each visit signs ada@example.com in and returns to /auth/callback.
+
+
+def _stub_sign_in(google):
+    """A local server for the provider's sign-in page. Returns the server and its visit count."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from urllib.parse import urlencode
+
+    visits = {"count": 0, "back": ""}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            visits["count"] += 1
+            query = google.sign_in(self.path)
+            self.send_response(302)
+            self.send_header("Location", f"{visits['back']}/auth/callback?{urlencode(query)}")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args) -> None:
+            pass
+
+    stub = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=stub.serve_forever, daemon=True).start()
+    return stub, visits
+
+
+def test_the_hosted_page_reloads_through_sign_in_when_its_session_ends(sqlite_env, chromium):
+    """Criterion 6 of TASKMAN-55: a data call that gets 401 reloads the page through sign-in, to the same address."""
+    import dataclasses
+    from datetime import datetime, timedelta, timezone
+
+    from taskman.login import SESSION_COOKIE, Provider
+    from tests.conftest import RunningServer
+    from tests.sql_helpers import new
+    from tests.test_login import PROVIDER, FakeGoogle, settings
+
+    google = FakeGoogle()
+    stub, visits = _stub_sign_in(google)
+    server = RunningServer(sqlite_env, login=settings(), post_form=google.post_form)
+    provider = Provider(authorize_url=f"http://127.0.0.1:{stub.server_port}/auth", token_url=PROVIDER.token_url,
+                        issuers=PROVIDER.issuers)
+    server.logins.settings = dataclasses.replace(server.logins.settings, public_url=server.url, provider=provider)
+    visits["back"] = server.url
+
+    def sessions() -> list[tuple]:
+        with server.store.lock():
+            return server.store.conn.execute("SELECT person, ended_at FROM sessions ORDER BY id").fetchall()
+
+    context = chromium.new_context(**DESKTOP)
+    try:
+        key = new("Signed-in item")
+        page = context.new_page()
+        problems: list[str] = []
+        page.on("pageerror", lambda error: problems.append(str(error)))
+        page.on("console", lambda message: problems.append(message.text)
+                if "Content Security Policy" in message.text else None)
+        path = f"/items/{key}?view=backlog"
+        response = page.goto(server.url + path)
+        # The sign-in returns to the address that the browser opened; the page then writes its own address.
+        assert response.url == server.url + path and response.status == 200
+        expect(page.locator("#preview .d-key")).to_have_text(key)
+        address = page.url
+        assert visits["count"] == 1 and [person for person, _ in sessions()] == ["ada@example.com"]
+        cookie = next(c for c in context.cookies() if c["name"] == SESSION_COOKIE)
+        assert cookie["httpOnly"] and cookie["secure"] and cookie["sameSite"] == "Lax"
+        expect(page.locator("#sign-out")).to_be_visible()
+
+        # The session expires, as 7 days after the sign-in. The next poll gets 401 and the page reloads.
+        with server.store.lock():
+            server.store.conn.execute("UPDATE sessions SET expires_at = ?",
+                                      ((datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),))
+        deadline = time.monotonic() + 20
+        while visits["count"] < 2:
+            assert time.monotonic() < deadline, "the page did not sign in again"
+            page.wait_for_timeout(200)
+        expect(page.locator("#preview .d-key")).to_have_text(key)
+        assert page.url == address and visits["count"] == 2
+        # A new session of the same person; the sign-in removed the expired one.
+        assert [person for person, _ in sessions()] == ["ada@example.com"]
+
+        page.click("#sign-out")
+        page.wait_for_url(server.url + "/auth/signed-out")
+        expect(page.locator("h1")).to_have_text("You signed out")
+        assert sessions()[-1][1] is not None
+        assert not [c for c in context.cookies() if c["name"] == SESSION_COOKIE]
+        # The page's own scripts and styles run under its policy: no violation, no script error.
+        assert not problems, problems
+        page.goto(server.url + "/")
+        assert visits["count"] == 3
+    finally:
+        context.close()
+        server.stop()
+        stub.shutdown()
+        stub.server_close()
+
+
+def test_a_second_tab_reloads_itself_after_a_new_sign_in_in_the_first(sqlite_env, chromium):
+    """A tab with the key of an earlier session gets 403 "stale" and reloads, without a sign-in, to its address."""
+    import dataclasses
+
+    from taskman.login import SESSION_COOKIE, Provider
+    from tests.conftest import RunningServer
+    from tests.sql_helpers import new
+    from tests.test_login import PROVIDER, FakeGoogle, settings
+
+    google = FakeGoogle()
+    stub, visits = _stub_sign_in(google)
+    server = RunningServer(sqlite_env, login=settings(), post_form=google.post_form)
+    provider = Provider(authorize_url=f"http://127.0.0.1:{stub.server_port}/auth", token_url=PROVIDER.token_url,
+                        issuers=PROVIDER.issuers)
+    server.logins.settings = dataclasses.replace(server.logins.settings, public_url=server.url, provider=provider)
+    visits["back"] = server.url
+
+    def sessions() -> list[tuple]:
+        with server.store.lock():
+            return server.store.conn.execute("SELECT id, ended_at FROM sessions ORDER BY id").fetchall()
+
+    context = chromium.new_context(**DESKTOP)
+    try:
+        first, second = new("First item"), new("Second item")
+        one, two = context.new_page(), context.new_page()
+        one.goto(server.url + f"/items/{first}")
+        expect(one.locator("#preview .d-key")).to_have_text(first)
+        two.goto(server.url + f"/items/{second}?view=backlog")
+        expect(two.locator("#preview .d-key")).to_have_text(second)
+        address = two.url
+        key = two.locator('meta[name="taskman-csrf"]').get_attribute("content")
+        cookie = next(c["value"] for c in context.cookies() if c["name"] == SESSION_COOKIE)
+        assert visits["count"] == 1
+        # The first tab signs in again: the browser now sends the cookie of a new session.
+        one.goto(server.url + f"/auth/ui?path=/items/{first}")
+        expect(one.locator("#preview .d-key")).to_have_text(first)
+        assert visits["count"] == 2 and len(sessions()) == 2
+        assert next(c["value"] for c in context.cookies() if c["name"] == SESSION_COOKIE) != cookie
+        # The next poll of the second tab gets 403 "stale"; the tab reloads with the key of the new session.
+        expect(two.locator('meta[name="taskman-csrf"]')).not_to_have_attribute("content", key, timeout=20000)
+        expect(two.locator("#preview .d-key")).to_have_text(second)
+        assert two.url == address and visits["count"] == 2
+        expect(two.get_by_text("This change does not come from")).to_have_count(0)
+
+        two.click("#sign-out")
+        two.wait_for_url(server.url + "/auth/signed-out")
+        assert sessions()[-1][1] is not None
+        assert not [c for c in context.cookies() if c["name"] == SESSION_COOKIE]
+    finally:
+        context.close()
+        server.stop()
+        stub.shutdown()
+        stub.server_close()
+
+
+def test_a_phone_signs_out_also_when_its_session_already_ended(sqlite_env, chromium):
+    """Sign out on a phone, where the sidebar is hidden, and with a session that expired before the click."""
+    import dataclasses
+    from datetime import datetime, timedelta, timezone
+
+    from taskman.login import SESSION_COOKIE, Provider
+    from tests.conftest import RunningServer
+    from tests.sql_helpers import new
+    from tests.test_login import PROVIDER, FakeGoogle, settings
+
+    google = FakeGoogle()
+    stub, visits = _stub_sign_in(google)
+    server = RunningServer(sqlite_env, login=settings(), post_form=google.post_form)
+    provider = Provider(authorize_url=f"http://127.0.0.1:{stub.server_port}/auth", token_url=PROVIDER.token_url,
+                        issuers=PROVIDER.issuers)
+    server.logins.settings = dataclasses.replace(server.logins.settings, public_url=server.url, provider=provider)
+    visits["back"] = server.url
+    context = chromium.new_context(**MOBILE)
+    try:
+        new("Phone item")
+        page = context.new_page()
+        page.goto(server.url + "/?view=backlog")
+        expect(page.get_by_text("Phone item")).to_be_visible()
+        expect(page.locator("#sign-out")).to_be_hidden()
+        page.click("#sign-out-m")
+        page.wait_for_url(server.url + "/auth/signed-out")
+        expect(page.locator("h1")).to_have_text("You signed out")
+        assert not [c for c in context.cookies() if c["name"] == SESSION_COOKIE]
+
+        page.goto(server.url + "/")
+        expect(page.locator("#sign-out-m")).to_be_visible()
+        assert visits["count"] == 2
+        # The session expires while the page is open. Sign out goes to the signed-out page, not through sign-in.
+        with server.store.lock():
+            server.store.conn.execute("UPDATE sessions SET expires_at = ?",
+                                      ((datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),))
+        page.click("#sign-out-m")
+        page.wait_for_url(server.url + "/auth/signed-out")
+        expect(page.locator("h1")).to_have_text("You signed out")
+        assert visits["count"] == 2
+    finally:
+        context.close()
+        server.stop()
+        stub.shutdown()
+        stub.server_close()
+
+
+def test_the_local_page_has_no_sign_out(chromium, sqlite_env):
+    from tests.conftest import RunningServer
+
+    server = RunningServer(sqlite_env, local_person="Ada")
+    context = chromium.new_context(**MOBILE)
+    try:
+        page = context.new_page()
+        page.goto(server.url + "/")
+        expect(page.locator("#view-title")).to_be_visible()
+        expect(page.locator("#sign-out-m")).to_be_hidden()
+        expect(page.locator("#sign-out")).to_be_hidden()
+    finally:
+        context.close()
+        server.stop()

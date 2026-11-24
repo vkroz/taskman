@@ -620,6 +620,18 @@ def test_partial_login_settings_are_refused(missing, message):
         login_settings(environ)
 
 
+@pytest.mark.parametrize(("url", "refused"), [("http://taskman.example.com", True), ("http://127.0.0.1:8080", False),
+                                             ("http://localhost:8080", False), ("https://taskman.example.com", False)])
+def test_a_plain_http_public_url_is_refused_unless_it_is_this_machine(url, refused):
+    environ = {"TASKMAN_GOOGLE_CLIENT_ID": "id", "TASKMAN_GOOGLE_CLIENT_SECRET": "s",
+               "TASKMAN_PUBLIC_URL": url, "TASKMAN_ALLOWED_DOMAINS": "x.example"}
+    if refused:
+        with pytest.raises(StorageConfigError, match="must use https://"):
+            login_settings(environ)
+    else:
+        assert login_settings(environ).public_url == url
+
+
 def test_serve_refuses_partial_login_settings(sqlite_env, monkeypatch):
     monkeypatch.setenv("TASKMAN_GOOGLE_CLIENT_ID", "id")
     assert "TASKMAN_GOOGLE_CLIENT_SECRET" in run("serve", code=2)

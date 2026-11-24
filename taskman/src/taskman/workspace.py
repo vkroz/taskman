@@ -1,10 +1,13 @@
 """The workspace page: task creation and live visibility into the shared work-item tree.
 
-The server serves the page and its data calls in local mode (``taskman serve``).
+The server serves the page and its data calls in local mode (``taskman serve``), and
+to a signed-in person in hosted mode.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
+import html
 import json
 import re
 from http.server import BaseHTTPRequestHandler
@@ -30,6 +33,7 @@ POSTS = ('/api/items', '/api/query', '/api/edit', '/api/discard', '/api/reorder'
          '/api/label', '/api/fields', '/api/move', '/api/repositories', '/api/finalize')
 # Any port: Compose can map another port of the computer. A rebinding page sends its own domain name.
 _LOCAL_HOST = re.compile(r"^(127\.0\.0\.1|localhost)(:\d{1,5})?$", re.IGNORECASE)
+_INLINE = re.compile(r"<(script|style)>(.*?)</\1>", re.DOTALL)
 
 
 def _derive(items: dict[str, Item]) -> dict[str, dict[str, Any]]:
@@ -251,16 +255,38 @@ def answer(request: BaseHTTPRequestHandler, store: Store, person: str) -> None:
     if not _LOCAL_HOST.match(request.headers.get('Host', '')) or (
             request.command == 'POST' and request.headers.get('X-Taskman') != '1'):
         _json(request, 403, {'error': 'Only local Taskman UI requests are accepted.'})
-    elif request.command == 'POST':
+    else:
+        # The Host is checked: it is the address that the browser uses for this server.
+        respond(request, store, person, f"http://{request.headers['Host']}")
+
+
+def respond(request: BaseHTTPRequestHandler, store: Store, person: str, server: str, csrf: str | None = None) -> None:
+    """Answer a request of the page for ``person``, after the caller checked who sends it.
+
+    ``server`` is the address of the server in links. ``csrf`` is the key of the page's changes in hosted mode:
+    the page holds it, and has a Content Security Policy.
+    """
+    if request.command == 'POST':
         _post(request, store, person)
     else:
         try:
             # Readers share the write lock so a page never mixes two states.
             with store.lock():
                 store.actor = person
-                _get(request, store)
+                _get(request, store, server, csrf)
         except Exception as exc:  # noqa: BLE001 - the client always gets JSON
             _json(request, 500, {'error': str(exc)})
+
+
+def content_policy(page: str) -> str:
+    """The Content Security Policy of ``page``: its own inline scripts and styles run, and nothing else loads."""
+
+    def hashes(tag: str) -> str:
+        return " ".join(f"'sha256-{base64.b64encode(hashlib.sha256(code.encode()).digest()).decode()}'"
+                        for name, code in _INLINE.findall(page) if name == tag)
+
+    return (f"default-src 'none'; script-src {hashes('script')}; style-src {hashes('style')}; connect-src 'self'; "
+            "base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
 
 def _unchanged_ok(change) -> dict:
@@ -389,7 +415,7 @@ def _post(request: BaseHTTPRequestHandler, store: Store, person: str) -> None:
         _json(request, 400, {'error': str(exc)})
 
 
-def _get(request: BaseHTTPRequestHandler, store: Store) -> None:
+def _get(request: BaseHTTPRequestHandler, store: Store, server: str, csrf: str | None) -> None:
     url = urlsplit(request.path)
     path = url.path
     if path.startswith("/api/show/"):
@@ -401,12 +427,18 @@ def _get(request: BaseHTTPRequestHandler, store: Store) -> None:
             _json(request, 500, {'error': item.error})
         else:
             etag = parse_qs(url.query).get("etag", [None])[0]
-            # The Host is checked: it is the address that the browser uses for this server.
-            _json(request, 200, show(store, item_id, etag, f"http://{request.headers['Host']}"))
+            _json(request, 200, show(store, item_id, etag, server))
         return
-    body = render_page().encode("utf-8")
+    page = render_page()
+    if csrf is not None:
+        page = page.replace("<head>", f'<head>\n    <meta name="taskman-csrf" content="{html.escape(csrf)}" />', 1)
+    body = page.encode("utf-8")
     request.send_response(200)
     request.send_header("Content-Type", "text/html; charset=utf-8")
     request.send_header("Content-Length", str(len(body)))
+    if csrf is not None:
+        request.send_header("Content-Security-Policy", content_policy(page))
+        # The page holds the key of the session's changes: no cache keeps it.
+        request.send_header("Cache-Control", "no-store")
     request.end_headers()
     request.wfile.write(body)

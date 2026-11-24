@@ -12,11 +12,21 @@ so a stolen exchange code is useless.
 token on the page, for a machine with no browser. The page also lists the
 person's tokens. Its revoke buttons post a page key that only this page holds,
 so another site cannot make the browser revoke a token.
+
+On a hosted server the workspace page signs a person in the same way. After
+``/auth/callback``, the server sets a session cookie and sends the browser
+back to the page address that the person opened. The database keeps only a
+fingerprint of the session secret, so every server instance accepts the
+session. A session ends 7 days after the sign-in, or at sign-out. A sign-in
+cookie binds the sign-in to the browser that started it (RFC 6749, section
+10.12), so a person cannot send the callback address of their own sign-in to
+another person and make that browser work as them.
 """
 from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import html
 import http.client
 import json
@@ -44,6 +54,13 @@ EXCHANGE_TIME = timedelta(minutes=2)
 ANONYMOUS_KEPT = timedelta(hours=1)
 SIGNED_IN_KEPT = timedelta(days=1)
 PAGE_TIME = timedelta(minutes=10)
+# A browser session of the workspace page. Use does not renew it.
+SESSION_TIME = timedelta(days=7)
+SESSION_COOKIE = "__Host-taskman_session"
+LOGIN_COOKIE = "__Host-taskman_login"
+_SECRET = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
+# A page address of this server: one "/" and no second "/" or "\\" after it, so never another host.
+_RETURN_PATH = re.compile(r"^/(?![/\\])[!-~]{0,2000}$")
 _STATE = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 _CHALLENGE = re.compile(r"^[A-Za-z0-9_-]{43}$")
 _ERROR_CODE = re.compile(r"^[a-z_]{1,64}$")
@@ -102,6 +119,9 @@ def login_settings(environ: Mapping[str, str] = os.environ) -> LoginSettings | N
         raise StorageConfigError(
             "Browser login needs TASKMAN_PUBLIC_URL: the address that people open, for example https://taskman.example.com."
         )
+    # The sign-in cookies are Secure: a browser keeps them over plain HTTP only on this machine.
+    if parts.scheme == "http" and parts.hostname not in ("localhost", "127.0.0.1", "::1"):
+        raise StorageConfigError("TASKMAN_PUBLIC_URL must use https:// unless the server runs on this machine.")
     emails, domains = _names(environ.get("TASKMAN_ALLOWED_EMAILS", "")), _names(environ.get("TASKMAN_ALLOWED_DOMAINS", ""))
     if not emails and not domains:
         raise StorageConfigError("Browser login needs TASKMAN_ALLOWED_EMAILS or TASKMAN_ALLOWED_DOMAINS.")
@@ -112,6 +132,8 @@ class LoginError(Exception):
     def __init__(self, status: int, message: str) -> None:
         super().__init__(message)
         self.status, self.message = status, message
+        # The kind of the login that failed, when the server knows it.
+        self.kind = ""
 
 
 def challenge_for(verifier: str) -> str:
@@ -126,6 +148,16 @@ def _fingerprint(value: str) -> str:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def csrf_token(secret: str) -> str:
+    """The key that the workspace page sends with each change. Only a holder of the session secret can make it."""
+    return hmac.new(secret.encode("ascii"), b"taskman csrf", hashlib.sha256).hexdigest()
+
+
+def _return_path(value: str) -> str:
+    """The page address to return to after a sign-in: ``value`` when it is a path of this server, else ``/``."""
+    return value if _RETURN_PATH.fullmatch(value) and "\\" not in value else "/"
 
 
 def _claims(id_token: str) -> dict[str, Any]:
@@ -187,12 +219,19 @@ class Logins:
     def _redirect_uri(self) -> str:
         return f"{self.settings.public_url}/auth/callback"
 
-    def start(self, kind: str, query: dict[str, str]) -> str:
-        """Record a new login and return the provider's sign-in address."""
+    def start(self, kind: str, query: dict[str, str], browser: str = "") -> tuple[str, str]:
+        """Record a new login. Gives the provider's sign-in address and, for the workspace page, the key of the
+        browser's sign-in cookie: ``browser`` when it is a valid key, so that two tabs can sign in at once."""
         label = query.get("label", "").strip()
         if len(label) > 60:
             raise LoginError(400, "A label has 60 characters or fewer.")
-        port = cli_state = challenge = None
+        port = cli_state = challenge = return_path = browser_hash = None
+        if kind == "ui":
+            return_path = _return_path(query.get("path", ""))
+            browser = browser if _SECRET.match(browser) else secrets.token_urlsafe(32)
+            browser_hash = _fingerprint(browser)
+        else:
+            browser = ""
         if kind == "cli":
             try:
                 port = int(query.get("port", ""))
@@ -214,8 +253,9 @@ class Logins:
             )
             self._q(
                 "INSERT INTO logins (state_hash, kind, cli_port, cli_state, code_challenge, label, nonce, verifier, "
-                "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (_fingerprint(state), kind, port, cli_state, challenge, label, nonce, verifier, now.isoformat()),
+                "created_at, return_path, browser_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (_fingerprint(state), kind, port, cli_state, challenge, label, nonce, verifier, now.isoformat(),
+                 return_path, browser_hash),
             )
         return self.settings.provider.authorize_url + "?" + urlencode({
             "client_id": self.settings.client_id,
@@ -227,25 +267,39 @@ class Logins:
             "code_challenge": challenge_for(verifier),
             "code_challenge_method": "S256",
             "prompt": "select_account",
-        })
+        }), browser
 
-    def finish(self, query: dict[str, str]) -> tuple[str, str]:
-        """Handle the provider's return. Gives ``("redirect", url)`` for the CLI, or ``("token", html)``."""
+    def finish(self, query: dict[str, str], browser: str = "") -> tuple[str, ...]:
+        """Handle the provider's return. ``browser`` is the key of the browser's sign-in cookie. Gives
+        ``("redirect", url)`` for the CLI, ``("token", html)``, or ``("session", path, secret)`` for the workspace
+        page: the page address and the secret of the new session."""
         state = query.get("state", "")
         now = _now()
         with self.store.lock():
             row = self._q(
-                "SELECT id, kind, cli_port, cli_state, label, nonce, verifier, created_at FROM logins "
-                "WHERE state_hash = ? AND finished_at IS NULL",
+                "SELECT id, kind, cli_port, cli_state, label, nonce, verifier, created_at, return_path, browser_hash, "
+                "finished_at FROM logins WHERE state_hash = ?",
                 (_fingerprint(state),),
             ).fetchone()
-            if row is None:
-                raise LoginError(400, "This sign-in is unknown or already used. Start the login again.")
+            if row is None or row[-1] is not None:
+                error = LoginError(400, "This sign-in is unknown or already used. Start the login again.")
+                # A reload of the callback address shows the page of the login's own kind.
+                error.kind = row[1] if row else ""
+                raise error
             # One use only, also when a later check fails.
             self._q("UPDATE logins SET finished_at = ? WHERE id = ?", (now.isoformat(), row[0]))
-        login_id, kind, port, cli_state, label, nonce, verifier, created_at = row
+        try:
+            return self._finish(row[:-1], query, now, browser)
+        except LoginError as exc:
+            exc.kind = row[1]
+            raise
+
+    def _finish(self, row: tuple, query: dict[str, str], now: datetime, browser: str) -> tuple[str, ...]:
+        login_id, kind, port, cli_state, label, nonce, verifier, created_at, return_path, browser_hash = row
         if now - datetime.fromisoformat(created_at) > LOGIN_TIME:
             raise LoginError(400, "This sign-in took more than 10 minutes. Start the login again.")
+        if kind == "ui" and not hmac.compare_digest(_fingerprint(browser), browser_hash or ""):
+            raise LoginError(400, "This sign-in was started in another browser. Open Taskman again in this browser.")
         if query.get("error"):
             raise LoginError(400, f"Google did not sign you in: {query['error']}.")
         if not query.get("code"):
@@ -267,10 +321,36 @@ class Logins:
                         (email, _fingerprint(page_key), login_id))
                 _, token = create_token(self.store, email, label or "web page", TOKEN_DAYS)
             return "token", token_page(email, token, list_tokens(self.store, email), page_key)
+        if kind == "ui":
+            secret = secrets.token_urlsafe(32)
+            with self.store.lock():
+                self._q("UPDATE logins SET person = ? WHERE id = ?", (email, login_id))
+                # Ended and expired sessions are never accepted again: remove them.
+                self._q("DELETE FROM sessions WHERE ended_at IS NOT NULL OR expires_at < ?", (now.isoformat(),))
+                self._q("INSERT INTO sessions (secret_hash, person, created_at, expires_at) VALUES (?, ?, ?, ?)",
+                        (_fingerprint(secret), email, now.isoformat(), (now + SESSION_TIME).isoformat()))
+            return "session", return_path or "/", secret
         code = secrets.token_urlsafe(32)
         with self.store.lock():
             self._q("UPDATE logins SET person = ?, exchange_hash = ? WHERE id = ?", (email, _fingerprint(code), login_id))
         return "redirect", f"http://127.0.0.1:{port}/callback?" + urlencode({"code": code, "state": cli_state})
+
+    def session_person(self, secret: str) -> str | None:
+        """The person of a session that has not expired or ended, or ``None``."""
+        if not _SECRET.match(secret):
+            return None
+        with self.store.lock():
+            row = self._q("SELECT person, expires_at, ended_at FROM sessions WHERE secret_hash = ?",
+                          (_fingerprint(secret),)).fetchone()
+        if row is None or row[2] or _now() >= datetime.fromisoformat(row[1]):
+            return None
+        return row[0]
+
+    def end_session(self, secret: str) -> None:
+        """End a session at sign-out. The next request with its cookie is not signed in."""
+        with self.store.lock():
+            self._q("UPDATE sessions SET ended_at = ? WHERE secret_hash = ? AND ended_at IS NULL",
+                    (_now().isoformat(), _fingerprint(secret)))
 
     def _verified_email(self, claims: dict[str, Any], nonce: str) -> str:
         audience = claims.get("aud")
@@ -398,6 +478,31 @@ def tokens_page(email: str, tokens: list[dict[str, Any]], page_key: str, message
 
 def token_error_page(message: str) -> str:
     return page("Taskman tokens", f"<h1>No token revoked</h1><p>{html.escape(message)}</p>")
+
+
+def ui_error_page(message: str) -> str:
+    return page("Taskman sign-in failed", (
+        f"<h1>Sign-in failed</h1><p>{html.escape(message)}</p><p><a href=\"/\">Open Taskman again</a></p>"
+    ))
+
+
+def signed_out_page() -> str:
+    return page("Signed out of Taskman", (
+        "<h1>You signed out</h1><p>Your Taskman session on this browser ended.</p>"
+        "<p><a href=\"/\">Sign in again</a></p>"
+    ))
+
+
+def ui_not_set_up_page() -> str:
+    return page("Taskman", (
+        "<h1>Browser login is not set up</h1>"
+        "<p>This Taskman server does not serve the workspace page: it has no Google sign-in settings.</p>"
+        "<p>To turn on sign-in, set <b>TASKMAN_GOOGLE_CLIENT_ID</b>, <b>TASKMAN_GOOGLE_CLIENT_SECRET</b> (or "
+        "<b>TASKMAN_GOOGLE_CLIENT_SECRET_FILE</b>), <b>TASKMAN_PUBLIC_URL</b>, and <b>TASKMAN_ALLOWED_EMAILS</b> or "
+        "<b>TASKMAN_ALLOWED_DOMAINS</b>, then start the server again.</p>"
+        "<p>On your own computer, use local mode instead: <b>TASKMAN_LOCAL_MODE=1</b> with "
+        "<b>TASKMAN_LOCAL_PERSON</b>, as the Docker Compose stack does.</p>"
+    ))
 
 
 def error_page(message: str) -> str:

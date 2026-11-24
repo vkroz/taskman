@@ -76,16 +76,19 @@ A comment does not make an activity entry. The comment itself is the record.
 
 ### Person and token
 
-A Taskman server keeps these two entities. A CLI that opens a database directly does not use them.
+A Taskman server keeps these entities. A CLI that opens a database directly does not use them.
 
 | Entity | Fields |
 | --- | --- |
 | Person | A name of 1 to 60 characters, unique, and the time of creation. |
 | Token | The person, a SHA-256 fingerprint of the token, a label, and the times of creation, expiry, last use and revocation. The token text is not stored. |
+| Session | A browser session of the workspace page: the person, a SHA-256 fingerprint of the session secret, and the times of sign-in, expiry (7 days after the sign-in) and sign-out. The secret is not stored. |
 
-A person who signs in with Google has the email address as the name. The server also keeps a short-lived `logins` record for each browser login: hashes of its state and of its one-time code or token-page key, and the checks of the login. It holds no token. Each new login deletes a record after 1 day when Google signed in a person who may use the server, and after 1 hour in all other cases, also when the sign-in returned with an error.
+A person who signs in with Google has the email address as the name. The server also keeps a short-lived `logins` record for each browser login: hashes of its state and of its one-time code or token-page key, the checks of the login, and, for the workspace page, the address to return to and a fingerprint of the browser's sign-in cookie. It holds no token. Each new login deletes a record after 1 day when Google signed in a person who may use the server, and after 1 hour in all other cases, also when the sign-in returned with an error.
 
-On a server, the author of a change is the person of the token. When the caller gives `--actor NAME`, the author is `NAME for <person>`.
+Each new sign-in of the workspace page deletes the sessions that ended or expired.
+
+On a server, the author of a change is the person of the token, or of the session for a change from the workspace page. When the caller gives `--actor NAME`, the author is `NAME for <person>`.
 
 ## Lifecycle rules
 

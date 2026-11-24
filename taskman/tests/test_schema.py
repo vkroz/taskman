@@ -14,7 +14,7 @@ from taskman.storage.store import StorageConfigError
 
 runner = CliRunner()
 TABLES = {"projects", "items", "labels", "repositories", "dependencies", "comments", "activity", "persons", "tokens", "logins",
-          "schema_versions"}
+          "sessions", "schema_versions"}
 
 
 def _tables(conn, dialect) -> set[str]:
@@ -363,7 +363,7 @@ def test_upgrade_from_version_6_allows_review_comments_and_keeps_every_row(db):
         with transaction(conn, dialect):
             conn.execute(q(_COMMENT), (2, "review", "pass", "pytest", "too early", 1, now))
 
-    assert upgrade(conn, dialect) == [7]
+    assert upgrade(conn, dialect) == [m.version for m in MIGRATIONS if m.version > 6]
 
     assert _rows(conn) == rows
     assert indexes <= _indexes(conn, dialect)
@@ -398,3 +398,50 @@ def test_a_failed_review_migration_leaves_version_6(db, monkeypatch):
     assert _schema_snapshot(conn, dialect) == before
     with transaction(conn, dialect):
         assert database_version(conn, dialect) == 6
+
+
+_LOGIN = ("INSERT INTO logins (state_hash, kind, nonce, verifier, created_at, person) VALUES (?, ?, ?, ?, ?, ?)")
+
+
+def test_upgrade_from_version_7_adds_sessions_and_ui_logins_and_keeps_every_row(db):
+    conn, dialect = db
+    q = dialect.sql
+    now = "2026-11-24T00:00:00+00:00"
+    _version_3_database_with_items(conn, dialect)
+    assert upgrade(conn, dialect, MIGRATIONS[:7]) == [4, 5, 6, 7]
+    with transaction(conn, dialect):
+        conn.execute(q(_LOGIN), ("cli-state", "cli", "n", "v", now, "ada@example.com"))
+        conn.execute(q(_LOGIN), ("token-state", "token", "n", "v", now, None))
+    rows, indexes = _rows(conn), _indexes(conn, dialect)
+    logins = sorted(tuple(row) for row in conn.execute("SELECT * FROM logins").fetchall())
+    with pytest.raises(Exception):
+        with transaction(conn, dialect):
+            conn.execute(q(_LOGIN), ("ui-state", "ui", "n", "v", now, None))
+
+    assert upgrade(conn, dialect) == [8]
+
+    assert _rows(conn) == rows
+    assert indexes <= _indexes(conn, dialect)
+    # The old logins keep every value and get no return address and no browser.
+    assert sorted(tuple(row)[:-2] for row in conn.execute("SELECT * FROM logins").fetchall()) == logins
+    assert set(conn.execute("SELECT return_path, browser_hash FROM logins").fetchall()) == {(None, None)}
+    with transaction(conn, dialect):
+        conn.execute(q("INSERT INTO logins (state_hash, kind, nonce, verifier, created_at, return_path, browser_hash) "
+                       "VALUES (?, ?, ?, ?, ?, ?, ?)"), ("ui-state", "ui", "n", "v", now, "/items/TM-2", "b"))
+        conn.execute(q("INSERT INTO sessions (secret_hash, person, created_at, expires_at) VALUES (?, ?, ?, ?)"),
+                     ("hash", "ada@example.com", now, now))
+    rejected = [
+        (_LOGIN, ("other-state", "browser", "n", "v", now, None)),
+        # One row per session secret.
+        ("INSERT INTO sessions (secret_hash, person, created_at, expires_at) VALUES (?, ?, ?, ?)",
+         ("hash", "bob@example.com", now, now)),
+        ("INSERT INTO sessions (secret_hash, person, created_at, expires_at) VALUES (?, ?, ?, ?)",
+         ("other", "bob@example.com", now, None)),
+    ]
+    for statement, values in rejected:
+        with pytest.raises(Exception):
+            with transaction(conn, dialect):
+                conn.execute(q(statement), values)
+    if dialect.name == "sqlite":
+        assert conn.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
